@@ -1,0 +1,51 @@
+# ============================================================
+# Segredos e dados de clientes: NUNCA entram no git
+# ============================================================
+.env
+.env.*
+!.env.example
+credentials.json
+token.json
+client_secret_*.json
+cotas.csv
+cotasreal.csv
+*.pem
+*.key
+acme.json
+
+# Saídas do worker/ferramentas: PDFs de lance, screenshots e logs
+*.pdf
+downloads/
+screenshots/
+logs/
+*.jsonl
+*.log
+tools/teste-ip-vm/*.png
+tools/teste-ip-vm/pacotes-instalados-pelo-teste.txt
+
+# Dados locais do docker compose (volumes montados, saídas do worker)
+deploy/data/
+
+# ============================================================
+# Dependências e builds
+# ============================================================
+node_modules/
+.next/
+out/
+build/
+dist/
+coverage/
+*.tsbuildinfo
+next-env.d.ts
+.npm/
+api/bin/
+api/tmp/
+
+# ============================================================
+# Sistema e editores
+# ============================================================
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.swp
