@@ -1,0 +1,24 @@
+{
+  "name": "newcon-automation",
+  "version": "0.1.0",
+  "description": "Automação Newcon: gera PDFs de credenciamento de lance e envia para Google Drive.",
+  "private": true,
+  "type": "commonjs",
+  "scripts": {
+    "install-browsers": "playwright install chromium",
+    "start": "node src/index.js",
+    "dry-run": "node src/index.js --dry-run",
+    "real": "node src/index.js --confirm",
+    "auth": "node src/auth.js"
+  },
+  "dependencies": {
+    "csv-parse": "^5.5.6",
+    "dotenv": "^16.4.5",
+    "googleapis": "^144.0.0",
+    "playwright": "^1.47.0",
+    "yargs": "^17.7.2"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

@@ -1,0 +1,50 @@
+# docker-compose.yml
+# Uso:
+#   Passo 1 (uma única vez): docker compose run --rm --service-ports newcon npm run auth
+#     → abre a URL que aparecer, autoriza no navegador, token.json fica salvo.
+#   Passo 2 (rotina): docker compose run --rm newcon npm run dry-run
+#   Passo 3 (produção): docker compose run --rm newcon npm run real
+
+services:
+  newcon:
+    build: .
+    image: newcon-automation:latest
+    # Roda com o mesmo UID:GID do usuário do host, pra os arquivos gerados
+    # (PDFs, logs, screenshots) não ficarem como root. Ajuste se precisar.
+    # user: "${UID:-1000}:${GID:-1000}"
+    environment:
+      # Newcon (pode vir de .env ou ser sobrescrito na linha de comando)
+      - NEWCON_URL=${NEWCON_URL}
+      - NEWCON_USER=${NEWCON_USER}
+      - NEWCON_PASS=${NEWCON_PASS}
+
+      # Caminhos DENTRO do container (correspondem aos volumes abaixo)
+      - CSV_PATH=/app/data/cotasreal.csv
+      - GOOGLE_CREDENTIALS_PATH=/app/data/credentials.json
+      - GOOGLE_TOKEN_PATH=/app/data/token.json
+      - DOWNLOAD_DIR=/app/data/downloads
+      - SCREENSHOT_DIR=/app/data/screenshots
+      - LOG_DIR=/app/data/logs
+
+      # Google Drive
+      - DRIVE_FOLDER_ID=${DRIVE_FOLDER_ID}
+      - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID}
+      - GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET}
+
+      # OAuth em porta fixa (necessário no container)
+      - DRIVE_OAUTH_PORT=43117
+      - BIND_HOST=0.0.0.0
+
+      # Playwright — no Docker rodamos sempre headless
+      - HEADFUL=false
+      - PLAYWRIGHT_TIMEOUT_SECONDS=${PLAYWRIGHT_TIMEOUT_SECONDS:-45}
+
+    volumes:
+      # Monte a pasta ./data do host em /app/data do container.
+      # Coloque cotasreal.csv e (depois do auth) token.json aqui.
+      # PDFs, screenshots e logs também caem aqui.
+      - ./data:/app/data
+
+    ports:
+      # Só precisa ser mapeada quando você rodar `npm run auth` com --service-ports.
+      - "43117:43117"

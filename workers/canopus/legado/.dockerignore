@@ -1,0 +1,17 @@
+node_modules
+npm-debug.log
+.env
+.env.local
+credentials.json
+token.json
+client_secret_*.json
+cotas.csv
+cotasreal.csv
+downloads
+screenshots
+logs
+data
+.git
+.gitignore
+README.md
+*.zip
