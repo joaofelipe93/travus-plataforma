@@ -1,0 +1,31 @@
+# Configuração estática do Traefik (gateway da plataforma).
+# Rotas de cada serviço vêm das labels no docker-compose.yml; middlewares
+# compartilhados ficam em dinamico.yml.
+
+entryPoints:
+  web:
+    address: ":80"
+  # Interno (não publicado): ping do healthcheck e dashboard.
+  traefik:
+    address: ":8080"
+
+providers:
+  docker:
+    # Só entram no gateway containers com a label traefik.enable=true.
+    exposedByDefault: false
+    network: travus_borda
+  file:
+    filename: /etc/traefik/dinamico.yml
+    watch: true
+
+# Dashboard só em desenvolvimento, em http://traefik.localhost (rota nas labels).
+api:
+  dashboard: true
+
+ping:
+  entryPoint: traefik
+
+log:
+  level: INFO
+
+accessLog: {}

@@ -1,0 +1,153 @@
+# Travus Plataforma: ambiente local.
+#   make up              sobe traefik, postgres, migrações, api e web
+#   make worker-dry-run  dry-run de 1 cota no container do worker (nunca confirma lance)
+#
+# Sem o Makefile: cd deploy && docker compose up -d --build
+# (as variáveis vêm de deploy/.env; copie de .env.example e troque a senha)
+name: travus
+
+x-api: &api-base
+  build: ../api
+  image: travus/api:dev
+  environment:
+    DATABASE_URL: postgres://${POSTGRES_USER:-travus}:${POSTGRES_PASSWORD:?defina POSTGRES_PASSWORD em deploy/.env}@postgres:5432/${POSTGRES_DB:-travus}?sslmode=disable
+  mem_limit: 128m
+
+services:
+  traefik:
+    image: traefik:v3.7.13
+    restart: unless-stopped
+    ports:
+      - "80:80"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./traefik/traefik.yml:/etc/traefik/traefik.yml:ro
+      - ./traefik/dinamico.yml:/etc/traefik/dinamico.yml:ro
+    networks:
+      borda:
+        # Dentro da rede, api.localhost e app.localhost também apontam para o gateway:
+        # assim o Next.js (lado servidor) chama a API passando pelo Traefik.
+        aliases: [api.localhost, app.localhost]
+    healthcheck:
+      test: ["CMD", "traefik", "healthcheck", "--ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    labels:
+      - traefik.enable=true
+      # Dashboard só no ambiente local.
+      - traefik.http.routers.dashboard.rule=Host(`traefik.localhost`)
+      - traefik.http.routers.dashboard.entrypoints=web
+      - traefik.http.routers.dashboard.service=api@internal
+    mem_limit: 128m
+
+  postgres:
+    image: postgres:18.6-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-travus}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?defina POSTGRES_PASSWORD em deploy/.env}
+      POSTGRES_DB: ${POSTGRES_DB:-travus}
+    volumes:
+      # Postgres 18: o volume vai em /var/lib/postgresql (não mais em .../data).
+      - postgres-dados:/var/lib/postgresql
+    networks: [interna]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    mem_limit: 512m
+
+  # Aplica as migrações e termina; a api só sobe depois que ela sai com sucesso.
+  migrate:
+    <<: *api-base
+    command: ["migrate", "up"]
+    restart: "no"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks: [interna]
+
+  api:
+    <<: *api-base
+    command: ["serve"]
+    restart: unless-stopped
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    # Sem "ports": a API só é alcançável pelo Traefik.
+    networks: [borda, interna]
+    healthcheck:
+      test: ["CMD", "/api", "healthcheck"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.api.rule=Host(`api.localhost`)
+      - traefik.http.routers.api.entrypoints=web
+      - traefik.http.routers.api.middlewares=limite-api@file,cabecalhos-seguranca@file
+      - traefik.http.services.api.loadbalancer.server.port=8080
+
+  web:
+    build: ../web
+    image: travus/web:dev
+    restart: unless-stopped
+    environment:
+      # Chamadas do lado servidor passam pelo gateway (alias de rede do Traefik).
+      API_INTERNAL_URL: http://api.localhost
+    depends_on:
+      traefik:
+        condition: service_healthy
+      api:
+        condition: service_healthy
+    networks: [borda]
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.web.rule=Host(`app.localhost`)
+      - traefik.http.routers.web.entrypoints=web
+      - traefik.http.routers.web.middlewares=cabecalhos-seguranca@file
+      - traefik.http.services.web.loadbalancer.server.port=3000
+    mem_limit: 384m
+
+  # Etapa 0: script legado em dry-run, só com `--profile canopus` (make worker-dry-run),
+  # para o `up` não fazer login no Newcon. Fora do Traefik. O entrypoint bloqueia --confirm.
+  worker-canopus:
+    build: ../workers/canopus
+    image: travus/worker-canopus:dev
+    profiles: [canopus]
+    command: ["node", "src/index.js", "--dry-run", "--limit", "1"]
+    # Mesmo uid do host para os screenshots em deploy/data/canopus não ficarem inacessíveis.
+    user: "${HOST_UID:-1000}:${HOST_GID:-1000}"
+    env_file:
+      - path: ../workers/canopus/.env
+        required: false
+    environment:
+      HOME: /tmp
+      HEADFUL: "false"
+      CSV_PATH: /app/entrada/cotasreal.csv
+      DOWNLOAD_DIR: /app/data/downloads
+      SCREENSHOT_DIR: /app/data/screenshots
+      LOG_DIR: /app/data/logs
+    volumes:
+      - ../workers/canopus/cotasreal.csv:/app/entrada/cotasreal.csv:ro
+      - ./data/canopus:/app/data
+    shm_size: 1gb
+    networks: [interna]
+    mem_limit: 1536m
+
+networks:
+  borda:
+    name: travus_borda
+  interna:
+    name: travus_interna
+
+volumes:
+  postgres-dados:

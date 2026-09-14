@@ -1,0 +1,15 @@
+# Middlewares compartilhados. Use nas labels como "<nome>@file".
+http:
+  middlewares:
+    # Limite por IP de origem para a API.
+    limite-api:
+      rateLimit:
+        average: 20
+        period: 1s
+        burst: 50
+
+    cabecalhos-seguranca:
+      headers:
+        frameDeny: true
+        contentTypeNosniff: true
+        referrerPolicy: strict-origin-when-cross-origin
