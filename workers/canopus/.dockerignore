@@ -1,0 +1,17 @@
+# Segredos e dados de clientes nunca entram na imagem: chegam por env_file/volume.
+.env
+.env.*
+!.env.example
+credentials.json
+token.json
+client_secret_*.json
+cotas.csv
+cotasreal.csv
+
+node_modules
+downloads
+screenshots
+logs
+data
+legado
+*.pdf
