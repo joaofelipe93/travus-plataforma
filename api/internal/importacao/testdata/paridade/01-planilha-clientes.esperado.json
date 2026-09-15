@@ -1,0 +1,32 @@
+{
+  "cotas": [
+    {
+      "grupo": "001234",
+      "cota": "0056",
+      "versao": "00",
+      "nome": "CLIENTE EXEMPLO UM",
+      "lineNumber": 2
+    },
+    {
+      "grupo": "001234",
+      "cota": "0089",
+      "versao": "00",
+      "nome": "CLIENTE EXEMPLO UM",
+      "lineNumber": 3
+    },
+    {
+      "grupo": "005678",
+      "cota": "0012",
+      "versao": "00",
+      "nome": "CLIENTE EXEMPLO DOIS",
+      "lineNumber": 4
+    },
+    {
+      "grupo": "006650",
+      "cota": "0924",
+      "versao": "00",
+      "nome": "EXEMPLO, CLIENTE TRÊS",
+      "lineNumber": 5
+    }
+  ]
+}

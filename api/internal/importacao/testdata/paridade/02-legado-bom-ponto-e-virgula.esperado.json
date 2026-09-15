@@ -1,0 +1,25 @@
+{
+  "cotas": [
+    {
+      "grupo": "006650",
+      "cota": "0924",
+      "versao": "00",
+      "nome": "",
+      "lineNumber": 2
+    },
+    {
+      "grupo": "006620",
+      "cota": "0001",
+      "versao": "01",
+      "nome": "",
+      "lineNumber": 3
+    },
+    {
+      "grupo": "008100",
+      "cota": "2218",
+      "versao": "00",
+      "nome": "",
+      "lineNumber": 4
+    }
+  ]
+}

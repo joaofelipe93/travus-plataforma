@@ -1,0 +1,25 @@
+{
+  "cotas": [
+    {
+      "grupo": "006660",
+      "cota": "01488",
+      "versao": "00",
+      "nome": "Cliente Quatro",
+      "lineNumber": 2
+    },
+    {
+      "grupo": "008100",
+      "cota": "2218",
+      "versao": "01",
+      "nome": "Cliente Cinco",
+      "lineNumber": 3
+    },
+    {
+      "grupo": "008200",
+      "cota": "0012",
+      "versao": "00",
+      "nome": "Cliente Seis",
+      "lineNumber": 4
+    }
+  ]
+}
