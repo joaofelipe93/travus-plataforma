@@ -1,0 +1,29 @@
+# Gera internal/db a partir das migrações e de internal/db/queries/*.sql.
+# Rode `make sqlc` (usa a imagem sqlc/sqlc, não precisa instalar nada).
+version: "2"
+sql:
+  - engine: postgresql
+    schema: migrations
+    queries: internal/db/queries
+    gen:
+      go:
+        package: db
+        out: internal/db
+        sql_package: pgx/v5
+        emit_pointers_for_null_types: true
+        emit_enum_valid_method: true
+        # O sqlc singulariza em inglês ("sessoes" viraria "Sesso").
+        rename:
+          auditorium: Auditoria
+          importaco: Importacao
+          sesso: Sessao
+        overrides:
+          - db_type: citext
+            go_type: string
+          - db_type: timestamptz
+            go_type: time.Time
+          - db_type: timestamptz
+            nullable: true
+            go_type:
+              type: time.Time
+              pointer: true
