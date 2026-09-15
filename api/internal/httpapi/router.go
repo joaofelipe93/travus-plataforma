@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"net/http"
 	"runtime/debug"
+	"sync"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -27,6 +28,10 @@ type Config struct {
 	CookieSecure      bool
 	SessaoInatividade time.Duration
 	SessaoMaxima      time.Duration
+	// Token de serviço exigido nas rotas internas (worker). Mínimo 32 caracteres.
+	TokenWorker string
+	// Screenshots têm dados pessoais: são apagados depois deste prazo.
+	RetencaoScreenshots time.Duration
 }
 
 type Servidor struct {
@@ -34,16 +39,53 @@ type Servidor struct {
 	pool  *pgxpool.Pool
 	q     *db.Queries
 	ping  Pinger
+	hub   *Hub
 	agora func() time.Time
+
+	// Fechado no desligamento: encerra os streams SSE abertos.
+	encerrando     chan struct{}
+	encerrarUmaVez sync.Once
 }
 
 func NovoServidor(cfg Config, pool *pgxpool.Pool) *Servidor {
-	return &Servidor{cfg: cfg, pool: pool, q: db.New(pool), ping: pool, agora: time.Now}
+	return &Servidor{
+		cfg: cfg, pool: pool, q: db.New(pool), ping: pool, hub: NovoHub(pool), agora: time.Now,
+		encerrando: make(chan struct{}),
+	}
+}
+
+// Encerrar fecha os streams SSE (use com http.Server.RegisterOnShutdown).
+func (s *Servidor) Encerrar() {
+	s.encerrarUmaVez.Do(func() { close(s.encerrando) })
+}
+
+// RodarTarefasDeFundo: escuta de eventos para o SSE e limpeza de screenshots vencidos.
+func (s *Servidor) RodarTarefasDeFundo(ctx context.Context) {
+	go s.hub.Rodar(ctx)
+	go func() {
+		t := time.NewTicker(time.Hour)
+		defer t.Stop()
+		for {
+			if n, err := s.q.ApagarArquivosExpirados(ctx); err != nil {
+				if ctx.Err() == nil {
+					slog.Warn("falha ao apagar screenshots vencidos", "erro", err)
+				}
+			} else if n > 0 {
+				slog.Info("screenshots vencidos apagados", "quantidade", n)
+			}
+			select {
+			case <-ctx.Done():
+				return
+			case <-t.C:
+			}
+		}
+	}()
 }
 
 // Rotas da API. No gateway, o navegador chega por app.<domínio>/api/... (o Traefik
 // remove o /api) e ferramentas por api.<domínio>/... Tudo menos /health, /auth/login e
 // /auth/verificar passa antes pelo ForwardAuth; mesmo assim a API valida a sessão de novo.
+// As rotas do worker ficam em RotasInternas, em outra porta.
 func (s *Servidor) Rotas() http.Handler {
 	editores := []db.PerfilUsuario{db.PerfilUsuarioAdmin, db.PerfilUsuarioOperador}
 	mux := http.NewServeMux()
@@ -66,6 +108,13 @@ func (s *Servidor) Rotas() http.Handler {
 	mux.Handle("GET /importacoes/{id}", s.autenticado(s.buscarImportacao))
 	mux.Handle("POST /importacoes/{id}/aplicar", s.autenticado(exigirPerfil(s.aplicarImportacao, editores...)))
 	mux.Handle("POST /importacoes/{id}/descartar", s.autenticado(exigirPerfil(s.descartarImportacao, editores...)))
+
+	mux.Handle("GET /execucoes", s.autenticado(s.listarExecucoes))
+	mux.Handle("POST /execucoes", s.autenticado(exigirPerfil(s.criarExecucao, editores...)))
+	mux.Handle("GET /execucoes/{id}", s.autenticado(s.buscarExecucao))
+	mux.Handle("POST /execucoes/{id}/cancelar", s.autenticado(exigirPerfil(s.cancelarExecucao, editores...)))
+	mux.Handle("GET /execucoes/{id}/eventos", s.autenticado(s.eventosExecucao))
+	mux.Handle("GET /arquivos/{id}", s.autenticado(s.baixarArquivo))
 
 	return recuperar(mux)
 }

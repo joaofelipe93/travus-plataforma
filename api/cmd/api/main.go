@@ -1,6 +1,6 @@
 // Comando da API da Travus Plataforma.
 //
-//	api serve                  sobe o servidor HTTP (padrão)
+//	api serve                  sobe a API: pública em API_ADDR (:8080), interna em API_ADDR_INTERNO (:8081)
 //	api migrate up|down|status aplica, desfaz (a última) ou lista as migrações
 //	api usuario ...            cria, lista e desativa usuários (api usuario para ajuda)
 //	api healthcheck            consulta o /health local (healthcheck do Docker)
@@ -68,45 +68,69 @@ func serve() error {
 	if err != nil {
 		return err
 	}
+	tokenWorker := os.Getenv("WORKER_TOKEN")
+	if len(tokenWorker) < 32 {
+		return errors.New("WORKER_TOKEN ausente ou curto (mínimo 32 caracteres; o make up gera um em deploy/.env)")
+	}
+
+	poolCfg, err := pgxpool.ParseConfig(dbURL)
+	if err != nil {
+		return fmt.Errorf("configuração do banco inválida: %w", err)
+	}
+	poolCfg.MaxConns = 10
 	// pgxpool conecta sob demanda: a API sobe mesmo com o banco fora, e o /health mostra isso.
-	pool, err := pgxpool.New(ctx, dbURL)
+	pool, err := pgxpool.NewWithConfig(ctx, poolCfg)
 	if err != nil {
 		return fmt.Errorf("configuração do banco inválida: %w", err)
 	}
 	defer pool.Close()
 
 	cfg := httpapi.Config{
-		AppOrigin:         strings.TrimRight(envOr("APP_ORIGIN", "http://app.localhost"), "/"),
-		CookieSecure:      envOr("COOKIE_SECURE", "true") != "false",
-		SessaoInatividade: 12 * time.Hour,
-		SessaoMaxima:      7 * 24 * time.Hour,
+		AppOrigin:           strings.TrimRight(envOr("APP_ORIGIN", "http://app.localhost"), "/"),
+		CookieSecure:        envOr("COOKIE_SECURE", "true") != "false",
+		SessaoInatividade:   12 * time.Hour,
+		SessaoMaxima:        7 * 24 * time.Hour,
+		TokenWorker:         tokenWorker,
+		RetencaoScreenshots: 30 * 24 * time.Hour,
 	}
-	srv := &http.Server{
+	servidor := httpapi.NovoServidor(cfg, pool)
+	servidor.RodarTarefasDeFundo(ctx)
+
+	publico := &http.Server{
 		Addr:              envOr("API_ADDR", ":8080"),
-		Handler:           httpapi.NovoServidor(cfg, pool).Rotas(),
+		Handler:           servidor.Rotas(),
+		ReadHeaderTimeout: 10 * time.Second,
+	}
+	publico.RegisterOnShutdown(servidor.Encerrar)
+	// Rotas do worker: porta que o Traefik não roteia.
+	interno := &http.Server{
+		Addr:              envOr("API_ADDR_INTERNO", ":8081"),
+		Handler:           servidor.RotasInternas(),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 	slog.Info("configuração", "app_origin", cfg.AppOrigin, "cookie_secure", cfg.CookieSecure)
 
-	errc := make(chan error, 1)
-	go func() {
-		slog.Info("api ouvindo", "endereco", srv.Addr)
-		errc <- srv.ListenAndServe()
-	}()
+	errc := make(chan error, 2)
+	for _, srv := range []*http.Server{publico, interno} {
+		go func() {
+			slog.Info("api ouvindo", "endereco", srv.Addr)
+			errc <- srv.ListenAndServe()
+		}()
+	}
 
+	var erroServidor error
 	select {
 	case err := <-errc:
 		if !errors.Is(err, http.ErrServerClosed) {
-			return err
+			erroServidor = err
 		}
-		return nil
 	case <-ctx.Done():
+		slog.Info("sinal recebido, desligando a api")
 	}
 
-	slog.Info("sinal recebido, desligando a api")
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	return srv.Shutdown(shutdownCtx)
+	return errors.Join(erroServidor, publico.Shutdown(shutdownCtx), interno.Shutdown(shutdownCtx))
 }
 
 func migrate(args []string) error {

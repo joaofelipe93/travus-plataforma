@@ -32,6 +32,7 @@ func novoServidorTeste(t *testing.T) *Servidor {
 	return NovoServidor(Config{
 		AppOrigin: origemTeste, CookieSecure: true,
 		SessaoInatividade: 12 * time.Hour, SessaoMaxima: 7 * 24 * time.Hour,
+		TokenWorker: tokenWorkerTeste, RetencaoScreenshots: 30 * 24 * time.Hour,
 	}, testedb.Abrir(t))
 }
 
