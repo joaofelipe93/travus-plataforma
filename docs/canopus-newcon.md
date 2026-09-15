@@ -67,4 +67,17 @@ Usado por `workers/canopus/src/leitura-credenciamento.js`. Nada disso preenche c
 - **Grupo 6620** (6620/1372): a tela abre, a assembleia é lida (nº 010) e o "2º Fixo" vem desabilitado; modalidades habilitadas: Livre, Fixo, Limitado.
 - **6650/2068**: "Localizar" leva ao Histórico das Ofertas (sem credenciamento; último lance na assembleia de 16/06/2026).
 
+## Descoberto na Etapa 3 (2026-09-15, sem confirmar lance)
+
+Usado por `workers/canopus/src/avisos-newcon.js`, `reimpressao.js` e `lance-real.js`.
+
+- **Prazo de oferta encerrado**: na hora de "Localizar", o Newcon pode mostrar um `alert` e **ficar na página do filtro**:
+  `Oferta de Lance só poderá ser realizada até 02:30 hora(s) antes da assembleia.\nTérmino da oferta de lance: 15/09/2026 à(s) 14:00 hora(s).`
+  A plataforma trata como **erro conhecido** da cota (`prazoEncerrado`), com o término na mensagem. Acontece no dry-run, na reimpressão e no lance real (antes de qualquer clique em Confirmar).
+- **Reimpressão pelo Histórico** (validada na 6650/2068, protocolo 1788714): o painel do Histórico abre na mesma página (grade `grdHistLances`); o `input[id$="srcPrint"]` da linha do protocolo **navega na mesma aba** para `CONCM/frmConCmNewconReports.aspx`, e o PDF sai por `downloadReportPdf()` como no lance real. Cota sem credenciamento (como a 6650/2068) já cai na página do Histórico das Ofertas, com a mesma grade. Não registra lance.
+- **Protocolo depois de Confirmar** (texto do `alert` nos logs das execuções reais do script legado em 13/09/2026, com espaço no fim; a plataforma nunca clicou em Confirmar):
+  `Anote os números dos protocolos: 2º Lance Fixo (Automático): 1889071 `
+  `extrairProtocolo` pega o número; sem ele, a cota vira `erro_apos_confirmar` para conferência manual.
+- **Avisos que só aparecem depois de Confirmar**: "Consorciado já credenciado nesta assembleia… Deseja continuar?" (`jaCredenciado`) e "Cota com Parcelas em Atraso. Deseja prosseguir?" (`parcelasEmAtraso`). Decisão do usuário: aceitar e marcar o lance (`parcelas_em_atraso`). Lance já existente na assembleia é barrado **antes**, pelo Histórico, salvo "registrar mesmo assim" na revisão.
+
 Secrets and runtime files (`.env`, `credentials.json`, `token.json`, `client_secret_*.json`, `cotasreal.csv` (client names, phones and e-mails), and the contents of `downloads/`, `screenshots/`, `logs/`) are in `.gitignore`; see `.env.example` for all config variables. The Docker `data/` folder holds the same secrets but is only in `.dockerignore`, not `.gitignore`.

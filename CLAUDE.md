@@ -39,11 +39,15 @@ make dev-web         # web com next dev (recarga automática) atrás do Traefik;
 make sqlc            # regera api/internal/db depois de mudar migrações ou consultas
 make paridade-csv    # regera o esperado do teste de paridade rodando o csv.js original
 make worker-dry-run  # script legado: dry-run de 1 cota da planilha no container (faz login; nunca confirma)
+make google-token    # importa workers/canopus/token.json (Google Drive) cifrado no banco
+make google-status   # mostra token, client OAuth, pasta e LANCE_REAL_HABILITADO
 ```
 
 Endereços locais: http://app.localhost (web e, em `/api/...`, a API), http://api.localhost (API para ferramentas; só `/health` é público), http://traefik.localhost (dashboard).
 
-Não há cadastro público de usuários: só `make usuario`. A senha é pedida no terminal ou lida da entrada padrão (mínimo 12 caracteres). `deploy/.env` guarda a senha do Postgres e o `WORKER_TOKEN` (gerados pelo `make`).
+Não há cadastro público de usuários: só `make usuario`. A senha é pedida no terminal ou lida da entrada padrão (mínimo 12 caracteres). `deploy/.env` guarda a senha do Postgres, o `WORKER_TOKEN` e a `CHAVE_CRIPTOGRAFIA` (gerados pelo `make`; sem a chave, o token do Google no banco não decifra) e, opcionalmente, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_DRIVE_PASTA_ID`.
+
+**`LANCE_REAL_HABILITADO`** (padrão `false`, na API e no worker): só `true` liga o lance real. Desligada, a API recusa aprovar (403) e não entrega execução `real`, e o worker nem carrega `lance-real.js`. **Nunca ligue sem pedido explícito do usuário, na hora.**
 
 ## Arquitetura
 
@@ -68,16 +72,20 @@ Não há cadastro público de usuários: só `make usuario`. A senha é pedida n
 - **API** (`api/`, Go 1.26): `net/http` com mux do Go 1.22+, `pgx/v5`, goose v3 (`goose.NewProvider`, migrações embutidas), **sqlc** (`internal/db`, gerado e commitado). Imagem distroless. Duas portas: **8080** pública (Traefik) e **8081** interna (worker, token `WORKER_TOKEN`, sem rota no Traefik).
   - `internal/auth`: senha argon2id (19 MiB, t=2, p=1, no máximo 2 cálculos simultâneos), token de sessão de 256 bits (o banco guarda só o SHA-256), token CSRF.
   - `internal/httpapi`: rotas; `autenticado` valida a sessão **de novo** (não confia em cabeçalho do gateway) e exige `Origin` permitida + `X-CSRF-Token` em POST/PATCH/DELETE; `exigirPerfil`. Cookie `__Host-travus_sessao` (HttpOnly, Secure, SameSite=Strict); sessão expira com 12 h sem uso ou 7 dias. Auditoria de login, falhas, logout, importações, ativação de cotas e execuções (criação e cancelamento).
-    - `execucoes.go`: criar dry-run (só cotas ativas; `real` é recusado), listar, detalhar, cancelar, baixar screenshot (`/arquivos/{id}`, só com sessão).
-    - `interno.go`: fila do worker (`/internal/tarefas/proxima` com `FOR UPDATE SKIP LOCKED` e trava de 2 min, renovar, iniciar/concluir cota, screenshot, eventos, finalizar, liberar no SIGTERM). Trava vencida devolve a execução à fila.
+    - `execucoes.go`: criar dry-run (só cotas ativas; `real` é recusado aqui), listar, detalhar (com os lances), cancelar, baixar screenshot/PDF (`/arquivos/{id}`, só com sessão).
+    - `interno.go`: fila do worker (`/internal/tarefas/proxima` com `FOR UPDATE SKIP LOCKED` e trava de 2 min, renovar, iniciar/concluir cota, screenshot, eventos, finalizar, liberar no SIGTERM). Trava vencida devolve a execução à fila. Tipos entregues: `dry_run`, `reimpressao` e, só com a chave, `real`. Na finalização, cota que ficou em `confirmacao_iniciada` vira `erro_apos_confirmar`.
+    - `reais.go`: `GET /execucoes/{id}/revisao` (revisão do dry-run), `POST /execucoes/reais` (**só admin**, chave ligada, dry-run concluído há menos de 2 h e ainda não aprovado, quantidade de cotas digitada, "registrar mesmo assim" por cota que já tem lance na assembleia), `POST /execucoes/reimpressoes` (comprovante de um protocolo pelo Histórico; `enviar_drive` opcional), `POST /lances/{id}/reenviar-drive`, `GET /integracoes/google-drive` (admin).
+    - `interno_real.go`: `pdf`, `confirmacao-iniciada` (confere tipo, chave, cancelamento e a assembleia aprovada; o worker só clica em Confirmar depois do 204), `concluir-confirmacao` (grava o lance), `concluir-reimpressao`.
+    - `drive_fila.go`: fila de envio dos PDFs ao Drive (tentativas com espera 1, 2, 4, 8 min; envio travado volta em 10 min; o lance fica registrado mesmo se o envio falhar). `internal/drive`: cliente REST (escopo `drive.file`, nome do arquivo igual ao `reportFileName` do script); `internal/cripto`: AES-256-GCM para o token do Google no banco (tabela `integracoes`).
     - `sse.go`: `GET /execucoes/{id}/eventos` (SSE, `Last-Event-ID`, `event: fim`); `Hub` com `LISTEN execucao_eventos` (trigger no insert).
   - `internal/importacao`: `LerPlanilha` porta as regras do `workers/canopus/src/csv.js` (teste de paridade contra o csv.js original em `testdata/paridade`); `Planejar` compara com o cadastro; aplicar recalcula a prévia na transação e recusa se o cadastro mudou.
   - `internal/testedb`: testes de integração (pulados sem `TEST_DATABASE_URL`).
-  - `cmd/api`: `serve`, `migrate up|down|status`, `usuario …`, `healthcheck`. Screenshots vencidos (30 dias) são apagados de hora em hora.
+  - `cmd/api`: `serve`, `migrate up|down|status`, `usuario …`, `google importar-token|status`, `healthcheck`. Screenshots vencidos (30 dias) são apagados de hora em hora; PDFs de comprovante não expiram.
 - **Web** (`web/`, Next.js 16, App Router, TypeScript, Tailwind 4, shadcn/ui estilo base-nova (Base UI, não Radix: use `render` em vez de `asChild`), TanStack Query, `output: "standalone"`). **O Next 16 tem mudanças incompatíveis: leia `web/AGENTS.md` e o guia relevante em `web/node_modules/next/dist/docs/` antes de escrever código** (ex.: `middleware` virou `proxy`; `useSearchParams` precisa de `<Suspense>`; env de runtime com `await connection()`).
   - O navegador chama a API em `/api/...` (mesma origem). `src/lib/api.ts` manda o `X-CSRF-Token`, e em 401 recarrega para o login.
   - `(app)/layout.tsx` busca `/auth/sessao` antes de mostrar as telas; botões aparecem conforme o perfil, mas quem decide é a API.
-  - Telas: `/login`, `/execucoes` (lista), `/execucoes/nova` (escolher cotas ativas), `/execucoes/[id]` (progresso por `EventSource`, cotas, lances já existentes na assembleia, screenshots, log, cancelar), `/cotas`, `/clientes`, `/clientes/[id]`, `/importar`, `/status`.
+  - Telas: `/login`, `/execucoes` (lista), `/execucoes/nova` (escolher cotas ativas), `/execucoes/[id]` (progresso por `EventSource`, cotas, lances já existentes na assembleia, screenshots, comprovantes, log, cancelar, botão "Revisar para lance real"), `/execucoes/[id]/revisao` (revisão do dry-run: cotas, "registrar mesmo assim", confirmação digitando a quantidade; mostra o bloqueio quando a chave está desligada), `/cotas`, `/clientes`, `/clientes/[id]` (lances com PDF e situação no Drive, Reimprimir, "Buscar comprovante no Histórico"), `/importar`, `/status`.
+  - `page.tsx` só pode exportar o componente da página (o build do Next recusa exports extras): componentes compartilhados vão para `src/components/` (ex.: `comprovante.tsx`).
 - **Worker Canopus** (`workers/canopus/`, Node + Playwright **1.63.0 exato**; a imagem `mcr.microsoft.com/playwright:v1.63.0-noble` precisa ter a mesma versão do `package-lock.json`).
   - `src/worker.js`: laço da fila. **Só dry-run: não há caminho para Confirmar** (um teste lê o arquivo e falha se aparecer `confirmAndWaitReport`, `downloadReportPdf` ou `btnConfirma`). Por cota: `backToFilter` (a partir da 2ª) → `searchCota` → `lerDadosCredenciamento` → `selectSegundoFixo` → `captureBeforeConfirm` → envia screenshot → `lerHistorico` (só leitura, depois do screenshot) → conclui. `NewconCotaError` → erro conhecido; outro erro → inesperado; ambos com screenshot. SIGTERM: termina a cota atual e devolve à fila (`stop_grace_period: 90s`).
   - `src/newcon.js`, `csv.js`, `logger.js`: o código validado, **sem mudanças**. `src/index.js` é o script legado (`make worker-dry-run`).
@@ -89,9 +97,9 @@ Não há cadastro público de usuários: só `make usuario`. A senha é pedida n
 
 | Perfil | Pode |
 |---|---|
-| `leitura` | ver clientes, cotas, importações e execuções |
-| `operador` | + importar planilha, ativar/desativar cota, criar e cancelar dry-run |
-| `admin` | tudo do operador (e, nas próximas etapas, o que for restrito) |
+| `leitura` | ver clientes, cotas, importações, execuções, revisões e comprovantes |
+| `operador` | + importar planilha, ativar/desativar cota, criar e cancelar dry-run, pedir reimpressão de comprovante, enviar comprovante ao Drive |
+| `admin` | tudo do operador + **aprovar lance real** e ver a situação do Google Drive |
 
 ## Regras da importação
 
@@ -108,32 +116,38 @@ execução:  na_fila → em_andamento → concluida | concluida_com_erros | canc
              ▲            │ (trava vencida ou SIGTERM)
              └────────────┘
 
-cota:  pendente → em_andamento → verificada (dry-run ok)
-                      │       └→ confirmacao_iniciada → confirmada        (Etapa 3)
+cota:  pendente → em_andamento → verificada (dry-run ok) | reimpressa (reimpressão ok)
+                      │       └→ confirmacao_iniciada → confirmada        (lance real)
                       ▼                     │
              erro_antes_confirmar     erro_apos_confirmar  (conferência manual pelo Histórico)
        (pendente → cancelada quando a execução é cancelada)
+
+lance real:  dry-run concluído → revisão → admin aprova (chave ligada, < 2 h) → execução real na fila
+             worker: confere a assembleia e o Histórico de novo → 2º Fixo → screenshot
+                     → grava confirmacao_iniciada (API) → só então clica em Confirmar
+                     → protocolo do alert → PDF → concluir-confirmacao (lance + fila do Drive)
 ```
 
 - Uma execução em andamento por credencial do Newcon (índice único parcial em `execucoes`); o worker pega uma por vez com `FOR UPDATE SKIP LOCKED` e renova a trava a cada 30 s.
 - Cancelar: na fila, cancela na hora; em andamento, o worker termina a cota atual e não começa a próxima.
 - Worker que parou (trava vencida): a execução volta à fila; cota `em_andamento` volta a `pendente`; cota `confirmacao_iniciada` vira `erro_apos_confirmar` ("o lance pode ter sido registrado, confira no Histórico").
 - **Trigger no banco** (`execucao_cotas_proteger_confirmacao`): cota em `confirmacao_iniciada`, `confirmada` ou `erro_apos_confirmar` nunca volta para um estado que permita reprocessá-la. `iniciar` só aceita `pendente` ou `erro_antes_confirmar`.
-- Etapa 3: gravar `confirmacao_iniciada` **no banco antes** de clicar em Confirmar; a API hoje recusa execuções `real` e conclusões que não sejam `verificada`/`erro_antes_confirmar`.
-- Os avisos "Consorciado já credenciado nesta assembleia…" e "Cota com Parcelas em Atraso…" só aparecem **depois** do clique em Confirmar: o dry-run não os vê. O dry-run lê o Histórico e mostra quantos lances a cota já tem na assembleia atual.
+- `confirmacao_iniciada` é gravada **no banco antes** do clique em Confirmar; sem o 204 da API, o worker não clica. Depois do clique, qualquer falha vira `erro_apos_confirmar` e **nunca** é repetida (`concluirConfirmacao` só tenta de novo *informar* o resultado à API).
+- Três camadas: a chave `LANCE_REAL_HABILITADO` (API e worker), a trava gravada antes do clique e o trigger no banco. Um dry-run origina no máximo uma execução real.
+- Os avisos "Consorciado já credenciado nesta assembleia…" e "Cota com Parcelas em Atraso…" só aparecem **depois** do clique em Confirmar: o dry-run não os vê. O dry-run lê o Histórico e mostra quantos lances a cota já tem na assembleia atual; a revisão soma os lances já registrados pela plataforma.
+- Tabela `lances`: protocolo único por administradora; origem `plataforma` (lance real) ou `historico` (reimpressão). `drive_status`: `pendente`, `enviando`, `enviado`, `erro`, `sem_pdf`, `nao_enviar` (reimpressão sem pedido de envio; dá para enviar pela tela).
 
 ## Etapas
 
 - **Etapa 0 (fundação)**: validada.
 - **Etapa 1 (login e cadastro)**: validada.
-- **Etapa 2 (dry-run pela interface)**: fila no Postgres, rotas internas, SSE, worker, telas de execução, leitura de assembleia e Histórico. *Em validação.*
-- **Etapa 3**: execução real (implementar e testar **sem confirmar**): revisão, confirmação por perfil autorizado, protocolo, `lances`, PDF no Drive e em armazenamento de objetos, auditoria. Token do Google no banco (criptografado) ou em cofre, nunca em arquivo.
+- **Etapa 2 (dry-run pela interface)**: validada.
+- **Etapa 3 (lance real, implementado e testado sem confirmar)**: revisão, aprovação só por admin, trava antes do clique, protocolo, `lances`, PDF no Postgres (bytea; armazenamento de objetos depois) e no Drive, reimpressão pelo Histórico, auditoria, token do Google cifrado no banco. *Em validação.* O primeiro lance real só com pedido explícito do usuário.
 - **Etapa 4**: VM dedicada, domínio, HTTPS, backup do Postgres, logs e alertas.
 
 ## Decisões em aberto (não invente a regra)
 
-- "Cota com Parcelas em Atraso. Deseja prosseguir?": hoje aceito automaticamente. Continua, pula ou só destaca?
-- Modalidade para cotas sem "2º Fixo" (grupo 6620: só Livre, Fixo, Limitado).
-- O que fazer com cota que já tem lance na assembleia (o dry-run mostra; a regra para a execução real é do usuário).
+- Modalidade para cotas sem "2º Fixo" (grupo 6620: só Livre, Fixo, Limitado). Hoje é erro conhecido.
 - Domínio (`app.`/`api.`) e provedor da VM de produção.
-- Quais perfis podem confirmar lance real (Etapa 3).
+
+Decididas pelo usuário na Etapa 3: "Parcelas em Atraso" → aceitar e marcar o lance; cota que já tem lance na assembleia → pular, salvo "registrar mesmo assim" por cota na revisão; só admin aprova lance real; prazo de oferta encerrado → erro conhecido; PDF do teste de reimpressão não vai ao Drive.
