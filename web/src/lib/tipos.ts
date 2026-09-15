@@ -103,6 +103,8 @@ export type Importacao = {
   previa: Previa;
 };
 
+export type TipoExecucao = "dry_run" | "real" | "reimpressao";
+
 export type StatusExecucao = "na_fila" | "em_andamento" | "concluida" | "concluida_com_erros" | "cancelada" | "falhou";
 
 export type StatusCotaExecucao =
@@ -113,11 +115,12 @@ export type StatusCotaExecucao =
   | "confirmacao_iniciada"
   | "confirmada"
   | "erro_apos_confirmar"
+  | "reimpressa"
   | "cancelada";
 
 export type ExecucaoResumo = {
   id: number;
-  tipo: "dry_run" | "real";
+  tipo: TipoExecucao;
   status: StatusExecucao;
   criada_por_nome: string;
   criada_em: string;
@@ -125,6 +128,7 @@ export type ExecucaoResumo = {
   finalizada_em: string | null;
   cancelamento_solicitado: boolean;
   erro: string | null;
+  dry_run_origem_id: number | null;
   total: number;
   sucesso: number;
   com_erro: number;
@@ -168,13 +172,18 @@ export type CotaExecucao = {
   tentativas: number;
   iniciada_em: string | null;
   finalizada_em: string | null;
+  assembleia_aprovada: string | null;
+  permitir_lance_existente: boolean;
+  protocolo: string | null;
 };
 
 export type Execucao = {
   id: number;
-  tipo: "dry_run" | "real";
+  tipo: TipoExecucao;
   status: StatusExecucao;
   criada_por_nome: string;
+  aprovada_por_nome: string | null;
+  dry_run_origem_id: number | null;
   criada_em: string;
   iniciada_em: string | null;
   finalizada_em: string | null;
@@ -184,10 +193,24 @@ export type Execucao = {
   posicao_fila: number | null;
 };
 
+export type StatusDrive = "pendente" | "enviando" | "enviado" | "erro" | "sem_pdf" | "nao_enviar";
+
+export type LanceExecucao = {
+  id: number;
+  execucao_cota_id: number;
+  protocolo: string;
+  pdf_id: string | null;
+  drive_status: StatusDrive;
+  drive_link: string | null;
+  drive_erro: string | null;
+  parcelas_em_atraso: boolean;
+};
+
 export type DetalheExecucao = {
   execucao: Execucao;
   totais: Partial<Record<StatusCotaExecucao, number>>;
   cotas: CotaExecucao[];
+  lances: LanceExecucao[];
 };
 
 export type EventoExecucao = {
@@ -197,6 +220,63 @@ export type EventoExecucao = {
   mensagem: string;
   dados: Record<string, unknown>;
   criado_em: string;
+};
+
+export type LanceCliente = {
+  id: number;
+  cota_id: number;
+  grupo: string;
+  cota: string;
+  versao: string;
+  origem: "plataforma" | "historico";
+  protocolo: string;
+  assembleia_data: string | null;
+  assembleia_numero: string | null;
+  modalidade: string;
+  percentual: string | null;
+  parcelas_em_atraso: boolean;
+  lance_existente_autorizado: boolean;
+  pdf_id: string | null;
+  drive_status: StatusDrive;
+  drive_link: string | null;
+  drive_erro: string | null;
+  registrado_em: string | null;
+  execucao_id: number | null;
+};
+
+export type CotaRevisao = {
+  execucao_cota_id: number;
+  cota_id: number;
+  grupo: string;
+  cota: string;
+  versao: string;
+  cliente_nome: string;
+  ativa: boolean;
+  assembleia_data: string | null;
+  assembleia_numero: string | null;
+  percentual_segundo_fixo: string | null;
+  historico_lido: boolean;
+  lances_nesta_assembleia: number;
+  lances: LanceHistorico[];
+  lances_plataforma: string[];
+  exige_autorizacao: boolean;
+  screenshot_id: string | null;
+  bloqueio: string;
+};
+
+export type Revisao = {
+  dry_run: {
+    id: number;
+    status: StatusExecucao;
+    finalizada_em: string | null;
+    valido_ate: string | null;
+    expirado: boolean;
+    execucao_real_id: number | null;
+  };
+  lance_real_habilitado: boolean;
+  pode_aprovar: boolean;
+  bloqueio: string;
+  cotas: CotaRevisao[];
 };
 
 export type ImportacaoResumo = {

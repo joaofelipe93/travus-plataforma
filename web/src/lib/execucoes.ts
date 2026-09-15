@@ -1,6 +1,6 @@
 import type { VariantProps } from "class-variance-authority";
 import type { badgeVariants } from "@/components/ui/badge";
-import type { StatusCotaExecucao, StatusExecucao } from "@/lib/tipos";
+import type { StatusCotaExecucao, StatusDrive, StatusExecucao, TipoExecucao } from "@/lib/tipos";
 
 type Variante = NonNullable<VariantProps<typeof badgeVariants>["variant"]>;
 
@@ -19,17 +19,27 @@ export const situacaoCota: Record<StatusCotaExecucao, { rotulo: string; variante
   verificada: { rotulo: "Pronta para confirmar", variante: "secondary" },
   erro_antes_confirmar: { rotulo: "Erro (lance não registrado)", variante: "destructive" },
   confirmacao_iniciada: { rotulo: "Confirmando", variante: "default" },
-  confirmada: { rotulo: "Confirmada", variante: "secondary" },
+  confirmada: { rotulo: "Lance registrado", variante: "secondary" },
   erro_apos_confirmar: { rotulo: "Erro após confirmar", variante: "destructive" },
+  reimpressa: { rotulo: "Comprovante obtido", variante: "secondary" },
   cancelada: { rotulo: "Cancelada", variante: "outline" },
+};
+
+export const situacaoDrive: Record<StatusDrive, { rotulo: string; variante: Variante }> = {
+  pendente: { rotulo: "Drive: aguardando", variante: "outline" },
+  enviando: { rotulo: "Drive: enviando", variante: "outline" },
+  enviado: { rotulo: "No Drive", variante: "secondary" },
+  erro: { rotulo: "Drive: erro", variante: "destructive" },
+  sem_pdf: { rotulo: "Sem PDF", variante: "outline" },
+  nao_enviar: { rotulo: "Fora do Drive", variante: "outline" },
 };
 
 export function execucaoTerminou(status: StatusExecucao) {
   return status === "concluida" || status === "concluida_com_erros" || status === "cancelada" || status === "falhou";
 }
 
-export function nomeTipo(tipo: "dry_run" | "real") {
-  return tipo === "dry_run" ? "Dry-run" : "Real";
+export function nomeTipo(tipo: TipoExecucao) {
+  return { dry_run: "Dry-run", real: "Lance real", reimpressao: "Reimpressão" }[tipo];
 }
 
 export function hora(iso: string) {

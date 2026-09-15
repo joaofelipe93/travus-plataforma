@@ -17,13 +17,14 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
+import { Comprovante } from "@/components/comprovante";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { api } from "@/lib/api";
 import { execucaoTerminou, hora, nomeTipo, situacaoCota, situacaoExecucao } from "@/lib/execucoes";
 import { dataHora, podeEditar, tagCota, useSessao } from "@/lib/sessao";
-import type { CotaExecucao, DetalheExecucao, EventoExecucao } from "@/lib/tipos";
+import type { CotaExecucao, DetalheExecucao, EventoExecucao, LanceExecucao } from "@/lib/tipos";
 import { cn } from "@/lib/utils";
 
 const MAX_EVENTOS = 1000;
@@ -38,8 +39,13 @@ export default function PaginaExecucao() {
   const detalhe = useQuery({
     queryKey: ["execucao", id],
     queryFn: () => api<DetalheExecucao>(`/execucoes/${encodeURIComponent(id)}`),
-    // Rede de segurança: o SSE é quem atualiza de verdade.
-    refetchInterval: (q) => (q.state.data && !execucaoTerminou(q.state.data.execucao.status) ? 15000 : false),
+    // Rede de segurança: o SSE é quem atualiza de verdade. Depois do fim, acompanha o envio ao Drive.
+    refetchInterval: (q) => {
+      const d = q.state.data;
+      if (!d) return false;
+      if (!execucaoTerminou(d.execucao.status)) return 15000;
+      return d.lances?.some((l) => l.drive_status === "pendente" || l.drive_status === "enviando") ? 20000 : false;
+    },
   });
   const terminou = detalhe.data ? execucaoTerminou(detalhe.data.execucao.status) : false;
 
@@ -97,10 +103,18 @@ export default function PaginaExecucao() {
   }
 
   const { execucao, totais, cotas } = detalhe.data;
-  const processadas = cotas.filter((c) => c.status !== "pendente" && c.status !== "em_andamento").length;
+  const lancesPorCota = new Map((detalhe.data.lances ?? []).map((l) => [l.execucao_cota_id, l]));
+  const processadas = cotas.filter((c) => c.status !== "pendente" && c.status !== "em_andamento" && c.status !== "confirmacao_iniciada").length;
   const percentual = cotas.length ? Math.round((processadas / cotas.length) * 100) : 0;
   const comLanceNaAssembleia = cotas.filter((c) => (c.detalhes.lances_nesta_assembleia ?? 0) > 0).length;
-  const podeCancelar = podeEditar(sessao.data?.usuario.perfil) && !terminou && !execucao.cancelamento_solicitado;
+  const perfil = sessao.data?.usuario.perfil;
+  const podeCancelar = podeEditar(perfil) && !terminou && !execucao.cancelamento_solicitado;
+  const podeRevisar =
+    perfil === "admin" &&
+    execucao.tipo === "dry_run" &&
+    (execucao.status === "concluida" || execucao.status === "concluida_com_erros") &&
+    (totais.verificada ?? 0) > 0;
+  const mostrarComprovante = execucao.tipo !== "dry_run";
 
   return (
     <div className="flex flex-col gap-5">
@@ -119,22 +133,45 @@ export default function PaginaExecucao() {
             </Badge>
           </div>
           <p className="text-sm text-muted-foreground">
-            Criada por {execucao.criada_por_nome} em {dataHora(execucao.criada_em)}
+            {execucao.tipo === "real" && execucao.aprovada_por_nome ? `Aprovada por ${execucao.aprovada_por_nome}` : `Criada por ${execucao.criada_por_nome}`} em{" "}
+            {dataHora(execucao.criada_em)}
+            {execucao.dry_run_origem_id && (
+              <>
+                {" · a partir do "}
+                <Link className="underline" href={`/execucoes/${execucao.dry_run_origem_id}`}>
+                  dry-run nº {execucao.dry_run_origem_id}
+                </Link>
+              </>
+            )}
             {execucao.finalizada_em && ` · terminou em ${dataHora(execucao.finalizada_em)}`}
             {execucao.status === "na_fila" && execucao.posicao_fila !== null && ` · posição na fila: ${execucao.posicao_fila}`}
           </p>
         </div>
-        {podeCancelar && (
-          <Button variant="outline" onClick={() => setConfirmarCancelamento(true)} disabled={cancelar.isPending}>
-            Cancelar execução
-          </Button>
-        )}
+        <div className="flex gap-2">
+          {podeRevisar && (
+            <Link href={`/execucoes/${execucao.id}/revisao`} className={buttonVariants({ variant: "destructive" })}>
+              Revisar para lance real
+            </Link>
+          )}
+          {podeCancelar && (
+            <Button variant="outline" onClick={() => setConfirmarCancelamento(true)} disabled={cancelar.isPending}>
+              Cancelar execução
+            </Button>
+          )}
+        </div>
       </div>
 
       {execucao.tipo === "dry_run" && (
-        <p className="rounded-md border border-dashed px-3 py-2 text-sm text-muted-foreground">
-          Dry-run: nenhum lance foi ou será confirmado nesta execução.
-        </p>
+        <p className="rounded-md border border-dashed px-3 py-2 text-sm text-muted-foreground">Dry-run: nenhum lance foi ou será confirmado nesta execução.</p>
+      )}
+      {execucao.tipo === "reimpressao" && (
+        <p className="rounded-md border border-dashed px-3 py-2 text-sm text-muted-foreground">Reimpressão de comprovante pelo Histórico: não registra lance.</p>
+      )}
+      {execucao.tipo === "real" && (
+        <Alert variant="destructive">
+          <AlertTitle>Execução real</AlertTitle>
+          <AlertDescription>O worker clica em Confirmar no Newcon para as cotas abaixo. Cota que passou pela confirmação nunca é repetida automaticamente.</AlertDescription>
+        </Alert>
       )}
       {execucao.erro && (
         <Alert variant="destructive">
@@ -144,7 +181,9 @@ export default function PaginaExecucao() {
       )}
       {execucao.cancelamento_solicitado && !terminou && (
         <Alert>
-          <AlertDescription>Cancelamento pedido{execucao.cancelada_por_nome ? ` por ${execucao.cancelada_por_nome}` : ""}: o worker termina a cota atual e para.</AlertDescription>
+          <AlertDescription>
+            Cancelamento pedido{execucao.cancelada_por_nome ? ` por ${execucao.cancelada_por_nome}` : ""}: o worker termina a cota atual e para.
+          </AlertDescription>
         </Alert>
       )}
 
@@ -154,8 +193,9 @@ export default function PaginaExecucao() {
             {processadas} de {cotas.length} cota(s) processada(s)
           </span>
           <span className="text-muted-foreground">
-            {totais.verificada ?? 0} pronta(s) · {(totais.erro_antes_confirmar ?? 0) + (totais.erro_apos_confirmar ?? 0)} com erro
-            {comLanceNaAssembleia > 0 && ` · ${comLanceNaAssembleia} já com lance nesta assembleia`}
+            {(totais.verificada ?? 0) + (totais.confirmada ?? 0) + (totais.reimpressa ?? 0)} ok ·{" "}
+            {(totais.erro_antes_confirmar ?? 0) + (totais.erro_apos_confirmar ?? 0)} com erro
+            {comLanceNaAssembleia > 0 && execucao.tipo === "dry_run" && ` · ${comLanceNaAssembleia} já com lance nesta assembleia`}
           </span>
         </div>
         <div className="h-2 overflow-hidden rounded-full bg-muted" role="progressbar" aria-valuenow={percentual} aria-valuemin={0} aria-valuemax={100}>
@@ -173,12 +213,13 @@ export default function PaginaExecucao() {
               <TableHead>Situação</TableHead>
               <TableHead>Assembleia</TableHead>
               <TableHead>Resultado</TableHead>
+              {mostrarComprovante && <TableHead>Comprovante</TableHead>}
               <TableHead className="text-right">Screenshot</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {cotas.map((c) => (
-              <LinhaCota key={c.id} cota={c} />
+              <LinhaCota key={c.id} cota={c} lance={lancesPorCota.get(c.id)} mostrarComprovante={mostrarComprovante} editavel={podeEditar(perfil)} />
             ))}
           </TableBody>
         </Table>
@@ -194,9 +235,7 @@ export default function PaginaExecucao() {
           <AlertDialogHeader>
             <AlertDialogTitle>Cancelar a execução nº {execucao.id}?</AlertDialogTitle>
             <AlertDialogDescription>
-              {execucao.status === "na_fila"
-                ? "Ela ainda não começou e sai da fila."
-                : "O worker termina a cota que está processando e não começa as próximas."}
+              {execucao.status === "na_fila" ? "Ela ainda não começou e sai da fila." : "O worker termina a cota que está processando e não começa as próximas."}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
@@ -211,12 +250,22 @@ export default function PaginaExecucao() {
   );
 }
 
-function LinhaCota({ cota: c }: { cota: CotaExecucao }) {
+function LinhaCota({
+  cota: c,
+  lance,
+  mostrarComprovante,
+  editavel,
+}: {
+  cota: CotaExecucao;
+  lance?: LanceExecucao;
+  mostrarComprovante: boolean;
+  editavel: boolean;
+}) {
   const d = c.detalhes;
   const lances = d.lances_nesta_assembleia ?? 0;
   const erroAposConfirmar = c.status === "erro_apos_confirmar";
   return (
-    <TableRow className={cn(erroAposConfirmar && "bg-destructive/10", c.status === "em_andamento" && "bg-muted/60")}>
+    <TableRow className={cn(erroAposConfirmar && "bg-destructive/10", (c.status === "em_andamento" || c.status === "confirmacao_iniciada") && "bg-muted/60")}>
       <TableCell className="tabular-nums text-muted-foreground">{c.ordem}</TableCell>
       <TableCell>{c.cliente_nome}</TableCell>
       <TableCell className="whitespace-nowrap tabular-nums">{tagCota(c)}</TableCell>
@@ -224,27 +273,37 @@ function LinhaCota({ cota: c }: { cota: CotaExecucao }) {
         <Badge variant={situacaoCota[c.status].variante}>{situacaoCota[c.status].rotulo}</Badge>
       </TableCell>
       <TableCell className="whitespace-nowrap text-muted-foreground">
-        {d.assembleia_data ? `${d.assembleia_data}${d.assembleia_numero ? ` (nº ${d.assembleia_numero})` : ""}` : "—"}
+        {d.assembleia_data ? `${d.assembleia_data}${d.assembleia_numero ? ` (nº ${d.assembleia_numero})` : ""}` : (c.assembleia_aprovada ?? "—")}
       </TableCell>
       <TableCell className="max-w-md whitespace-normal">
         {erroAposConfirmar && <p className="font-medium text-destructive">O lance pode ter sido registrado: confira no Histórico do Newcon.</p>}
+        {c.protocolo && (c.status === "confirmada" || c.status === "reimpressa" || erroAposConfirmar) && (
+          <p>
+            Protocolo <span className="font-medium tabular-nums">{c.protocolo}</span>
+            {lance?.parcelas_em_atraso && <Badge variant="outline" className="ml-2">Parcelas em atraso</Badge>}
+          </p>
+        )}
         {c.erro && (
           <p className={cn(c.erro_tipo === "inesperado" && "text-destructive")}>
             {c.erro_tipo === "inesperado" ? "Erro inesperado: " : ""}
             {c.erro}
           </p>
         )}
-        {lances > 0 && (
+        {lances > 0 && c.status !== "confirmada" && (
           <p className="text-amber-700 dark:text-amber-400">
             Já tem {lances} lance(s) nesta assembleia: {d.lances?.map((l) => `${l.protocolo} (${l.modalidade ?? "?"})`).join(", ")}
           </p>
         )}
+        {c.permitir_lance_existente && <p className="text-xs text-muted-foreground">Autorizado a registrar mesmo com lance existente.</p>}
         {c.status === "verificada" && lances === 0 && d.historico_lido && <p className="text-muted-foreground">Sem lance nesta assembleia.</p>}
         {c.status === "verificada" && d.historico_lido === false && <p className="text-muted-foreground">Histórico não pôde ser lido.</p>}
-        {d.percentual_segundo_fixo && c.status === "verificada" && (
-          <p className="text-xs text-muted-foreground">2º Lance Fixo: {d.percentual_segundo_fixo}%</p>
-        )}
+        {d.percentual_segundo_fixo && c.status === "verificada" && <p className="text-xs text-muted-foreground">2º Lance Fixo: {d.percentual_segundo_fixo}%</p>}
       </TableCell>
+      {mostrarComprovante && (
+        <TableCell>
+          {lance ? <Comprovante lance={lance} editavel={editavel} /> : <span className="text-muted-foreground">—</span>}
+        </TableCell>
+      )}
       <TableCell className="text-right">
         {c.screenshot_id ? (
           <a href={`/api/arquivos/${c.screenshot_id}`} target="_blank" rel="noopener noreferrer" className="inline-block" title="Abrir screenshot">
