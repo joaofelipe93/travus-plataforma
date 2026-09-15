@@ -53,4 +53,18 @@ The Dockerfile base image is pinned to `mcr.microsoft.com/playwright:v1.47.0-jam
 - **PDF file names** come from `reportFileName()` in `newcon.js`: `NOME DO CLIENTE - 006650-0924-00 - AAAA-MM-DD.pdf`, using the local date. Grupo/cota stay in the name because one client can have several cotas. Without a `nome` it falls back to `credenciamento_<tag>_<date>.pdf`. Drive uploads reuse the local basename.
 - **`logger.js`** writes one JSONL file per run to `logs/run-<timestamp>.jsonl` and mirrors a compact line to stdout.
 
+## Descoberto na plataforma (dry-run de 2026-09-15, só leitura)
+
+Usado por `workers/canopus/src/leitura-credenciamento.js`. Nada disso preenche campo, marca modalidade ou confirma.
+
+- **Tela de credenciamento** (depois de `searchCota`):
+  - `#ctl00_Conteudo_edtDT_Assembleia`: data da assembleia (ex.: `15/09/2026`). É um `<input>` **editável**: só ler o valor, nunca preencher.
+  - `#ctl00_Conteudo_lblNO_Assembleia`: número da assembleia (ex.: `027`).
+  - `#ctl00_Conteudo_lblVA_Lance_Fixo_2`: percentual do 2º Lance Fixo (ex.: `30.0000`). Vizinhos: `lblVA_Lance_Fixo`, `lblVA_Lance_Minimo`, `lblVA_Lance_Maximo`, `lblVA_Lance_Limitado`.
+  - `#ctl00_Conteudo_lblNM_Ocorrencia`: texto vermelho "Último lance ofertado em: 13/09/2026 às 19:52:31, através da(o) Web". **Não diz de qual assembleia** é o lance.
+  - Radios da modalidade: `rgLance_0` (LL, Livre), `rgLance_1` (LF, Fixo), `rgLance_2` (LS, 2º Fixo), `rgLance_3` (LM, Limitado), `rgLance_4` (LI, Fidelidade; desabilitado na 6650/0236).
+- **Histórico** (`#ctl00_Conteudo_btnHistorico`, submit): abre um **painel na mesma página** (a URL continua `frmConCpCadCredenciamentoLance.aspx`), fechado por `#ctl00_Conteudo_lbkFechaHistorico`. Grade `#ctl00_Conteudo_ucHistoricoOfertaLance_grdHistLances`, colunas: Protocolo, Assembleia, Credenciamento (data e hora), Modalidade ("2º Lance Fixo"), Acesso, Tipo Oferta, Usuário (login do Newcon: não guardar), Vl. Lance, % Lance, Pc. Lance, % Embutido, Vl Embutido, Lance Automático, Vl. FGTS, Tipo Redução, Construtora, Troca de Chaves, Sequência, 2ª Via. É pela coluna **Assembleia** que se sabe se a cota já tem lance na assembleia atual (a 6650/0236 tinha 2 em 15/09/2026).
+- **Grupo 6620** (6620/1372): a tela abre, a assembleia é lida (nº 010) e o "2º Fixo" vem desabilitado; modalidades habilitadas: Livre, Fixo, Limitado.
+- **6650/2068**: "Localizar" leva ao Histórico das Ofertas (sem credenciamento; último lance na assembleia de 16/06/2026).
+
 Secrets and runtime files (`.env`, `credentials.json`, `token.json`, `client_secret_*.json`, `cotasreal.csv` (client names, phones and e-mails), and the contents of `downloads/`, `screenshots/`, `logs/`) are in `.gitignore`; see `.env.example` for all config variables. The Docker `data/` folder holds the same secrets but is only in `.dockerignore`, not `.gitignore`.
