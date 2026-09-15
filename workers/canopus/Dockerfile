@@ -21,4 +21,6 @@ USER pwuser
 # O Chromium precisa de /dev/shm maior que o padrão do Docker (64 MB):
 # o compose usa shm_size; com docker run, passe --shm-size=1g ou --ipc=host.
 ENTRYPOINT ["/app/docker-entrypoint.sh"]
-CMD ["node", "src/index.js", "--dry-run", "--limit", "1"]
+# Worker da plataforma (só dry-run nesta etapa). O script legado continua disponível:
+# node src/index.js --dry-run --limit 1 (make worker-dry-run).
+CMD ["node", "src/worker.js"]
