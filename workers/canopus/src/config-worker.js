@@ -31,6 +31,8 @@ function carregarConfig(env = process.env) {
 
   const tmp = env.WORKER_TMP_DIR || path.join(os.tmpdir(), 'travus-worker');
   return {
+    // Lance real só com "true" explícito. A API tem a sua própria chave com o mesmo nome.
+    lanceRealHabilitado: String(env.LANCE_REAL_HABILITADO || '').trim() === 'true',
     api: { url: obrigatoria(env, 'API_INTERNA_URL').replace(/\/+$/, ''), token },
     worker: {
       nome: String(env.WORKER_NOME || `canopus@${os.hostname()}`).slice(0, 100),

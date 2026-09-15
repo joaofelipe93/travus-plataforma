@@ -5,29 +5,44 @@
  * Worker Canopus da plataforma: pega execuções da fila (API interna), roda no Newcon e
  * informa o andamento de cada cota.
  *
- * ETAPA 2: SÓ DRY-RUN. Este arquivo não tem nenhum caminho que clique em Confirmar
- * (confirmAndWaitReport/downloadReportPdf não são chamados; um teste garante isso).
- * Por cota: filtro → dados da assembleia → "2º Fixo" → screenshot → Histórico (só leitura).
+ * Tipos:
+ *   - dry_run: filtro → dados da assembleia → "2º Fixo" → screenshot → Histórico (só leitura).
+ *     Este arquivo não tem nenhum caminho que clique em Confirmar (um teste garante isso).
+ *   - reimpressao: comprovante de um protocolo pelo Histórico (src/reimpressao.js).
+ *   - real: só com LANCE_REAL_HABILITADO=true; o fluxo fica em src/lance-real.js, que nem é
+ *     carregado quando o lance real está desligado.
  */
 
 const fs = require('fs');
 const { NewconClient } = require('./newcon');
-const { lerDadosCredenciamento, lerHistorico, resumirHistorico } = require('./leitura-credenciamento');
+const leituraPadrao = require('./leitura-credenciamento');
+const { prazoEncerrado } = require('./avisos-newcon');
 const { Plataforma } = require('./plataforma');
 const { Registro } = require('./registro');
 const { carregarConfig } = require('./config-worker');
 
-const TIPOS_SUPORTADOS = ['dry_run'];
-
+const { resumirHistorico } = leituraPadrao;
 const primeiraLinha = (e) => String((e && e.message) || e).split('\n')[0];
 const tagCota = (c) => `${c.grupo}-${c.cota}-${c.versao}`;
 
+function tiposSuportados(config) {
+  return config.lanceRealHabilitado ? ['dry_run', 'reimpressao', 'real'] : ['dry_run', 'reimpressao'];
+}
+
 class Worker {
-  constructor({ config, plataforma, criarNewcon, leitura = { lerDadosCredenciamento, lerHistorico }, saida = console }) {
+  constructor({
+    config,
+    plataforma,
+    criarNewcon,
+    leitura = leituraPadrao,
+    modulos = { lanceReal: () => require('./lance-real'), reimpressao: () => require('./reimpressao') },
+    saida = console,
+  }) {
     this.config = config;
     this.plataforma = plataforma;
     this.criarNewcon = criarNewcon;
     this.leitura = leitura;
+    this.modulos = modulos;
     this.saida = saida;
     this.parando = false;
     this.acordar = null;
@@ -52,12 +67,14 @@ class Worker {
 
   async rodar() {
     const { nome, intervaloFilaMs } = this.config.worker;
-    this.saida.log(`· worker ${nome} esperando execuções (${TIPOS_SUPORTADOS.join(', ')})`);
+    const tipos = tiposSuportados(this.config);
+    if (this.config.lanceRealHabilitado) this.saida.log('! ATENÇÃO: LANCE_REAL_HABILITADO=true: este worker registra lances reais aprovados');
+    this.saida.log(`· worker ${nome} esperando execuções (${tipos.join(', ')})`);
     let falhasSeguidas = 0;
     while (!this.parando) {
       let tarefa;
       try {
-        tarefa = await this.plataforma.proximaTarefa(TIPOS_SUPORTADOS);
+        tarefa = await this.plataforma.proximaTarefa(tipos);
         falhasSeguidas = 0;
       } catch (e) {
         falhasSeguidas++;
@@ -74,11 +91,22 @@ class Worker {
     this.saida.log('· worker parado');
   }
 
+  /** Escolhe o fluxo de cada cota pelo tipo da execução. */
+  _fluxoDoTipo(tipo) {
+    if (!tiposSuportados(this.config).includes(tipo)) return null;
+    if (tipo === 'dry_run') return (ctx) => this.processarCota(ctx.newcon, ctx.registro, ctx.cota, ctx.voltarAoFiltro);
+    if (tipo === 'reimpressao') return this.modulos.reimpressao().processarReimpressao;
+    if (tipo === 'real' && this.config.lanceRealHabilitado === true) return this.modulos.lanceReal().processarCotaReal;
+    return null;
+  }
+
   async processar({ execucao, cotas }) {
     const { id, tipo } = execucao;
-    if (!TIPOS_SUPORTADOS.includes(tipo)) {
-      // Defesa extra: a API não entrega outros tipos a este worker.
-      await this.plataforma.finalizar(id, `este worker não executa o tipo "${tipo}"`).catch(() => {});
+    const fluxo = this._fluxoDoTipo(tipo);
+    if (!fluxo) {
+      // Defesa extra: a API não entrega a este worker tipos que ele não executa.
+      const motivo = tipo === 'real' ? 'lance real desligado neste worker (LANCE_REAL_HABILITADO)' : `este worker não executa o tipo "${tipo}"`;
+      await this.plataforma.finalizar(id, motivo).catch(() => {});
       return;
     }
 
@@ -135,7 +163,7 @@ class Worker {
         }
 
         registro.definirCota(cota.id);
-        await this.processarCota(newcon, registro, cota, processadas > 0);
+        await fluxo(this._contexto(newcon, registro, cota, processadas > 0));
         processadas++;
         await registro.enviar();
         registro.definirCota(null);
@@ -155,9 +183,25 @@ class Worker {
     }
   }
 
+  _contexto(newcon, registro, cota, voltarAoFiltro) {
+    return {
+      newcon,
+      registro,
+      cota,
+      voltarAoFiltro,
+      config: this.config,
+      plataforma: this.plataforma,
+      leitura: this.leitura,
+      enviarScreenshot: (c, arquivo) => this._enviarScreenshot(c, arquivo, registro),
+      concluir: (c, conclusao) => this._concluir(c, conclusao, registro),
+    };
+  }
+
+  /** Dry-run de uma cota. */
   async processarCota(newcon, registro, cota, voltarAoFiltro) {
     const tag = tagCota(cota);
     const detalhes = {};
+    const dialogosAntes = registro.dialogos.length;
     try {
       // Como o script legado: a partir da 2ª cota volta ao filtro, mesmo depois de erro.
       if (voltarAoFiltro) await newcon.backToFilter();
@@ -184,14 +228,14 @@ class Worker {
 
       await this._concluir(cota, { status: 'verificada', detalhes }, registro);
     } catch (e) {
-      const conhecido = e && e.name === 'NewconCotaError';
+      // Depois do prazo, o Newcon avisa num alert e fica no filtro: o erro genérico do
+      // searchCota ("confira grupo, cota e versão") vira o motivo real.
+      const prazo = prazoEncerrado(registro.dialogos.slice(dialogosAntes));
+      const conhecido = !!prazo || (e && e.name === 'NewconCotaError');
+      const erro = prazo || (conhecido ? e.message : primeiraLinha(e));
       const arquivo = await newcon.snapshotError(tag);
       if (arquivo) await this._enviarScreenshot(cota, arquivo, registro);
-      await this._concluir(
-        cota,
-        { status: 'erro_antes_confirmar', erro_tipo: conhecido ? 'conhecido' : 'inesperado', erro: conhecido ? e.message : primeiraLinha(e), detalhes },
-        registro
-      );
+      await this._concluir(cota, { status: 'erro_antes_confirmar', erro_tipo: conhecido ? 'conhecido' : 'inesperado', erro, detalhes }, registro);
     }
   }
 
@@ -235,4 +279,4 @@ if (require.main === module) {
   );
 }
 
-module.exports = { Worker, TIPOS_SUPORTADOS };
+module.exports = { Worker, tiposSuportados };

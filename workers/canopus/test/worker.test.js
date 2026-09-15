@@ -30,7 +30,7 @@ class NewconCotaError extends Error {
 // comportamento: { '006650-0236-00': 'ok' | 'conhecido' | 'inesperado' }
 function newconFalso(comportamento, chamadas, { falharLogin = false, aoBuscar } = {}) {
   let atual = null;
-  return () => ({
+  return (opcoes) => ({
     page: {},
     async start() { chamadas.push('start'); },
     async login() { chamadas.push('login'); if (falharLogin) throw new Error('usuário ou senha inválidos'); },
@@ -42,6 +42,11 @@ function newconFalso(comportamento, chamadas, { falharLogin = false, aoBuscar } 
       atual = tag;
       if (aoBuscar) aoBuscar(tag);
       if (comportamento[tag] === 'inesperado') throw new Error('Timeout 30000ms exceeded.\nlinha 2');
+      if (comportamento[tag] === 'prazo') {
+        // Como no Newcon real depois do prazo (2026-09-15): alert aceito e página no filtro.
+        opcoes.logger.info('dialog', { type: 'alert', message: 'Oferta de Lance só poderá ser realizada até 02:30 hora(s) antes da assembleia.\nTérmino da oferta de lance: 15/09/2026 à(s) 14:00 hora(s).' });
+        throw new NewconCotaError('Newcon não abriu a cota após "Localizar" (ficou em frmConCpCadCredenciamentoLance_Filtro.aspx). Confira grupo, cota e versão.');
+      }
     },
     // Como no Newcon real (grupo 6620): a tela abre, mas o "2º Fixo" está desabilitado.
     async selectSegundoFixo() {
@@ -144,7 +149,7 @@ test('recusa execução real sem abrir o Newcon', async () => {
   const worker = new Worker({ config, plataforma, criarNewcon: newconFalso({}, chamadas), leitura: leituraFalsa, saida: silencio });
   await worker.processar(tarefa([cota(1, '006650', '0236')], 'real'));
   assert.deepEqual(chamadas, []);
-  assert.match(plataforma.chamadas.join('|'), /finalizar 7: este worker não executa o tipo "real"/);
+  assert.match(plataforma.chamadas.join('|'), /finalizar 7: lance real desligado neste worker/);
 });
 
 test('falha no login finaliza com erro e não inicia cotas', async () => {
@@ -213,4 +218,38 @@ test('configuração recusa URL do Newcon com a grafia derrubada e token curto',
   assert.equal(carregarConfig(base).playwright.headless, true);
   assert.throws(() => carregarConfig({ ...base, NEWCON_URL: 'https://cnp3.consorciocanopus.com.br/WWW/frmCorCCCnsLogin.aspx' }), /frmCorCcCnsLogin/);
   assert.throws(() => carregarConfig({ ...base, WORKER_TOKEN: 'curto' }), /32 caracteres/);
+  assert.equal(carregarConfig(base).lanceRealHabilitado, false);
+  assert.equal(carregarConfig({ ...base, LANCE_REAL_HABILITADO: 'sim' }).lanceRealHabilitado, false, 'só "true" liga o lance real');
+  assert.equal(carregarConfig({ ...base, LANCE_REAL_HABILITADO: 'true' }).lanceRealHabilitado, true);
+});
+
+test('prazo de oferta encerrado vira erro conhecido com o término', async () => {
+  const plataforma = plataformaFalsa();
+  const worker = new Worker({ config, plataforma, criarNewcon: newconFalso({ '006650-0236-00': 'prazo' }, []), leitura: leituraFalsa, saida: silencio });
+  await worker.processar(tarefa([cota(1, '006650', '0236')]));
+  assert.deepEqual(
+    { status: plataforma.conclusoes[1].status, erro_tipo: plataforma.conclusoes[1].erro_tipo, erro: plataforma.conclusoes[1].erro },
+    { status: 'erro_antes_confirmar', erro_tipo: 'conhecido', erro: 'prazo de oferta de lance encerrado (término em 15/09/2026 às 14:00)' }
+  );
+});
+
+test('lance real desligado: recusa a execução sem carregar lance-real.js', async () => {
+  const chamadas = [];
+  const plataforma = plataformaFalsa();
+  let carregou = false;
+  const modulos = { lanceReal: () => { carregou = true; return require('../src/lance-real'); }, reimpressao: () => require('../src/reimpressao') };
+  const worker = new Worker({ config: { ...config, lanceRealHabilitado: false }, plataforma, criarNewcon: newconFalso({}, chamadas), leitura: leituraFalsa, modulos, saida: silencio });
+  await worker.processar(tarefa([cota(1, '006650', '0236')], 'real'));
+  assert.equal(carregou, false);
+  assert.deepEqual(chamadas, []);
+  assert.match(plataforma.chamadas.join('|'), /finalizar 7: lance real desligado/);
+  assert.ok(!Object.keys(require.cache).some((k) => k.endsWith('lance-real.js')), 'lance-real.js não pode ter sido carregado');
+});
+
+test('reimpressão e dry-run não usam o botão Confirmar', () => {
+  const semComentarios = (arquivo) => fs.readFileSync(path.join(__dirname, '../src', arquivo), 'utf8').replace(/\/\*[\s\S]*?\*\/|\/\/.*$/gm, '');
+  for (const proibido of ['confirmAndWaitReport', 'btnConfirma']) {
+    assert.ok(!semComentarios('reimpressao.js').includes(proibido), `reimpressao.js não pode usar ${proibido}`);
+    assert.ok(!semComentarios('leitura-credenciamento.js').includes(proibido), `leitura-credenciamento.js não pode usar ${proibido}`);
+  }
 });

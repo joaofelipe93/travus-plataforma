@@ -1,8 +1,8 @@
 'use strict';
 
 /**
- * Leituras da tela de credenciamento do Newcon. SÓ LEITURA: nada aqui preenche campos,
- * marca modalidade ou clica em Confirmar. Seletores descobertos num dry-run em 2026-09-15
+ * Leituras e navegação no Histórico do Newcon. Nada aqui preenche campos, marca modalidade
+ * ou clica em Confirmar. Seletores descobertos em dry-runs em 2026-09-15
  * (ver docs/canopus-newcon.md).
  */
 
@@ -25,12 +25,17 @@ async function lerDadosCredenciamento(page) {
   };
 }
 
-/**
- * Abre o Histórico (#ctl00_Conteudo_btnHistorico, painel na mesma página) e lê a grade de
- * ofertas. Chamado só DEPOIS do screenshot do dry-run. A coluna "Usuário" não é guardada.
- */
-async function lerHistorico(page, timeoutMs = 30000) {
+/** Abre o painel do Histórico na tela de credenciamento (#ctl00_Conteudo_btnHistorico). */
+async function abrirHistorico(page, timeoutMs = 30000) {
   await page.locator('#ctl00_Conteudo_btnHistorico').click();
+  await page.locator('table[id*="grdHistLances"]').first().waitFor({ state: 'visible', timeout: timeoutMs });
+}
+
+/**
+ * Lê a grade de ofertas (painel do Histórico ou página frmConCpCnsHistoricoOfertaLance.aspx,
+ * que usam a mesma grade). A coluna "Usuário" não é guardada.
+ */
+async function lerGradeHistorico(page, timeoutMs = 30000) {
   const grade = page.locator('table[id*="grdHistLances"]').first();
   await grade.waitFor({ state: 'visible', timeout: timeoutMs });
   const linhas = await grade.locator('tr').evaluateAll((trs) =>
@@ -54,6 +59,28 @@ async function lerHistorico(page, timeoutMs = 30000) {
     .filter((l) => /^\d+$/.test(l.protocolo || '')); // ignora linha de paginação
 }
 
+/** Abre o Histórico e lê a grade. Chamado no dry-run só DEPOIS do screenshot. */
+async function lerHistorico(page, timeoutMs = 30000) {
+  await abrirHistorico(page, timeoutMs);
+  return lerGradeHistorico(page, timeoutMs);
+}
+
+/**
+ * Reimprime o comprovante de um protocolo: botão de imagem input[id$="srcPrint"] da linha na
+ * grade. Descoberto em 2026-09-15: navega na mesma aba para CONCM/frmConCmNewconReports.aspx
+ * (o mesmo visualizador Stimulsoft do lance). Depois, use newcon.downloadReportPdf().
+ */
+async function reimprimirProtocolo(page, protocolo, timeoutMs = 30000) {
+  if (!/^\d+$/.test(String(protocolo || ''))) throw new Error(`protocolo inválido: ${protocolo}`);
+  const grade = page.locator('table[id*="grdHistLances"]').first();
+  const linha = grade.locator('tr').filter({ has: page.locator('td', { hasText: new RegExp(`^\\s*${protocolo}\\s*$`) }) }).first();
+  const botao = linha.locator('input[id$="srcPrint"]').first();
+  if (!(await botao.count())) throw new Error(`botão de reimprimir não encontrado para o protocolo ${protocolo}`);
+  await Promise.all([page.waitForURL(/frmConCmNewconReports\.aspx/i, { timeout: timeoutMs }), botao.click()]);
+  await page.locator('iframe[id*="StiWebRelatorio"]').first().waitFor({ state: 'attached', timeout: timeoutMs });
+  await page.waitForLoadState('networkidle', { timeout: timeoutMs }).catch(() => {});
+}
+
 /** Lances já registrados na assembleia atual, para o aviso da revisão. */
 function resumirHistorico(linhas, assembleiaData) {
   const desta = assembleiaData ? linhas.filter((l) => l.assembleia === assembleiaData) : [];
@@ -65,4 +92,4 @@ function resumirHistorico(linhas, assembleiaData) {
   };
 }
 
-module.exports = { lerDadosCredenciamento, lerHistorico, resumirHistorico };
+module.exports = { lerDadosCredenciamento, abrirHistorico, lerGradeHistorico, lerHistorico, reimprimirProtocolo, resumirHistorico };

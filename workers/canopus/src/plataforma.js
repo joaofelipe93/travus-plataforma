@@ -97,6 +97,38 @@ class Plataforma {
     throw this._falha(caminho, r);
   }
 
+  /** Lance real: grava confirmacao_iniciada. Só clique em Confirmar se voltar { ok: true }. */
+  async marcarConfirmacaoIniciada(execucaoCotaId, { assembleia_data }) {
+    const caminho = `/internal/execucao-cotas/${execucaoCotaId}/confirmacao-iniciada`;
+    const r = await this._post(caminho, { corpo: { assembleia_data } });
+    if (r.status === 204) return { ok: true };
+    if (r.status === 409 || r.status === 422) return this._conflito(r);
+    throw this._falha(caminho, r);
+  }
+
+  async concluirConfirmacao(execucaoCotaId, conclusao) {
+    const caminho = `/internal/execucao-cotas/${execucaoCotaId}/concluir-confirmacao`;
+    const r = await this._post(caminho, { corpo: conclusao });
+    if (r.status === 204) return { ok: true };
+    if (r.status === 409 || r.status === 422) return this._conflito(r);
+    throw this._falha(caminho, r);
+  }
+
+  async concluirReimpressao(execucaoCotaId, conclusao) {
+    const caminho = `/internal/execucao-cotas/${execucaoCotaId}/concluir-reimpressao`;
+    const r = await this._post(caminho, { corpo: conclusao });
+    if (r.status === 204) return { ok: true };
+    if (r.status === 409 || r.status === 422) return this._conflito(r);
+    throw this._falha(caminho, r);
+  }
+
+  async enviarPdf(execucaoCotaId, arquivo) {
+    const caminho = `/internal/execucao-cotas/${execucaoCotaId}/pdf`;
+    const r = await this._post(caminho, { bruto: fs.readFileSync(arquivo), contentType: 'application/pdf' });
+    if (r.status === 201) return r.dados.id;
+    throw this._falha(caminho, r);
+  }
+
   async finalizar(execucaoId, erro) {
     const caminho = `/internal/execucoes/${execucaoId}/finalizar`;
     const r = await this._post(caminho, { corpo: erro ? { erro } : {} });

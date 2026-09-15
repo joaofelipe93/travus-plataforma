@@ -19,6 +19,8 @@ class Registro {
     this.fila = [];
     this.cotaAtual = null;
     this.parar = false;
+    // Diálogos JS do Newcon desta execução (avisos de prazo, protocolo, parcelas em atraso).
+    this.dialogos = [];
   }
 
   definirCota(execucaoCotaId) {
@@ -33,6 +35,7 @@ class Registro {
       // Diálogo JS do Newcon (aceito automaticamente pelo NewconClient).
       texto = `Aviso do Newcon (${extra.type}): ${extra.message}`;
       nivelApi = 'aviso';
+      this.dialogos.push({ tipo: extra.type, mensagem: String(extra.message || ''), cota: this.cotaAtual });
     } else if (Object.keys(visiveis).length) {
       texto += ' ' + Object.entries(visiveis).map(([k, v]) => `${k}=${typeof v === 'string' ? v : JSON.stringify(v)}`).join(' ');
     }
