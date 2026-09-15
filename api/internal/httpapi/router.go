@@ -3,10 +3,12 @@ package httpapi
 
 import (
 	"context"
+	"crypto/x509"
 	"log/slog"
 	"net/http"
 	"runtime/debug"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -47,6 +49,8 @@ type Config struct {
 	// Cifra segredos de integrações (token do Google). Sem cofre, não há envio ao Drive.
 	Cofre  *cripto.Cofre
 	Google ConfigGoogle
+	// Alertas por e-mail e monitor externo (vigia.go).
+	Vigia ConfigVigia
 }
 
 type Servidor struct {
@@ -69,15 +73,29 @@ type Servidor struct {
 	driveCliente  drive.Enviador
 	driveVersao   time.Time
 	avisouDrive   string
+
+	// Vigia: início da API, último contato do worker (UnixNano) e alertas já avisados.
+	inicio              time.Time
+	ultimoContatoWorker atomic.Int64
+	vigiaMu             sync.Mutex
+	alertas             map[string]*alertaAtivo
+	vigiaRaizes         *x509.CertPool
 }
 
 func NovoServidor(cfg Config, pool *pgxpool.Pool) *Servidor {
 	if cfg.ValidadeDryRun == 0 {
 		cfg.ValidadeDryRun = 2 * time.Hour
 	}
+	if cfg.Vigia.Intervalo == 0 {
+		cfg.Vigia.Intervalo = 5 * time.Minute
+	}
+	if cfg.Vigia.LimiteDisco == 0 {
+		cfg.Vigia.LimiteDisco = 0.8
+	}
 	return &Servidor{
 		cfg: cfg, pool: pool, q: db.New(pool), ping: pool, hub: NovoHub(pool), agora: time.Now,
 		encerrando: make(chan struct{}), acordarDrive: make(chan struct{}, 1),
+		inicio: time.Now(), alertas: map[string]*alertaAtivo{},
 	}
 }
 
@@ -86,11 +104,12 @@ func (s *Servidor) Encerrar() {
 	s.encerrarUmaVez.Do(func() { close(s.encerrando) })
 }
 
-// RodarTarefasDeFundo: escuta de eventos para o SSE, limpeza de screenshots vencidos e
-// envio de comprovantes ao Google Drive.
+// RodarTarefasDeFundo: escuta de eventos para o SSE, limpeza de screenshots vencidos,
+// envio de comprovantes ao Google Drive e vigia (alertas).
 func (s *Servidor) RodarTarefasDeFundo(ctx context.Context) {
 	go s.hub.Rodar(ctx)
 	go s.rodarFilaDrive(ctx)
+	go s.rodarVigia(ctx)
 	go func() {
 		t := time.NewTicker(time.Hour)
 		defer t.Stop()

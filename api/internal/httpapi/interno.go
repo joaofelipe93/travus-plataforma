@@ -73,6 +73,8 @@ func (s *Servidor) exigirTokenWorker(h http.Handler) http.Handler {
 			responderErro(w, http.StatusUnauthorized, "token de serviço inválido")
 			return
 		}
+		// O vigia avisa quando o worker fica sem falar com a API.
+		s.ultimoContatoWorker.Store(s.agora().UnixNano())
 		h.ServeHTTP(w, r)
 	})
 }

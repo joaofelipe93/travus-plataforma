@@ -56,10 +56,15 @@ func main() {
 			fmt.Fprintln(os.Stderr, "erro:", err)
 			os.Exit(1)
 		}
+	case "alerta":
+		if err = alertaCLI(os.Args[2:]); err != nil {
+			fmt.Fprintln(os.Stderr, "erro:", err)
+			os.Exit(1)
+		}
 	case "healthcheck":
 		err = healthcheck()
 	default:
-		err = fmt.Errorf("comando desconhecido %q (use serve, migrate, usuario, google ou healthcheck)", cmd)
+		err = fmt.Errorf("comando desconhecido %q (use serve, migrate, usuario, google, alerta ou healthcheck)", cmd)
 	}
 	if err != nil {
 		slog.Error("encerrando com erro", "comando", cmd, "erro", err)
@@ -112,6 +117,14 @@ func serve() error {
 			ClientSecret: os.Getenv("GOOGLE_CLIENT_SECRET"),
 			PastaDrive:   os.Getenv("GOOGLE_DRIVE_PASTA_ID"),
 		},
+		Vigia: httpapi.ConfigVigia{
+			PingURL:         os.Getenv("VIGIA_PING_URL"),
+			BackupDir:       os.Getenv("VIGIA_BACKUP_DIR"),
+			CertificadoHost: os.Getenv("VIGIA_CERTIFICADO"),
+		},
+	}
+	if email := smtpDoAmbiente(); email.Configurado() {
+		cfg.Vigia.Email = email
 	}
 	servidor := httpapi.NovoServidor(cfg, pool)
 	servidor.RodarTarefasDeFundo(ctx)
@@ -128,7 +141,10 @@ func serve() error {
 		Handler:           servidor.RotasInternas(),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
-	slog.Info("configuração", "app_origin", cfg.AppOrigin, "cookie_secure", cfg.CookieSecure, "lance_real_habilitado", cfg.LanceRealHabilitado, "drive_configurado", cfg.Google.ClientID != "" && cfg.Google.PastaDrive != "")
+	slog.Info("configuração", "app_origin", cfg.AppOrigin, "cookie_secure", cfg.CookieSecure, "lance_real_habilitado", cfg.LanceRealHabilitado,
+		"drive_configurado", cfg.Google.ClientID != "" && cfg.Google.PastaDrive != "",
+		"alertas_por_email", cfg.Vigia.Email != nil, "monitor_externo", cfg.Vigia.PingURL != "",
+		"vigia_backup", cfg.Vigia.BackupDir != "", "vigia_certificado", cfg.Vigia.CertificadoHost)
 
 	errc := make(chan error, 2)
 	for _, srv := range []*http.Server{publico, interno} {
