@@ -1,7 +1,8 @@
-# Travus Plataforma: ambiente local.
+# Travus Plataforma: ambiente local e base da produção (docker-compose.prod.yml por cima).
 #   make up              sobe traefik, postgres, migrações, api, web e worker
 #   make usuario args=…  cria/lista/desativa usuários (não há cadastro público)
 #   make test            testes (api com Postgres, web, worker)
+#   make backup          backup do Postgres agora (em deploy/backups)
 #   make worker-dry-run  script legado: dry-run de 1 cota da planilha (nunca confirma lance)
 #
 # Sem o Makefile: cd deploy && docker compose up -d --build
@@ -11,12 +12,19 @@
 # Só ligue quando o usuário pedir o lance real, na hora.
 name: travus
 
+# Logs do Docker com rotação (em produção, o disco da VM não enche).
+x-logs: &logs
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "5"
+
 x-api: &api-base
   build: ../api
   image: travus/api:dev
   environment:
     DATABASE_URL: postgres://${POSTGRES_USER:-travus}:${POSTGRES_PASSWORD:?defina POSTGRES_PASSWORD em deploy/.env}@postgres:5432/${POSTGRES_DB:-travus}?sslmode=disable
-    APP_ORIGIN: http://app.localhost
+    APP_ORIGIN: ${APP_ORIGIN:-http://app.localhost}
     WORKER_TOKEN: ${WORKER_TOKEN:?defina WORKER_TOKEN em deploy/.env (make up gera)}
     CHAVE_CRIPTOGRAFIA: ${CHAVE_CRIPTOGRAFIA:?defina CHAVE_CRIPTOGRAFIA em deploy/.env (make up gera)}
     LANCE_REAL_HABILITADO: ${LANCE_REAL_HABILITADO:-false}
@@ -24,7 +32,16 @@ x-api: &api-base
     GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
     GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
     GOOGLE_DRIVE_PASTA_ID: ${GOOGLE_DRIVE_PASTA_ID:-}
+    # Alertas por e-mail (vigia da API). Sem SMTP_HOST, os alertas só vão para o log.
+    SMTP_HOST: ${SMTP_HOST:-}
+    SMTP_PORTA: ${SMTP_PORTA:-587}
+    SMTP_USUARIO: ${SMTP_USUARIO:-}
+    SMTP_SENHA: ${SMTP_SENHA:-}
+    ALERTA_DE: ${ALERTA_DE:-}
+    ALERTA_PARA: ${ALERTA_PARA:-}
+    VIGIA_PING_URL: ${VIGIA_PING_URL:-}
     TZ: America/Sao_Paulo
+  logging: *logs
   mem_limit: 256m
 
 services:
@@ -40,9 +57,9 @@ services:
       - ./traefik:/etc/traefik:ro
     networks:
       borda:
-        # Dentro da rede, api.localhost e app.localhost também apontam para o gateway:
+        # Dentro da rede, os domínios do app e da API também apontam para o gateway:
         # assim o Next.js (lado servidor) chama a API passando pelo Traefik.
-        aliases: [api.localhost, app.localhost]
+        aliases: ["${DOMINIO_API:-api.localhost}", "${DOMINIO_APP:-app.localhost}"]
     healthcheck:
       test: ["CMD", "traefik", "healthcheck", "--ping"]
       interval: 10s
@@ -50,10 +67,11 @@ services:
       retries: 5
     labels:
       - traefik.enable=true
-      # Dashboard só no ambiente local.
+      # Dashboard só no ambiente local (a produção desliga).
       - traefik.http.routers.dashboard.rule=Host(`traefik.localhost`)
       - traefik.http.routers.dashboard.entrypoints=web
       - traefik.http.routers.dashboard.service=api@internal
+    logging: *logs
     mem_limit: 128m
 
   postgres:
@@ -72,6 +90,7 @@ services:
       interval: 5s
       timeout: 3s
       retries: 10
+    logging: *logs
     mem_limit: 512m
 
   # Aplica as migrações e termina; a api só sobe depois que ela sai com sucesso.
@@ -102,21 +121,21 @@ services:
     labels:
       - traefik.enable=true
       - traefik.http.services.api.loadbalancer.server.port=8080
-      # Navegador: app.localhost/api/... (mesma origem do app, cookie SameSite=Strict).
-      - traefik.http.routers.app-api-health.rule=Host(`app.localhost`) && Path(`/api/health`)
+      # Navegador: app.<domínio>/api/... (mesma origem do app, cookie SameSite=Strict).
+      - traefik.http.routers.app-api-health.rule=Host(`${DOMINIO_APP:-app.localhost}`) && Path(`/api/health`)
       - traefik.http.routers.app-api-health.priority=100
       - traefik.http.routers.app-api-health.middlewares=remover-prefixo-api@file,limite-api@file,cabecalhos-seguranca@file
-      - traefik.http.routers.app-api-login.rule=Host(`app.localhost`) && Path(`/api/auth/login`)
+      - traefik.http.routers.app-api-login.rule=Host(`${DOMINIO_APP:-app.localhost}`) && Path(`/api/auth/login`)
       - traefik.http.routers.app-api-login.priority=100
       - traefik.http.routers.app-api-login.middlewares=remover-prefixo-api@file,limite-login@file,cabecalhos-seguranca@file
-      - traefik.http.routers.app-api.rule=Host(`app.localhost`) && PathPrefix(`/api/`)
+      - traefik.http.routers.app-api.rule=Host(`${DOMINIO_APP:-app.localhost}`) && PathPrefix(`/api/`)
       - traefik.http.routers.app-api.priority=50
       - traefik.http.routers.app-api.middlewares=sessao-api@file,remover-prefixo-api@file,limite-api@file,cabecalhos-seguranca@file
-      # Ferramentas e, no futuro, o agente de IA: api.localhost/... (tudo protegido menos /health).
-      - traefik.http.routers.api-health.rule=Host(`api.localhost`) && Path(`/health`)
+      # Ferramentas e, no futuro, o agente de IA: api.<domínio>/... (tudo protegido menos /health).
+      - traefik.http.routers.api-health.rule=Host(`${DOMINIO_API:-api.localhost}`) && Path(`/health`)
       - traefik.http.routers.api-health.priority=100
       - traefik.http.routers.api-health.middlewares=limite-api@file,cabecalhos-seguranca@file
-      - traefik.http.routers.api.rule=Host(`api.localhost`)
+      - traefik.http.routers.api.rule=Host(`${DOMINIO_API:-api.localhost}`)
       - traefik.http.routers.api.priority=10
       - traefik.http.routers.api.middlewares=sessao-api@file,limite-api@file,cabecalhos-seguranca@file
 
@@ -126,7 +145,7 @@ services:
     restart: unless-stopped
     environment:
       # Chamadas do lado servidor passam pelo gateway (alias de rede do Traefik).
-      API_INTERNAL_URL: http://api.localhost
+      API_INTERNAL_URL: http://${DOMINIO_API:-api.localhost}
     depends_on:
       traefik:
         condition: service_healthy
@@ -143,13 +162,14 @@ services:
       - traefik.enable=true
       - traefik.http.services.web.loadbalancer.server.port=3000
       # Sem sessão: só a tela de login e os arquivos estáticos do Next.
-      - traefik.http.routers.web-publico.rule=Host(`app.localhost`) && (Path(`/login`) || PathPrefix(`/_next/`) || Path(`/favicon.ico`) || Path(`/robots.txt`))
+      - traefik.http.routers.web-publico.rule=Host(`${DOMINIO_APP:-app.localhost}`) && (Path(`/login`) || PathPrefix(`/_next/`) || Path(`/favicon.ico`) || Path(`/robots.txt`))
       - traefik.http.routers.web-publico.priority=40
       - traefik.http.routers.web-publico.middlewares=cabecalhos-seguranca@file
       # Todo o resto do app exige sessão (sem sessão → /login).
-      - traefik.http.routers.web.rule=Host(`app.localhost`)
+      - traefik.http.routers.web.rule=Host(`${DOMINIO_APP:-app.localhost}`)
       - traefik.http.routers.web.priority=1
       - traefik.http.routers.web.middlewares=sessao-pagina@file,cabecalhos-seguranca@file
+    logging: *logs
     mem_limit: 384m
 
   # Worker Canopus: pega execuções da fila na API interna (dry-run, reimpressão e, só com
@@ -178,9 +198,35 @@ services:
     stop_grace_period: 90s
     shm_size: 1gb
     networks: [interna]
+    logging: *logs
     mem_limit: 1536m
 
-  # Comandos da API: make usuario args='criar …', make google-token, make google-status.
+  # Backup do Postgres (deploy/backup/backup.sh). Aqui só roda quando chamado (make backup,
+  # make restaurar-teste); em produção, o docker-compose.prod.yml o deixa ligado, um por dia.
+  backup:
+    image: postgres:18.6-alpine
+    profiles: [backup]
+    user: "${HOST_UID:-1000}:${HOST_GID:-1000}"
+    entrypoint: ["sh", "/backup/backup.sh"]
+    command: ["agora"]
+    environment:
+      PGHOST: postgres
+      PGUSER: ${POSTGRES_USER:-travus}
+      PGPASSWORD: ${POSTGRES_PASSWORD:?defina POSTGRES_PASSWORD em deploy/.env}
+      PGDATABASE: ${POSTGRES_DB:-travus}
+      BACKUP_HORA: ${BACKUP_HORA:-3}
+      TZ: America/Sao_Paulo
+    volumes:
+      - ./backup:/backup:ro
+      - ${BACKUP_DIR:-./backups}:/backups
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks: [interna]
+    logging: *logs
+    mem_limit: 256m
+
+  # Comandos da API: make usuario args='criar …', make google-token, make alerta-teste.
   cli:
     <<: *api-base
     profiles: [cli]

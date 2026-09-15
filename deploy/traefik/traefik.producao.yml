@@ -1,0 +1,54 @@
+# Configuração estática do Traefik em produção. O docker-compose.prod.yml a monta por cima
+# do traefik.yml. Rotas continuam nas labels; middlewares, em dinamico.yml.
+
+entryPoints:
+  web:
+    address: ":80"
+    http:
+      # Tudo em HTTP vai para HTTPS (o desafio HTTP-01 do Let's Encrypt continua passando).
+      redirections:
+        entryPoint:
+          to: websecure
+          scheme: https
+          permanent: true
+  websecure:
+    address: ":443"
+    http:
+      tls: {}
+  # Interno (não publicado): só o ping do healthcheck.
+  traefik:
+    address: ":8080"
+
+providers:
+  docker:
+    exposedByDefault: false
+    network: travus_borda
+  file:
+    filename: /etc/traefik/dinamico.yml
+    watch: true
+
+# Sem "api": nada de dashboard em produção.
+
+ping:
+  entryPoint: traefik
+
+# O resolvedor de cada rota vem de CERT_RESOLVER (labels no docker-compose.prod.yml).
+certificatesResolvers:
+  le:
+    acme:
+      storage: /letsencrypt/acme.json
+      httpChallenge:
+        entryPoint: web
+  # Ambiente de testes do Let's Encrypt: certificado não confiável, sem limite de emissão.
+  # Use no primeiro deploy e troque para "le" quando o DNS e as rotas estiverem certos.
+  le-teste:
+    acme:
+      caServer: https://acme-staging-v02.api.letsencrypt.org/directory
+      storage: /letsencrypt/acme-teste.json
+      httpChallenge:
+        entryPoint: web
+
+log:
+  level: INFO
+
+accessLog: {}

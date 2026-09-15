@@ -40,6 +40,8 @@ http:
 
     cabecalhos-seguranca:
       headers:
+        # HSTS: o Traefik só manda em HTTPS (em produção); no localhost em HTTP não aparece.
+        stsSeconds: 31536000
         frameDeny: true
         contentTypeNosniff: true
         referrerPolicy: strict-origin-when-cross-origin
