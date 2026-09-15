@@ -63,6 +63,18 @@ func (e PerfilUsuario) Valid() bool {
 	return false
 }
 
+type Arquivo struct {
+	ID          string
+	Tipo        string
+	Nome        string
+	ContentType string
+	Tamanho     int32
+	Sha256      string
+	Conteudo    []byte
+	CriadoEm    time.Time
+	ExpiraEm    *time.Time
+}
+
 type Auditoria struct {
 	ID         int64
 	UsuarioID  *int64
@@ -99,6 +111,53 @@ type Cota struct {
 	ImportacaoID     *int64
 	CriadoEm         time.Time
 	AtualizadoEm     time.Time
+}
+
+type ExecucaoCota struct {
+	ID           int64
+	ExecucaoID   int64
+	CotaID       int64
+	Ordem        int32
+	Grupo        string
+	Cota         string
+	Versao       string
+	ClienteNome  string
+	Modalidade   string
+	Status       string
+	ErroTipo     *string
+	Erro         *string
+	Detalhes     []byte
+	ScreenshotID *string
+	Tentativas   int32
+	IniciadaEm   *time.Time
+	FinalizadaEm *time.Time
+}
+
+type ExecucaoEvento struct {
+	ID             int64
+	ExecucaoID     int64
+	ExecucaoCotaID *int64
+	Nivel          string
+	Mensagem       string
+	Dados          []byte
+	CriadoEm       time.Time
+}
+
+type Execuco struct {
+	ID                     int64
+	Tipo                   string
+	Status                 string
+	Credencial             string
+	CriadaPor              int64
+	AprovadaPor            *int64
+	CancelamentoSolicitado bool
+	CanceladaPor           *int64
+	Worker                 *string
+	TravaAte               *time.Time
+	Erro                   *string
+	CriadaEm               time.Time
+	IniciadaEm             *time.Time
+	FinalizadaEm           *time.Time
 }
 
 type Importacao struct {
