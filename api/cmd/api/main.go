@@ -18,6 +18,8 @@ import (
 	"strings"
 	"syscall"
 	"time"
+	// Fusos horários embutidos: a imagem distroless não tem /usr/share/zoneinfo (TZ no compose).
+	_ "time/tzdata"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	_ "github.com/jackc/pgx/v5/stdlib"

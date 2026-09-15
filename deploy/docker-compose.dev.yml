@@ -1,0 +1,18 @@
+# Web em modo desenvolvimento (next dev com recarga automática), atrás do mesmo Traefik.
+#   make dev-web   (volta ao normal com make up)
+# Usa a imagem Debian (glibc) porque o node_modules vem do host.
+services:
+  web:
+    image: node:24.21.0-bookworm-slim
+    build: !reset null
+    working_dir: /app
+    command: ["npm", "run", "dev", "--", "--hostname", "0.0.0.0", "--port", "3000"]
+    user: "${HOST_UID:-1000}:${HOST_GID:-1000}"
+    environment:
+      HOME: /tmp
+      NEXT_TELEMETRY_DISABLED: "1"
+    volumes:
+      - ../web:/app
+    healthcheck:
+      start_period: 60s
+    mem_limit: 1g

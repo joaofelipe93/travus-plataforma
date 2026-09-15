@@ -1,12 +1,37 @@
 # Middlewares compartilhados. Use nas labels como "<nome>@file".
 http:
   middlewares:
+    # Barreira de sessão no gateway. A API responde 204 (libera) ou 401.
+    sessao-api:
+      forwardAuth:
+        address: http://api:8080/auth/verificar
+        authRequestHeaders: ["Cookie"]
+
+    # Mesma checagem para páginas do app: sem sessão, redireciona para /login.
+    sessao-pagina:
+      forwardAuth:
+        address: http://api:8080/auth/verificar?modo=pagina
+        authRequestHeaders: ["Cookie"]
+        preserveLocationHeader: true
+
+    # O navegador chama app.<domínio>/api/...; a API não conhece o prefixo.
+    remover-prefixo-api:
+      stripPrefix:
+        prefixes: ["/api"]
+
     # Limite por IP de origem para a API.
     limite-api:
       rateLimit:
         average: 20
         period: 1s
         burst: 50
+
+    # Tentativas de login: 10 por minuto por IP.
+    limite-login:
+      rateLimit:
+        average: 10
+        period: 1m
+        burst: 10
 
     cabecalhos-seguranca:
       headers:

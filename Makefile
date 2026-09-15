@@ -6,7 +6,7 @@ export HOST_UID := $(shell id -u)
 export HOST_GID := $(shell id -g)
 
 .DEFAULT_GOAL := help
-.PHONY: help up down logs ps migrate test worker-dry-run
+.PHONY: help up down logs ps migrate usuario test smoke sqlc paridade-csv worker-dry-run
 
 help: ## Lista os comandos
 	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  make %-16s %s\n", $$1, $$2}'
@@ -27,11 +27,29 @@ ps: ## Estado dos containers
 migrate: deploy/.env ## Aplica as migrações pendentes
 	$(COMPOSE) run --rm --build migrate
 
-test: ## Testes e checagens: api (go), web (lint e tipos), worker (sintaxe)
-	cd api && go vet ./... && go test ./...
+usuario: deploy/.env ## Usuários: make usuario args='criar --email a@b.com --nome "Ana" --perfil operador' (ou listar, senha, desativar, ativar)
+	$(COMPOSE) --profile cli run --rm --build cli $(args)
+
+test: deploy/.env ## Testes: api (unitários e integração com Postgres), web (lint e tipos), worker (sintaxe)
+	$(COMPOSE) up -d --wait postgres
+	$(COMPOSE) --profile teste run --rm api-teste
 	cd web && npm run lint && npx next typegen && npx tsc --noEmit
 	cd workers/canopus && for f in src/*.js; do node --check "$$f" || exit 1; done
 	sh -n workers/canopus/docker-entrypoint.sh
+
+dev-web: deploy/.env ## Web em modo desenvolvimento (next dev) atrás do Traefik; make up volta ao normal
+	cd web && npm ci --no-audit --no-fund
+	$(COMPOSE) -f deploy/docker-compose.dev.yml up -d --wait web
+	@echo "Web em modo dev: http://app.localhost (logs: make logs s=web)"
+
+smoke: ## Checagens pelo gateway com curl (precisa de make up)
+	bash tools/smoke/etapa1.sh
+
+sqlc: ## Gera api/internal/db a partir das migrações e das consultas
+	docker run --rm --user "$$(id -u):$$(id -g)" -v "$(CURDIR)/api":/src -w /src sqlc/sqlc:1.31.1 generate
+
+paridade-csv: ## Regera o esperado do teste de paridade rodando o csv.js original
+	node tools/paridade-csv/gerar-esperado.js
 
 worker-dry-run: deploy/.env ## Dry-run de 1 cota no container do worker (não confirma lance)
 	mkdir -p deploy/data/canopus
