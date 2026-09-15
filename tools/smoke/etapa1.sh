@@ -95,6 +95,14 @@ if [[ -n "$IMPORTACAO" ]]; then
   esperar "descartar a prévia fictícia" 200 "$(codigo -X POST -H "Cookie: $OPERADOR_COOKIE" -H "Origin: $APP" -H "X-CSRF-Token: $OPERADOR_CSRF" "$APP/api/importacoes/$IMPORTACAO/descartar")"
 fi
 
+echo "== Execuções (sem criar dry-run: isso faria o worker entrar no Newcon)"
+esperar "GET app.localhost/api/execucoes (leitura)" 200 "$(codigo -H "Cookie: $LEITURA_COOKIE" "$APP/api/execucoes")"
+esperar "POST execução (leitura)" 403 "$(codigo -H "Cookie: $LEITURA_COOKIE" -H "Origin: $APP" -H "X-CSRF-Token: $LEITURA_CSRF" -H 'Content-Type: application/json' -d '{"tipo":"dry_run","cota_ids":[1]}' "$APP/api/execucoes")"
+esperar "POST execução real (operador, recusada)" 422 "$(codigo -H "Cookie: $OPERADOR_COOKIE" -H "Origin: $APP" -H "X-CSRF-Token: $OPERADOR_CSRF" -H 'Content-Type: application/json' -d '{"tipo":"real","cota_ids":[1]}' "$APP/api/execucoes")"
+esperar "rota interna do worker pelo gateway (com sessão)" 404 "$(codigo -X POST -H "Cookie: $OPERADOR_COOKIE" -H "Origin: $APP" -H "X-CSRF-Token: $OPERADOR_CSRF" "$APP/api/internal/tarefas/proxima")"
+esperar "rota interna do worker em api.localhost" 401 "$(codigo -X POST "$API/internal/tarefas/proxima")"
+esperar "porta interna 8081 no host" 000 "$(codigo -m 3 -X POST http://localhost:8081/internal/tarefas/proxima)"
+
 echo "== Logout"
 esperar "POST logout (leitura)" 204 "$(codigo -X POST -H "Cookie: $LEITURA_COOKIE" -H "Origin: $APP" -H "X-CSRF-Token: $LEITURA_CSRF" "$APP/api/auth/logout")"
 esperar "POST logout (operador)" 204 "$(codigo -X POST -H "Cookie: $OPERADOR_COOKIE" -H "Origin: $APP" -H "X-CSRF-Token: $OPERADOR_CSRF" "$APP/api/auth/logout")"

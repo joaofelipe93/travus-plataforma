@@ -1,11 +1,11 @@
 # Travus Plataforma: ambiente local.
-#   make up              sobe traefik, postgres, migrações, api e web
+#   make up              sobe traefik, postgres, migrações, api, web e worker
 #   make usuario args=…  cria/lista/desativa usuários (não há cadastro público)
 #   make test            testes (api com Postgres, web, worker)
-#   make worker-dry-run  dry-run de 1 cota no container do worker (nunca confirma lance)
+#   make worker-dry-run  script legado: dry-run de 1 cota da planilha (nunca confirma lance)
 #
 # Sem o Makefile: cd deploy && docker compose up -d --build
-# (as variáveis vêm de deploy/.env; copie de .env.example e troque a senha)
+# (as variáveis vêm de deploy/.env: POSTGRES_* e WORKER_TOKEN; veja .env.example)
 name: travus
 
 x-api: &api-base
@@ -14,6 +14,7 @@ x-api: &api-base
   environment:
     DATABASE_URL: postgres://${POSTGRES_USER:-travus}:${POSTGRES_PASSWORD:?defina POSTGRES_PASSWORD em deploy/.env}@postgres:5432/${POSTGRES_DB:-travus}?sslmode=disable
     APP_ORIGIN: http://app.localhost
+    WORKER_TOKEN: ${WORKER_TOKEN:?defina WORKER_TOKEN em deploy/.env (make up gera)}
     TZ: America/Sao_Paulo
   mem_limit: 256m
 
@@ -81,7 +82,8 @@ services:
     depends_on:
       migrate:
         condition: service_completed_successfully
-    # Sem "ports": a API só é alcançável pelo Traefik.
+    # Sem "ports". 8080: pública, só pelo Traefik. 8081: rotas do worker, sem rota no
+    # Traefik (só a rede interna alcança).
     networks: [borda, interna]
     healthcheck:
       test: ["CMD", "/api", "healthcheck"]
@@ -141,6 +143,32 @@ services:
       - traefik.http.routers.web.middlewares=sessao-pagina@file,cabecalhos-seguranca@file
     mem_limit: 384m
 
+  # Worker Canopus: pega execuções da fila na API interna. Etapa 2: só dry-run (não há
+  # código de confirmar). Fora do Traefik; só na rede interna (precisa de saída para o Newcon).
+  worker-canopus:
+    build: ../workers/canopus
+    image: travus/worker-canopus:dev
+    restart: unless-stopped
+    command: ["node", "src/worker.js"]
+    env_file:
+      - path: ../workers/canopus/.env
+        required: false
+    environment:
+      HOME: /tmp
+      HEADFUL: "false"
+      API_INTERNA_URL: http://api:8081
+      WORKER_TOKEN: ${WORKER_TOKEN:?defina WORKER_TOKEN em deploy/.env (make up gera)}
+      WORKER_NOME: canopus-1
+      TZ: America/Sao_Paulo
+    depends_on:
+      api:
+        condition: service_healthy
+    # Ao desligar, termina a cota atual antes de sair.
+    stop_grace_period: 90s
+    shm_size: 1gb
+    networks: [interna]
+    mem_limit: 1536m
+
   # Comando de usuários: make usuario args='criar --email … --nome "…" --perfil operador'
   cli:
     <<: *api-base
@@ -171,9 +199,9 @@ services:
         condition: service_healthy
     networks: [interna]
 
-  # Etapa 0: script legado em dry-run, só com `--profile canopus` (make worker-dry-run),
-  # para o `up` não fazer login no Newcon. Fora do Traefik. O entrypoint bloqueia --confirm.
-  worker-canopus:
+  # Script legado (Etapa 0) em dry-run, lendo a planilha: make worker-dry-run.
+  # O entrypoint bloqueia --confirm.
+  worker-legado:
     build: ../workers/canopus
     image: travus/worker-canopus:dev
     profiles: [canopus]
