@@ -65,7 +65,7 @@ type detalheExecucao struct {
 		CancelamentoSolicitado bool    `json:"cancelamento_solicitado"`
 		Erro                   *string `json:"erro"`
 	} `json:"execucao"`
-	Totais map[string]int      `json:"totais"`
+	Totais map[string]int     `json:"totais"`
 	Cotas  []cotaExecucaoJSON `json:"cotas"`
 }
 
@@ -198,7 +198,9 @@ func TestFluxoDryRunPeloWorker(t *testing.T) {
 		t.Fatalf("segunda execução começou em paralelo com a mesma credencial: %d", codigo)
 	}
 	c := tarefa.Cotas
-	rota := func(ec cotaExecucaoJSON, acao string) string { return fmt.Sprintf("/internal/execucao-cotas/%d/%s", ec.ID, acao) }
+	rota := func(ec cotaExecucaoJSON, acao string) string {
+		return fmt.Sprintf("/internal/execucao-cotas/%d/%s", ec.ID, acao)
+	}
 
 	esperarStatus(t, w1.post(rota(c[0], "iniciar"), nil), http.StatusNoContent, "iniciar cota 1")
 	esperarStatus(t, w1.post(rota(c[0], "iniciar"), nil), http.StatusConflict, "iniciar cota 1 de novo")
