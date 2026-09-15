@@ -103,6 +103,102 @@ export type Importacao = {
   previa: Previa;
 };
 
+export type StatusExecucao = "na_fila" | "em_andamento" | "concluida" | "concluida_com_erros" | "cancelada" | "falhou";
+
+export type StatusCotaExecucao =
+  | "pendente"
+  | "em_andamento"
+  | "verificada"
+  | "erro_antes_confirmar"
+  | "confirmacao_iniciada"
+  | "confirmada"
+  | "erro_apos_confirmar"
+  | "cancelada";
+
+export type ExecucaoResumo = {
+  id: number;
+  tipo: "dry_run" | "real";
+  status: StatusExecucao;
+  criada_por_nome: string;
+  criada_em: string;
+  iniciada_em: string | null;
+  finalizada_em: string | null;
+  cancelamento_solicitado: boolean;
+  erro: string | null;
+  total: number;
+  sucesso: number;
+  com_erro: number;
+  restantes: number;
+};
+
+export type LanceHistorico = {
+  protocolo: string;
+  assembleia: string;
+  credenciamento?: string | null;
+  modalidade?: string | null;
+  percentual?: string | null;
+};
+
+// Lido da tela de credenciamento e do Histórico pelo worker (só leitura).
+export type DetalhesCota = {
+  assembleia_data?: string | null;
+  assembleia_numero?: string | null;
+  percentual_segundo_fixo?: string | null;
+  ultimo_lance?: string | null;
+  historico_lido?: boolean;
+  lances_no_historico?: number;
+  lances_nesta_assembleia?: number;
+  lances?: LanceHistorico[];
+};
+
+export type CotaExecucao = {
+  id: number;
+  cota_id: number;
+  ordem: number;
+  grupo: string;
+  cota: string;
+  versao: string;
+  cliente_nome: string;
+  modalidade: string;
+  status: StatusCotaExecucao;
+  erro_tipo: "conhecido" | "inesperado" | null;
+  erro: string | null;
+  detalhes: DetalhesCota;
+  screenshot_id: string | null;
+  tentativas: number;
+  iniciada_em: string | null;
+  finalizada_em: string | null;
+};
+
+export type Execucao = {
+  id: number;
+  tipo: "dry_run" | "real";
+  status: StatusExecucao;
+  criada_por_nome: string;
+  criada_em: string;
+  iniciada_em: string | null;
+  finalizada_em: string | null;
+  cancelamento_solicitado: boolean;
+  cancelada_por_nome: string | null;
+  erro: string | null;
+  posicao_fila: number | null;
+};
+
+export type DetalheExecucao = {
+  execucao: Execucao;
+  totais: Partial<Record<StatusCotaExecucao, number>>;
+  cotas: CotaExecucao[];
+};
+
+export type EventoExecucao = {
+  id: number;
+  execucao_cota_id: number | null;
+  nivel: "info" | "ok" | "aviso" | "erro";
+  mensagem: string;
+  dados: Record<string, unknown>;
+  criado_em: string;
+};
+
 export type ImportacaoResumo = {
   id: number;
   status: StatusImportacao;

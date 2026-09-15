@@ -21,6 +21,7 @@ import type { Usuario } from "@/lib/tipos";
 import { cn } from "@/lib/utils";
 
 const links = [
+  { href: "/execucoes", rotulo: "Execuções", soEditores: false },
   { href: "/cotas", rotulo: "Cotas", soEditores: false },
   { href: "/clientes", rotulo: "Clientes", soEditores: false },
   { href: "/importar", rotulo: "Importar planilha", soEditores: true },
