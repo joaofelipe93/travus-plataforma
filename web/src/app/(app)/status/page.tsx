@@ -1,4 +1,5 @@
 import { connection } from "next/server";
+import { Badge } from "@/components/ui/badge";
 
 type Health = {
   status: string;
@@ -37,38 +38,38 @@ async function consultarHealth(): Promise<Consulta> {
 function Linha({ rotulo, children }: { rotulo: string; children: React.ReactNode }) {
   return (
     <div className="flex flex-col gap-0.5 py-2 sm:flex-row sm:gap-4">
-      <dt className="w-40 shrink-0 text-sm text-zinc-500">{rotulo}</dt>
+      <dt className="w-40 shrink-0 text-sm text-muted-foreground">{rotulo}</dt>
       <dd className="text-sm break-all">{children}</dd>
     </div>
   );
 }
 
-export default async function Home() {
+export default async function PaginaStatus() {
   // Renderiza a cada requisição (e lê API_INTERNAL_URL em tempo de execução, não no build).
   await connection();
   const consulta = await consultarHealth();
-
   const tudoOk = consulta.ok && consulta.httpStatus === 200 && consulta.corpo.via_gateway;
-  const selo = !consulta.ok
-    ? { texto: "sem resposta", cor: "bg-red-100 text-red-800 dark:bg-red-950 dark:text-red-200" }
-    : tudoOk
-      ? { texto: "ok", cor: "bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-200" }
-      : { texto: consulta.corpo.status, cor: "bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-200" };
 
   return (
-    <main className="mx-auto flex w-full max-w-2xl flex-1 flex-col gap-8 px-4 py-12 sm:py-20">
-      <header>
-        <p className="text-sm text-zinc-500">Etapa 0 · fundação</p>
-        <h1 className="text-3xl font-semibold tracking-tight">Travus Plataforma</h1>
-      </header>
+    <div className="flex max-w-2xl flex-col gap-6">
+      <div>
+        <h1 className="text-xl font-semibold tracking-tight">Status da plataforma</h1>
+        <p className="text-sm text-muted-foreground">Consulta feita agora, pelo servidor do app, passando pelo gateway.</p>
+      </div>
 
-      <section className="rounded-lg border border-black/10 bg-white p-5 dark:border-white/10 dark:bg-zinc-900">
+      <section className="rounded-lg border p-5">
         <div className="mb-3 flex items-center justify-between gap-4">
           <h2 className="font-medium">API pelo gateway</h2>
-          <span className={`rounded-full px-2.5 py-0.5 text-xs font-medium ${selo.cor}`}>{selo.texto}</span>
+          {!consulta.ok ? (
+            <Badge variant="destructive">sem resposta</Badge>
+          ) : tudoOk ? (
+            <Badge variant="secondary">ok</Badge>
+          ) : (
+            <Badge variant="outline">{consulta.corpo.status}</Badge>
+          )}
         </div>
 
-        <dl className="divide-y divide-black/5 dark:divide-white/5">
+        <dl className="divide-y">
           <Linha rotulo="Endereço consultado">
             <code className="font-mono">{consulta.url}</code>
           </Linha>
@@ -87,13 +88,7 @@ export default async function Home() {
             <Linha rotulo="Erro">{consulta.erro}</Linha>
           )}
         </dl>
-
-        {consulta.ok && (
-          <pre className="mt-4 overflow-x-auto rounded-md bg-zinc-100 p-3 font-mono text-xs dark:bg-zinc-950">
-            {JSON.stringify(consulta.corpo, null, 2)}
-          </pre>
-        )}
       </section>
-    </main>
+    </div>
   );
 }
