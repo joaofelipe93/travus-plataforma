@@ -1,0 +1,163 @@
+# Produção (Etapa 4)
+
+Roteiro para colocar a Travus Plataforma numa VM e mantê-la. Decisões do usuário:
+
+- **VM**: DigitalOcean, 4 GB de RAM, Ubuntu 24.04, **dedicada** (nunca a `appairbnb`). O Newcon aceitou login a partir de IP da DigitalOcean (teste de 14/09/2026).
+- **Domínio**: a definir (`app.<domínio>` e `api.<domínio>`).
+- **Backup do Postgres**: na própria VM, com cópia manual para fora (`make backup-baixar`).
+- **Alertas**: e-mail (vigia da API) + monitor externo.
+
+Nada disso roda sem pedido: criar a VM, mexer no DNS, publicar e ligar o lance real são decisões do usuário, na hora.
+
+## Como está montado
+
+```
+sua máquina                                  VM (/opt/travus)
+make deploy VM=travus@<ip>  ── git archive ─► releases/<commit>/        (código, sem segredos)
+                            ── ssh ─────────► deploy/vm/publicar.sh <commit>
+                                                ├─ compartilhado/.env         (deploy/.env de produção)
+                                                ├─ compartilhado/canopus.env  (credenciais do Newcon)
+                                                ├─ docker compose -f docker-compose.yml -f docker-compose.prod.yml up
+                                                └─ atual → releases/<commit>
+                                              backups/ (diario, semanal, mensal)
+```
+
+- `deploy/docker-compose.prod.yml` vai por cima do compose local: Traefik nas portas 80 e 443, com o HTTP redirecionando; certificados do Let's Encrypt (`deploy/traefik/traefik.producao.yml`); HSTS; dashboard fechado; backup diário ligado; vigia com a pasta de backups e o certificado.
+- O deploy publica **só o que está commitado** (sem push para o GitHub) e **recusa** publicar com execução em andamento (`FORCAR=1` passa por cima).
+- Os segredos ficam só na VM, em `/opt/travus/compartilhado`, e são ligados a cada versão por link simbólico.
+
+## 1. Criar a VM (usuário)
+
+1. Droplet de 4 GB e 2 vCPU, **Ubuntu 24.04 LTS**, autenticação **por chave SSH** (sua chave pública), nome `travus-producao`.
+2. Opcional e pago: backups semanais da própria DigitalOcean. Os backups do Postgres ficam na mesma VM; se ela se perder, só sobra a última cópia baixada.
+3. Anote o IP. **Não use nem altere a VM `appairbnb`**: o `preparar.sh` para se encontrar o usuário `checkin` ou o PM2.
+
+## 2. Preparar a VM
+
+Na sua máquina, uma vez:
+
+```bash
+ssh root@<ip> 'bash -s' < deploy/vm/preparar.sh
+ssh travus@<ip>        # a partir daqui, root e senha estão bloqueados no SSH
+```
+
+O script instala Docker (repositório oficial, logs com rotação), firewall (22, 80, 443), fail2ban, atualizações automáticas de segurança, swap de 2 GB, fuso `America/Sao_Paulo`, o usuário `travus` (sudo, só chave) e as pastas em `/opt/travus`.
+
+Rede até o Newcon a partir da VM (sem login):
+
+```bash
+scp -r tools/teste-ip-vm travus@<ip>:/tmp/ && ssh travus@<ip> 'bash /tmp/teste-ip-vm/teste-ip.sh --sem-login'
+```
+
+## 3. DNS (usuário)
+
+Dois registros do tipo **A**, TTL 300: `app.<domínio>` e `api.<domínio>` → IP da VM. Confira com `dig +short app.<domínio>` antes do primeiro deploy (o Let's Encrypt precisa alcançar a VM pela porta 80).
+
+## 4. Segredos na VM
+
+**Credenciais do Newcon do worker** (só as três variáveis; a URL com essa caixa exata):
+
+```bash
+ssh travus@<ip> 'umask 077; cat > /opt/travus/compartilhado/canopus.env'
+# cole, depois Ctrl+D:
+# NEWCON_URL=https://cnp3.consorciocanopus.com.br/WWW/frmCorCcCnsLogin.aspx
+# NEWCON_USER=...
+# NEWCON_PASS=...
+```
+
+**deploy/.env de produção**: o primeiro `make deploy` cria `/opt/travus/compartilhado/.env` a partir de `deploy/.env.producao.example`, com senha do Postgres, `WORKER_TOKEN` e `CHAVE_CRIPTOGRAFIA` novos, e para. Então:
+
+```bash
+ssh -t travus@<ip> 'nano /opt/travus/compartilhado/.env'
+```
+
+- `DOMINIO_APP`, `DOMINIO_API`;
+- `CERT_RESOLVER=le-teste` no primeiro deploy (certificado de teste, sem limite de emissões);
+- `SMTP_*`, `ALERTA_DE`, `ALERTA_PARA` (Gmail: `smtp.gmail.com`, porta 587, senha de app);
+- `LANCE_REAL_HABILITADO=false`;
+- **copie a `CHAVE_CRIPTOGRAFIA` para o seu gerenciador de senhas**: sem ela, o token do Google no banco não decifra.
+
+## 5. Primeiro deploy
+
+```bash
+make deploy VM=travus@<ip>                                                   # cria o .env e para
+make deploy VM=travus@<ip>                                                   # sobe tudo
+make smoke-producao APP=app.<domínio> API=api.<domínio> INSEGURO=1            # certificado de teste
+```
+
+Com tudo verde, troque `CERT_RESOLVER=le` no `.env` da VM e publique de novo (o mesmo commit serve):
+
+```bash
+make deploy VM=travus@<ip>
+make smoke-producao APP=app.<domínio> API=api.<domínio>                       # certificado de verdade
+```
+
+## 6. Usuários, planilha, Drive e alertas
+
+Comandos na VM rodam dentro da versão atual:
+
+```bash
+ssh -t travus@<ip> 'cd /opt/travus/atual && make usuario args="criar --email ana@exemplo.com --nome \"Ana\" --perfil admin"'
+ssh -t travus@<ip> 'cd /opt/travus/atual && make alerta-teste'
+```
+
+- **Planilha**: importe pela tela (`/importar`). A produção começa com o banco vazio.
+- **Google Drive** (opcional): preencha `GOOGLE_*` no `.env`, publique e importe o token:
+  ```bash
+  scp workers/canopus/token.json travus@<ip>:/opt/travus/atual/workers/canopus/token.json
+  ssh -t travus@<ip> 'cd /opt/travus/atual && make google-token && rm workers/canopus/token.json && make google-status'
+  ```
+
+## 7. Monitor externo
+
+O vigia só avisa enquanto a API está de pé. Para a VM inteira fora do ar:
+
+1. **healthchecks.io** (grátis): crie um check com período de 5 min e tolerância de 10 min, integração por e-mail; copie a URL de ping para `VIGIA_PING_URL` e publique. O vigia faz o ping a cada 5 min quando a API e o banco respondem; se os pings param, o healthchecks.io avisa.
+2. **UptimeRobot** (grátis, opcional, recomendado): monitores HTTP de 5 min para `https://api.<domínio>/health` e `https://app.<domínio>/login` (cobre Traefik e web).
+
+## 8. Primeiro dry-run a partir da VM
+
+Só com o ok do usuário, e com **nenhuma outra sessão do Newcon** aberta (script antigo parado). Crie um dry-run de 1 cota pela tela e acompanhe. O lance real continua desligado.
+
+## Rotina
+
+| Tarefa | Como |
+|---|---|
+| Publicar | commit → `make deploy VM=travus@<ip>` (recusa com execução em andamento) |
+| Voltar uma versão | `make deploy-voltar VM=travus@<ip>`. **Migrações não são desfeitas**: se a versão nova mudou o banco, voltar pode não funcionar |
+| Logs | `ssh -t travus@<ip> 'cd /opt/travus/atual && make logs s=api'` (api, worker-canopus, traefik, backup…) |
+| Estado | `ssh travus@<ip> 'cd /opt/travus/atual && make ps'` |
+| Cópia do backup | `make backup-baixar VM=travus@<ip>` (semanal; vai para `deploy/backups/`, fora do git; tem dados de clientes) |
+| Testar a restauração | `ssh -t travus@<ip> 'cd /opt/travus/atual && make restaurar-teste'` (mensal) |
+| Backup fora de hora | `ssh -t travus@<ip> 'cd /opt/travus/atual && make backup'` |
+
+Na VM, `make up`, `make prod-local` e `make dev-web` se recusam a rodar: a stack de produção sobe só pelo `publicar.sh`.
+
+### Backup
+
+- `backup` (container `postgres:18.6-alpine`) faz `pg_dump -Fc` todo dia a partir de `BACKUP_HORA` (3 h) em `BACKUP_DIR` (`/opt/travus/backups`), confere o arquivo com `pg_restore -l` e guarda 7 diários, 4 semanais (domingo) e 6 mensais (dia 1). Os PDFs de comprovante estão no banco, então entram no dump.
+- `ultimo-ok` e `ultimo-erro` são lidos pelo vigia.
+- **Restaurar de verdade** (VM nova ou banco perdido), com a mesma `CHAVE_CRIPTOGRAFIA` no `.env`:
+  ```bash
+  cd /opt/travus/atual
+  P="docker compose -f deploy/docker-compose.yml -f deploy/docker-compose.prod.yml"
+  $P stop web api worker-canopus
+  $P exec -T postgres sh -c 'pg_restore -U "$POSTGRES_USER" -d "$POSTGRES_DB" --clean --if-exists --no-owner' < travus-AAAA-MM-DD.dump
+  $P up -d --wait
+  ```
+  O `make restaurar-teste` confere que o dump restaura num banco temporário; a restauração por cima do banco em uso ainda não foi ensaiada.
+
+### O que o vigia avisa (e-mail, a cada 5 min, só quando muda; lembrete a cada 12 h)
+
+- banco inacessível; worker sem contato com a API há mais de 10 min;
+- execução na fila há mais de 30 min, ou em andamento sem sinal do worker há mais de 5 min;
+- **cota em `erro_apos_confirmar`** (clicou em Confirmar sem resultado: conferir no Histórico);
+- comprovante que não foi para o Drive depois de 5 tentativas, ou esperando há mais de 1 h;
+- backup atrasado (mais de 26 h) ou com erro; disco acima de 80%;
+- certificado HTTPS vencendo em menos de 14 dias ou não verificável (com `CERT_RESOLVER=le-teste`, esse alerta é esperado).
+
+Os e-mails não levam nome de cliente, só grupo, cota e versão.
+
+### Lance real em produção
+
+`LANCE_REAL_HABILITADO=false` sempre, a não ser com pedido explícito do usuário, na hora: trocar no `.env` da VM, publicar, fazer o lance, voltar para `false` e publicar de novo.

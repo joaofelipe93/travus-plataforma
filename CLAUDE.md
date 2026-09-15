@@ -41,6 +41,16 @@ make paridade-csv    # regera o esperado do teste de paridade rodando o csv.js o
 make worker-dry-run  # script legado: dry-run de 1 cota da planilha no container (faz login; nunca confirma)
 make google-token    # importa workers/canopus/token.json (Google Drive) cifrado no banco
 make google-status   # mostra token, client OAuth, pasta e LANCE_REAL_HABILITADO
+make alerta-teste    # e-mail de teste com SMTP_* e ALERTA_* do deploy/.env
+make backup          # backup do Postgres agora (deploy/backups, fora do git: dados de clientes)
+make restaurar-teste # restaura o último backup num banco temporário e compara com o banco em uso
+
+# Produção (docs/producao.md)
+make prod-local      # modo produção nesta máquina (HTTPS não confiável); volte com make down && make up
+make smoke-producao APP=app.<domínio> API=api.<domínio> [INSEGURO=1]   # checagens HTTPS de fora
+make deploy VM=travus@<ip>         # publica o commit atual na VM (sem push; recusa com execução em andamento)
+make deploy-voltar VM=travus@<ip>  # volta para a versão anterior (migrações não são desfeitas)
+make backup-baixar VM=travus@<ip>  # copia o último backup da VM para deploy/backups
 ```
 
 Endereços locais: http://app.localhost (web e, em `/api/...`, a API), http://api.localhost (API para ferramentas; só `/health` é público), http://traefik.localhost (dashboard).
@@ -64,6 +74,7 @@ Não há cadastro público de usuários: só `make usuario`. A senha é pedida n
 ```
 
 - **`deploy/docker-compose.yml`** (projeto `travus`). Redes: `travus_borda` (traefik, api, web) e `travus_interna` (postgres, migrate, api, worker, cli, api-teste). Só o Traefik publica porta (80). `migrate` roda `api migrate up` antes da `api`. Perfis: `cli` (usuários), `teste` (Go com Postgres, banco `travus_teste`), `canopus` (script legado `worker-legado`). `deploy/docker-compose.dev.yml` troca o web por `next dev`.
+- **Produção** (Etapa 4, roteiro em `docs/producao.md`): `deploy/docker-compose.prod.yml` vai por cima do compose local (Traefik em 80/443 com Let's Encrypt via `deploy/traefik/traefik.producao.yml`, HTTP → HTTPS, HSTS, dashboard fechado, `backup` diário, vigia com pasta de backups e certificado). Domínios por `DOMINIO_APP`/`DOMINIO_API` (padrão `app.localhost`/`api.localhost`); `CERT_RESOLVER` `le` ou `le-teste`. Na VM (`/opt/travus`): `releases/<commit>` enviadas por `git archive`, `compartilhado/.env` e `compartilhado/canopus.env` (segredos, só na VM), `backups/`, `atual` → versão publicada. `deploy/vm/preparar.sh` (root, uma vez: usuário `travus`, SSH só por chave, ufw, fail2ban, Docker, swap; para se achar a `appairbnb`) e `deploy/vm/publicar.sh` (sobe a versão; `--voltar`). Na VM, `make up`/`prod-local`/`dev-web` se recusam a rodar. `deploy/backup/backup.sh`: `pg_dump -Fc` com 7 diários, 4 semanais e 6 mensais, marcadores `ultimo-ok`/`ultimo-erro`.
 - **Traefik** (`deploy/traefik/`, montado como pasta: bind mount de arquivo único não enxerga edições). Rotas por labels (`exposedByDefault: false`) com prioridades; middlewares em `dinamico.yml`:
   - `sessao-api` / `sessao-pagina`: ForwardAuth em `http://api:8080/auth/verificar` (só repassa `Cookie`, `trustForwardHeader: false`); a versão de página responde 302 para `/login?proximo=…` (`preserveLocationHeader`);
   - `remover-prefixo-api`, `limite-api` (20/s), `limite-login` (10/min por IP), `cabecalhos-seguranca`.
@@ -77,10 +88,11 @@ Não há cadastro público de usuários: só `make usuario`. A senha é pedida n
     - `reais.go`: `GET /execucoes/{id}/revisao` (revisão do dry-run), `POST /execucoes/reais` (**só admin**, chave ligada, dry-run concluído há menos de 2 h e ainda não aprovado, quantidade de cotas digitada, "registrar mesmo assim" por cota que já tem lance na assembleia), `POST /execucoes/reimpressoes` (comprovante de um protocolo pelo Histórico; `enviar_drive` opcional), `POST /lances/{id}/reenviar-drive`, `GET /integracoes/google-drive` (admin).
     - `interno_real.go`: `pdf`, `confirmacao-iniciada` (confere tipo, chave, cancelamento e a assembleia aprovada; o worker só clica em Confirmar depois do 204), `concluir-confirmacao` (grava o lance), `concluir-reimpressao`.
     - `drive_fila.go`: fila de envio dos PDFs ao Drive (tentativas com espera 1, 2, 4, 8 min; envio travado volta em 10 min; o lance fica registrado mesmo se o envio falhar). `internal/drive`: cliente REST (escopo `drive.file`, nome do arquivo igual ao `reportFileName` do script); `internal/cripto`: AES-256-GCM para o token do Google no banco (tabela `integracoes`).
+    - `vigia.go`: a cada 5 min confere banco, contato do worker (10 min), fila parada, cota em `erro_apos_confirmar` (24 h), Drive, backup (26 h, erro), disco (80%) e certificado (14 dias); manda e-mail só quando muda (novos, lembrete a cada 12 h, resolvidos), sem nome de cliente, e faz ping no monitor externo (`VIGIA_PING_URL`). `internal/alerta`: SMTP com STARTTLS obrigatório (ou TLS na 465). Sem `SMTP_HOST`, os alertas só vão para o log.
     - `sse.go`: `GET /execucoes/{id}/eventos` (SSE, `Last-Event-ID`, `event: fim`); `Hub` com `LISTEN execucao_eventos` (trigger no insert).
   - `internal/importacao`: `LerPlanilha` porta as regras do `workers/canopus/src/csv.js` (teste de paridade contra o csv.js original em `testdata/paridade`); `Planejar` compara com o cadastro; aplicar recalcula a prévia na transação e recusa se o cadastro mudou.
   - `internal/testedb`: testes de integração (pulados sem `TEST_DATABASE_URL`).
-  - `cmd/api`: `serve`, `migrate up|down|status`, `usuario …`, `google importar-token|status`, `healthcheck`. Screenshots vencidos (30 dias) são apagados de hora em hora; PDFs de comprovante não expiram.
+  - `cmd/api`: `serve`, `migrate up|down|status`, `usuario …`, `google importar-token|status`, `alerta testar`, `healthcheck`. Screenshots vencidos (30 dias) são apagados de hora em hora; PDFs de comprovante não expiram.
 - **Web** (`web/`, Next.js 16, App Router, TypeScript, Tailwind 4, shadcn/ui estilo base-nova (Base UI, não Radix: use `render` em vez de `asChild`), TanStack Query, `output: "standalone"`). **O Next 16 tem mudanças incompatíveis: leia `web/AGENTS.md` e o guia relevante em `web/node_modules/next/dist/docs/` antes de escrever código** (ex.: `middleware` virou `proxy`; `useSearchParams` precisa de `<Suspense>`; env de runtime com `await connection()`).
   - O navegador chama a API em `/api/...` (mesma origem). `src/lib/api.ts` manda o `X-CSRF-Token`, e em 401 recarrega para o login.
   - `(app)/layout.tsx` busca `/auth/sessao` antes de mostrar as telas; botões aparecem conforme o perfil, mas quem decide é a API.
@@ -91,7 +103,7 @@ Não há cadastro público de usuários: só `make usuario`. A senha é pedida n
   - `src/newcon.js`, `csv.js`, `logger.js`: o código validado, **sem mudanças**. `src/index.js` é o script legado (`make worker-dry-run`).
   - `src/leitura-credenciamento.js`: seletores de assembleia e do Histórico (só leitura). `src/plataforma.js`: cliente das rotas internas. `src/registro.js`: logger que manda eventos à API. `src/config-worker.js`: só variáveis de ambiente (recusa `NEWCON_URL` com a grafia `frmCorCCCnsLogin`).
   - No container, `docker-entrypoint.sh` bloqueia `--confirm`/`real`, e o Chromium precisa de `shm_size` (ou `--ipc=host`). `legado/` é só referência.
-- **`tools/`**: `teste-ip-vm/` (Newcon aceita login do IP de uma VM?), `paridade-csv/` (esperado do teste de paridade), `smoke/etapa1.sh` (gateway, sessão, perfis e rotas de execução, sem criar execução).
+- **`tools/`**: `teste-ip-vm/` (Newcon aceita login do IP de uma VM?), `paridade-csv/` (esperado do teste de paridade), `smoke/etapa1.sh` (gateway, sessão, perfis, rotas de execução e recusa do lance real, sem criar execução), `smoke/producao.sh` (HTTPS de fora: redirecionamento, HSTS, barreira de sessão, dashboard e portas fechadas, validade do certificado; sem login).
 
 ## Perfis
 
@@ -143,11 +155,13 @@ lance real:  dry-run concluído → revisão → admin aprova (chave ligada, < 2
 - **Etapa 1 (login e cadastro)**: validada.
 - **Etapa 2 (dry-run pela interface)**: validada.
 - **Etapa 3 (lance real, implementado e testado sem confirmar)**: revisão, aprovação só por admin, trava antes do clique, protocolo, `lances`, PDF no Postgres (bytea; armazenamento de objetos depois) e no Drive, reimpressão pelo Histórico, auditoria, token do Google cifrado no banco. *Em validação.* O primeiro lance real só com pedido explícito do usuário.
-- **Etapa 4**: VM dedicada, domínio, HTTPS, backup do Postgres, logs e alertas.
+- **Etapa 4 (servidor)**: compose de produção com HTTPS, preparação da VM, deploy e volta, backup na VM com teste de restauração, vigia com alertas por e-mail e monitor externo, smoke de produção. *Parte do repositório pronta e testada localmente (`make prod-local`); falta a VM e o domínio, que o usuário cria depois.*
 
 ## Decisões em aberto (não invente a regra)
 
 - Modalidade para cotas sem "2º Fixo" (grupo 6620: só Livre, Fixo, Limitado). Hoje é erro conhecido.
-- Domínio (`app.`/`api.`) e provedor da VM de produção.
+- Domínio (`app.`/`api.`): o usuário define e cria depois.
 
 Decididas pelo usuário na Etapa 3: "Parcelas em Atraso" → aceitar e marcar o lance; cota que já tem lance na assembleia → pular, salvo "registrar mesmo assim" por cota na revisão; só admin aprova lance real; prazo de oferta encerrado → erro conhecido; PDF do teste de reimpressão não vai ao Drive.
+
+Decididas pelo usuário na Etapa 4: VM na DigitalOcean com 4 GB (criada pelo usuário, depois); backup do Postgres só na VM, com cópia manual (`make backup-baixar`); alertas por e-mail + monitor externo.
