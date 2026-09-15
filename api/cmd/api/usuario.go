@@ -126,8 +126,9 @@ func usuario(args []string) error {
 				return err
 			}
 		}
-		auditarCLI(ctx, q, "usuario_"+args[0]+"do", *email, map[string]any{"sessoes_encerradas": sessoes})
-		fmt.Printf("Usuário %s %sdo\n", *email, args[0])
+		participio := map[bool]string{true: "ativado", false: "desativado"}[ativo]
+		auditarCLI(ctx, q, "usuario_"+participio, *email, map[string]any{"sessoes_encerradas": sessoes})
+		fmt.Printf("Usuário %s %s\n", *email, participio)
 
 	case "listar":
 		us, err := q.ListarUsuarios(ctx)
