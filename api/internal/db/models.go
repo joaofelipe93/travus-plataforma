@@ -114,23 +114,26 @@ type Cota struct {
 }
 
 type ExecucaoCota struct {
-	ID           int64
-	ExecucaoID   int64
-	CotaID       int64
-	Ordem        int32
-	Grupo        string
-	Cota         string
-	Versao       string
-	ClienteNome  string
-	Modalidade   string
-	Status       string
-	ErroTipo     *string
-	Erro         *string
-	Detalhes     []byte
-	ScreenshotID *string
-	Tentativas   int32
-	IniciadaEm   *time.Time
-	FinalizadaEm *time.Time
+	ID                     int64
+	ExecucaoID             int64
+	CotaID                 int64
+	Ordem                  int32
+	Grupo                  string
+	Cota                   string
+	Versao                 string
+	ClienteNome            string
+	Modalidade             string
+	Status                 string
+	ErroTipo               *string
+	Erro                   *string
+	Detalhes               []byte
+	ScreenshotID           *string
+	Tentativas             int32
+	IniciadaEm             *time.Time
+	FinalizadaEm           *time.Time
+	AssembleiaAprovada     *string
+	PermitirLanceExistente bool
+	Protocolo              *string
 }
 
 type ExecucaoEvento struct {
@@ -158,6 +161,7 @@ type Execuco struct {
 	CriadaEm               time.Time
 	IniciadaEm             *time.Time
 	FinalizadaEm           *time.Time
+	DryRunOrigemID         *int64
 }
 
 type Importacao struct {
@@ -170,6 +174,37 @@ type Importacao struct {
 	Previa        []byte
 	CriadaEm      time.Time
 	FinalizadaEm  *time.Time
+}
+
+type Integracao struct {
+	Nome          string
+	DadosCifrados []byte
+	AtualizadoEm  time.Time
+}
+
+type Lance struct {
+	ID                       int64
+	CotaID                   int64
+	ExecucaoCotaID           *int64
+	Origem                   string
+	Administradora           string
+	Protocolo                string
+	AssembleiaData           *time.Time
+	AssembleiaNumero         *string
+	Modalidade               string
+	Percentual               *string
+	TextoProtocolo           *string
+	ParcelasEmAtraso         bool
+	LanceExistenteAutorizado bool
+	PdfID                    *string
+	DriveStatus              string
+	DriveArquivoID           *string
+	DriveLink                *string
+	DriveErro                *string
+	DriveTentativas          int32
+	RegistradoEm             *time.Time
+	CriadoEm                 time.Time
+	AtualizadoEm             time.Time
 }
 
 type Sessao struct {

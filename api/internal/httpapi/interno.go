@@ -21,12 +21,25 @@ import (
 	"github.com/joaofelipe93/travus-plataforma/api/internal/db"
 )
 
-// Tipos de execução que a API entrega ao worker. "real" só entra na Etapa 3.
-var tiposLiberados = map[string]bool{"dry_run": true}
+// tipoLiberado: tipos de execução que a API entrega ao worker. "real" só com
+// LANCE_REAL_HABILITADO=true (o worker tem a sua própria chave).
+func (s *Servidor) tipoLiberado(tipo string) bool {
+	switch tipo {
+	case "dry_run", "reimpressao":
+		return true
+	case "real":
+		return s.cfg.LanceRealHabilitado
+	}
+	return false
+}
 
-// Situações finais que o worker pode informar para uma cota, por tipo de execução.
+// Situações que o worker pode informar pela rota /concluir, por tipo de execução. O resultado
+// do lance real e da reimpressão tem rotas próprias (concluir-confirmacao e
+// concluir-reimpressao); por aqui esses tipos só registram erro antes de confirmar.
 var conclusoesPermitidas = map[string]map[string]bool{
-	"dry_run": {"verificada": true, "erro_antes_confirmar": true},
+	"dry_run":     {"verificada": true, "erro_antes_confirmar": true},
+	"real":        {"erro_antes_confirmar": true},
+	"reimpressao": {"erro_antes_confirmar": true},
 }
 
 var assinaturaPNG = []byte("\x89PNG\r\n\x1a\n")
@@ -45,6 +58,11 @@ func (s *Servidor) RotasInternas() http.Handler {
 	mux.HandleFunc("POST /internal/execucao-cotas/{id}/iniciar", s.iniciarCota)
 	mux.HandleFunc("POST /internal/execucao-cotas/{id}/concluir", s.concluirCota)
 	mux.HandleFunc("POST /internal/execucao-cotas/{id}/screenshot", s.enviarScreenshot)
+	// Etapa 3 (interno_real.go).
+	mux.HandleFunc("POST /internal/execucao-cotas/{id}/pdf", s.enviarPdf)
+	mux.HandleFunc("POST /internal/execucao-cotas/{id}/confirmacao-iniciada", s.marcarConfirmacaoIniciada)
+	mux.HandleFunc("POST /internal/execucao-cotas/{id}/concluir-confirmacao", s.concluirConfirmacao)
+	mux.HandleFunc("POST /internal/execucao-cotas/{id}/concluir-reimpressao", s.concluirReimpressao)
 	return recuperar(s.exigirTokenWorker(mux))
 }
 
@@ -82,6 +100,15 @@ func (s *Servidor) evento(ctx context.Context, q *db.Queries, execucaoID int64, 
 	return err
 }
 
+// objetoJSON devolve o JSON recebido se ele for um objeto; senão, {}.
+func objetoJSON(bruto json.RawMessage) []byte {
+	var objeto map[string]any
+	if len(bruto) > 0 && json.Unmarshal(bruto, &objeto) == nil && objeto != nil {
+		return bruto
+	}
+	return []byte("{}")
+}
+
 type pedidoProxima struct {
 	Tipos []string `json:"tipos"`
 }
@@ -108,7 +135,7 @@ func (s *Servidor) proximaTarefa(w http.ResponseWriter, r *http.Request) {
 	}
 	var tipos []string
 	for _, t := range p.Tipos {
-		if tiposLiberados[t] {
+		if s.tipoLiberado(t) {
 			tipos = append(tipos, t)
 		}
 	}
@@ -159,11 +186,7 @@ func (s *Servidor) proximaTarefa(w http.ResponseWriter, r *http.Request) {
 	var t tarefaJSON
 	t.Execucao.ID, t.Execucao.Tipo = reservada.ID, reservada.Tipo
 	for _, c := range rows {
-		t.Cotas = append(t.Cotas, cotaExecucaoJSON{
-			ID: c.ID, CotaID: c.CotaID, Ordem: c.Ordem, Grupo: c.Grupo, Cota: c.Cota, Versao: c.Versao,
-			ClienteNome: c.ClienteNome, Modalidade: c.Modalidade, Status: c.Status, Detalhes: json.RawMessage(c.Detalhes),
-			Tentativas: c.Tentativas,
-		})
+		t.Cotas = append(t.Cotas, cotaParaJSON(c))
 	}
 	responderJSON(w, http.StatusOK, t)
 }
@@ -287,13 +310,8 @@ func (s *Servidor) registrarEventos(w http.ResponseWriter, r *http.Request) {
 		if utf8.RuneCountInString(mensagem) > 2000 {
 			mensagem = string([]rune(mensagem)[:2000]) + "…"
 		}
-		dados := []byte("{}")
-		var objeto map[string]any
-		if len(e.Dados) > 0 && json.Unmarshal(e.Dados, &objeto) == nil && objeto != nil {
-			dados = e.Dados
-		}
 		if _, err := qtx.InserirEvento(ctx, db.InserirEventoParams{
-			ExecucaoID: id, ExecucaoCotaID: e.ExecucaoCotaID, Nivel: nivel, Mensagem: mensagem, Dados: dados,
+			ExecucaoID: id, ExecucaoCotaID: e.ExecucaoCotaID, Nivel: nivel, Mensagem: mensagem, Dados: objetoJSON(e.Dados),
 		}); err != nil {
 			var pgErr *pgconn.PgError
 			if errors.As(err, &pgErr) && pgErr.Code == "23503" { // cota de outra execução
@@ -423,14 +441,9 @@ func (s *Servidor) concluirCota(w http.ResponseWriter, r *http.Request) {
 		}
 		erroTipo, erroTexto = &p.ErroTipo, &p.Erro
 	}
-	detalhes := []byte("{}")
-	var objeto map[string]any
-	if len(p.Detalhes) > 0 && json.Unmarshal(p.Detalhes, &objeto) == nil && objeto != nil {
-		detalhes = p.Detalhes
-	}
 
 	n, err := qtx.ConcluirExecucaoCota(ctx, db.ConcluirExecucaoCotaParams{
-		ID: c.ID, Status: p.Status, ErroTipo: erroTipo, Erro: erroTexto, Detalhes: detalhes,
+		ID: c.ID, Status: p.Status, ErroTipo: erroTipo, Erro: erroTexto, Detalhes: objetoJSON(p.Detalhes),
 	})
 	if err != nil {
 		erroInterno(w, r, err)
@@ -443,6 +456,9 @@ func (s *Servidor) concluirCota(w http.ResponseWriter, r *http.Request) {
 	nivel, mensagem := "ok", fmt.Sprintf("Cota %s verificada: \"2º Fixo\" marcado, pronta para confirmar (dry-run, nada foi confirmado).", tagDe(c))
 	if p.Status == "erro_antes_confirmar" {
 		nivel, mensagem = "erro", fmt.Sprintf("Cota %s: %s", tagDe(c), p.Erro)
+		if c.Tipo == "real" {
+			mensagem += " (não cliquei em Confirmar)"
+		}
 	}
 	if err := s.evento(ctx, qtx, c.ExecucaoID, &c.ID, nivel, mensagem); err != nil {
 		erroInterno(w, r, err)
@@ -533,6 +549,18 @@ func (s *Servidor) finalizarExecucao(w http.ResponseWriter, r *http.Request) {
 	e, ok := s.execucaoDoWorker(w, r, qtx, id, worker)
 	if !ok {
 		return
+	}
+	// Confirmação sem resultado informado: nunca volta a ser processada, vai para conferência.
+	semResultado, err := qtx.MarcarConfirmacoesPendentesComoErro(ctx, id)
+	if err != nil {
+		erroInterno(w, r, err)
+		return
+	}
+	if semResultado > 0 {
+		if err := s.evento(ctx, qtx, id, nil, "erro", fmt.Sprintf("%d cota(s) clicaram em Confirmar sem o resultado chegar à plataforma: confira no Histórico do Newcon.", semResultado)); err != nil {
+			erroInterno(w, r, err)
+			return
+		}
 	}
 	resumo, err := qtx.ResumoCotasDaExecucao(ctx, id)
 	if err != nil {

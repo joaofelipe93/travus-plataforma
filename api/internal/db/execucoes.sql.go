@@ -55,10 +55,11 @@ func (q *Queries) BuscarArquivo(ctx context.Context, id string) (BuscarArquivoRo
 
 const buscarExecucao = `-- name: BuscarExecucao :one
 SELECT e.id, e.tipo, e.status, e.criada_em, e.iniciada_em, e.finalizada_em, e.cancelamento_solicitado, e.erro,
-       u.nome AS criada_por_nome, uc.nome AS cancelada_por_nome
+       e.dry_run_origem_id, u.nome AS criada_por_nome, uc.nome AS cancelada_por_nome, ua.nome AS aprovada_por_nome
 FROM execucoes e
 JOIN usuarios u ON u.id = e.criada_por
 LEFT JOIN usuarios uc ON uc.id = e.cancelada_por
+LEFT JOIN usuarios ua ON ua.id = e.aprovada_por
 WHERE e.id = $1
 `
 
@@ -71,8 +72,10 @@ type BuscarExecucaoRow struct {
 	FinalizadaEm           *time.Time
 	CancelamentoSolicitado bool
 	Erro                   *string
+	DryRunOrigemID         *int64
 	CriadaPorNome          string
 	CanceladaPorNome       *string
+	AprovadaPorNome        *string
 }
 
 func (q *Queries) BuscarExecucao(ctx context.Context, id int64) (BuscarExecucaoRow, error) {
@@ -87,17 +90,21 @@ func (q *Queries) BuscarExecucao(ctx context.Context, id int64) (BuscarExecucaoR
 		&i.FinalizadaEm,
 		&i.CancelamentoSolicitado,
 		&i.Erro,
+		&i.DryRunOrigemID,
 		&i.CriadaPorNome,
 		&i.CanceladaPorNome,
+		&i.AprovadaPorNome,
 	)
 	return i, err
 }
 
 const buscarExecucaoCotaParaWorker = `-- name: BuscarExecucaoCotaParaWorker :one
-SELECT ec.id, ec.execucao_id, ec.status, ec.grupo, ec.cota, ec.versao,
+SELECT ec.id, ec.execucao_id, ec.cota_id, ec.status, ec.grupo, ec.cota, ec.versao, ec.cliente_nome,
+       ec.assembleia_aprovada, ec.permitir_lance_existente, ec.protocolo, ec.detalhes, q.administradora,
        e.tipo, e.status AS execucao_status, e.worker, e.cancelamento_solicitado
 FROM execucao_cotas ec
 JOIN execucoes e ON e.id = ec.execucao_id
+JOIN cotas q ON q.id = ec.cota_id
 WHERE ec.id = $1
 FOR UPDATE OF e
 `
@@ -105,10 +112,17 @@ FOR UPDATE OF e
 type BuscarExecucaoCotaParaWorkerRow struct {
 	ID                     int64
 	ExecucaoID             int64
+	CotaID                 int64
 	Status                 string
 	Grupo                  string
 	Cota                   string
 	Versao                 string
+	ClienteNome            string
+	AssembleiaAprovada     *string
+	PermitirLanceExistente bool
+	Protocolo              *string
+	Detalhes               []byte
+	Administradora         string
 	Tipo                   string
 	ExecucaoStatus         string
 	Worker                 *string
@@ -121,10 +135,17 @@ func (q *Queries) BuscarExecucaoCotaParaWorker(ctx context.Context, id int64) (B
 	err := row.Scan(
 		&i.ID,
 		&i.ExecucaoID,
+		&i.CotaID,
 		&i.Status,
 		&i.Grupo,
 		&i.Cota,
 		&i.Versao,
+		&i.ClienteNome,
+		&i.AssembleiaAprovada,
+		&i.PermitirLanceExistente,
+		&i.Protocolo,
+		&i.Detalhes,
+		&i.Administradora,
 		&i.Tipo,
 		&i.ExecucaoStatus,
 		&i.Worker,
@@ -163,18 +184,51 @@ func (q *Queries) CancelarExecucaoNaFila(ctx context.Context, arg CancelarExecuc
 	return err
 }
 
+const concluirConfirmacao = `-- name: ConcluirConfirmacao :execrows
+UPDATE execucao_cotas
+SET status = $1, erro_tipo = $2, erro = $3, detalhes = $4,
+    protocolo = $5, finalizada_em = now()
+WHERE id = $6 AND status = 'confirmacao_iniciada'
+`
+
+type ConcluirConfirmacaoParams struct {
+	Status    string
+	ErroTipo  *string
+	Erro      *string
+	Detalhes  []byte
+	Protocolo *string
+	ID        int64
+}
+
+func (q *Queries) ConcluirConfirmacao(ctx context.Context, arg ConcluirConfirmacaoParams) (int64, error) {
+	result, err := q.db.Exec(ctx, concluirConfirmacao,
+		arg.Status,
+		arg.ErroTipo,
+		arg.Erro,
+		arg.Detalhes,
+		arg.Protocolo,
+		arg.ID,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const concluirExecucaoCota = `-- name: ConcluirExecucaoCota :execrows
 UPDATE execucao_cotas
-SET status = $1, erro_tipo = $2, erro = $3, detalhes = $4, finalizada_em = now()
-WHERE id = $5 AND status = 'em_andamento'
+SET status = $1, erro_tipo = $2, erro = $3, detalhes = $4,
+    protocolo = COALESCE($5, protocolo), finalizada_em = now()
+WHERE id = $6 AND status = 'em_andamento'
 `
 
 type ConcluirExecucaoCotaParams struct {
-	Status   string
-	ErroTipo *string
-	Erro     *string
-	Detalhes []byte
-	ID       int64
+	Status    string
+	ErroTipo  *string
+	Erro      *string
+	Detalhes  []byte
+	Protocolo *string
+	ID        int64
 }
 
 func (q *Queries) ConcluirExecucaoCota(ctx context.Context, arg ConcluirExecucaoCotaParams) (int64, error) {
@@ -183,12 +237,72 @@ func (q *Queries) ConcluirExecucaoCota(ctx context.Context, arg ConcluirExecucao
 		arg.ErroTipo,
 		arg.Erro,
 		arg.Detalhes,
+		arg.Protocolo,
 		arg.ID,
 	)
 	if err != nil {
 		return 0, err
 	}
 	return result.RowsAffected(), nil
+}
+
+const cotasVerificadasDoDryRun = `-- name: CotasVerificadasDoDryRun :many
+SELECT ec.id, ec.cota_id, ec.ordem, ec.grupo, ec.cota, ec.versao, ec.cliente_nome, ec.modalidade, ec.detalhes,
+       ec.screenshot_id, ec.finalizada_em, q.ativa, q.administradora
+FROM execucao_cotas ec
+JOIN cotas q ON q.id = ec.cota_id
+WHERE ec.execucao_id = $1 AND ec.status = 'verificada'
+ORDER BY ec.ordem
+`
+
+type CotasVerificadasDoDryRunRow struct {
+	ID             int64
+	CotaID         int64
+	Ordem          int32
+	Grupo          string
+	Cota           string
+	Versao         string
+	ClienteNome    string
+	Modalidade     string
+	Detalhes       []byte
+	ScreenshotID   *string
+	FinalizadaEm   *time.Time
+	Ativa          bool
+	Administradora string
+}
+
+func (q *Queries) CotasVerificadasDoDryRun(ctx context.Context, execucaoID int64) ([]CotasVerificadasDoDryRunRow, error) {
+	rows, err := q.db.Query(ctx, cotasVerificadasDoDryRun, execucaoID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []CotasVerificadasDoDryRunRow
+	for rows.Next() {
+		var i CotasVerificadasDoDryRunRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.CotaID,
+			&i.Ordem,
+			&i.Grupo,
+			&i.Cota,
+			&i.Versao,
+			&i.ClienteNome,
+			&i.Modalidade,
+			&i.Detalhes,
+			&i.ScreenshotID,
+			&i.FinalizadaEm,
+			&i.Ativa,
+			&i.Administradora,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const criarExecucao = `-- name: CriarExecucao :one
@@ -214,6 +328,62 @@ type CriarExecucaoRow struct {
 func (q *Queries) CriarExecucao(ctx context.Context, arg CriarExecucaoParams) (CriarExecucaoRow, error) {
 	row := q.db.QueryRow(ctx, criarExecucao, arg.Tipo, arg.CriadaPor)
 	var i CriarExecucaoRow
+	err := row.Scan(
+		&i.ID,
+		&i.Tipo,
+		&i.Status,
+		&i.CriadaEm,
+	)
+	return i, err
+}
+
+const criarExecucaoReal = `-- name: CriarExecucaoReal :one
+INSERT INTO execucoes (tipo, criada_por, aprovada_por, dry_run_origem_id)
+VALUES ('real', $1, $1, $2)
+RETURNING id, tipo, status, criada_em
+`
+
+type CriarExecucaoRealParams struct {
+	UsuarioID      int64
+	DryRunOrigemID *int64
+}
+
+type CriarExecucaoRealRow struct {
+	ID       int64
+	Tipo     string
+	Status   string
+	CriadaEm time.Time
+}
+
+// Execução real: sempre aprovada a partir de um dry-run.
+func (q *Queries) CriarExecucaoReal(ctx context.Context, arg CriarExecucaoRealParams) (CriarExecucaoRealRow, error) {
+	row := q.db.QueryRow(ctx, criarExecucaoReal, arg.UsuarioID, arg.DryRunOrigemID)
+	var i CriarExecucaoRealRow
+	err := row.Scan(
+		&i.ID,
+		&i.Tipo,
+		&i.Status,
+		&i.CriadaEm,
+	)
+	return i, err
+}
+
+const criarExecucaoReimpressao = `-- name: CriarExecucaoReimpressao :one
+INSERT INTO execucoes (tipo, criada_por)
+VALUES ('reimpressao', $1)
+RETURNING id, tipo, status, criada_em
+`
+
+type CriarExecucaoReimpressaoRow struct {
+	ID       int64
+	Tipo     string
+	Status   string
+	CriadaEm time.Time
+}
+
+func (q *Queries) CriarExecucaoReimpressao(ctx context.Context, criadaPor int64) (CriarExecucaoReimpressaoRow, error) {
+	row := q.db.QueryRow(ctx, criarExecucaoReimpressao, criadaPor)
+	var i CriarExecucaoReimpressaoRow
 	err := row.Scan(
 		&i.ID,
 		&i.Tipo,
@@ -306,6 +476,27 @@ func (q *Queries) DevolverExecucoesComTravaVencida(ctx context.Context) ([]Devol
 	return items, nil
 }
 
+const execucaoRealDoDryRun = `-- name: ExecucaoRealDoDryRun :one
+SELECT id, status
+FROM execucoes
+WHERE dry_run_origem_id = $1 AND tipo = 'real' AND status NOT IN ('cancelada', 'falhou')
+ORDER BY id DESC
+LIMIT 1
+`
+
+type ExecucaoRealDoDryRunRow struct {
+	ID     int64
+	Status string
+}
+
+// Um dry-run só pode originar uma execução real (que não tenha sido cancelada ou falhado).
+func (q *Queries) ExecucaoRealDoDryRun(ctx context.Context, dryRunID *int64) (ExecucaoRealDoDryRunRow, error) {
+	row := q.db.QueryRow(ctx, execucaoRealDoDryRun, dryRunID)
+	var i ExecucaoRealDoDryRunRow
+	err := row.Scan(&i.ID, &i.Status)
+	return i, err
+}
+
 const finalizarExecucao = `-- name: FinalizarExecucao :exec
 UPDATE execucoes
 SET status = $1, erro = $2, finalizada_em = now(), trava_ate = NULL
@@ -369,6 +560,73 @@ func (q *Queries) InserirArquivo(ctx context.Context, arg InserirArquivoParams) 
 	return id, err
 }
 
+const inserirCotaReal = `-- name: InserirCotaReal :exec
+INSERT INTO execucao_cotas (execucao_id, cota_id, ordem, grupo, cota, versao, cliente_nome, modalidade,
+                            assembleia_aprovada, permitir_lance_existente, detalhes)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8,
+        $9, $10, $11)
+`
+
+type InserirCotaRealParams struct {
+	ExecucaoID             int64
+	CotaID                 int64
+	Ordem                  int32
+	Grupo                  string
+	Cota                   string
+	Versao                 string
+	ClienteNome            string
+	Modalidade             string
+	AssembleiaAprovada     *string
+	PermitirLanceExistente bool
+	Detalhes               []byte
+}
+
+func (q *Queries) InserirCotaReal(ctx context.Context, arg InserirCotaRealParams) error {
+	_, err := q.db.Exec(ctx, inserirCotaReal,
+		arg.ExecucaoID,
+		arg.CotaID,
+		arg.Ordem,
+		arg.Grupo,
+		arg.Cota,
+		arg.Versao,
+		arg.ClienteNome,
+		arg.Modalidade,
+		arg.AssembleiaAprovada,
+		arg.PermitirLanceExistente,
+		arg.Detalhes,
+	)
+	return err
+}
+
+const inserirCotaReimpressao = `-- name: InserirCotaReimpressao :execrows
+INSERT INTO execucao_cotas (execucao_id, cota_id, ordem, grupo, cota, versao, cliente_nome, modalidade, protocolo, detalhes)
+SELECT $1::bigint, q.id, 1, q.grupo, q.cota, q.versao, c.nome, q.modalidade_padrao, $2::text, $3::jsonb
+FROM cotas q
+JOIN clientes c ON c.id = q.cliente_id
+WHERE q.id = $4::bigint
+`
+
+type InserirCotaReimpressaoParams struct {
+	ExecucaoID int64
+	Protocolo  string
+	Detalhes   []byte
+	CotaID     int64
+}
+
+// detalhes guarda o pedido ({"enviar_drive": bool}) até o worker concluir.
+func (q *Queries) InserirCotaReimpressao(ctx context.Context, arg InserirCotaReimpressaoParams) (int64, error) {
+	result, err := q.db.Exec(ctx, inserirCotaReimpressao,
+		arg.ExecucaoID,
+		arg.Protocolo,
+		arg.Detalhes,
+		arg.CotaID,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const inserirCotasNaExecucao = `-- name: InserirCotasNaExecucao :execrows
 INSERT INTO execucao_cotas (execucao_id, cota_id, ordem, grupo, cota, versao, cliente_nome, modalidade)
 SELECT $1::bigint, q.id,
@@ -422,29 +680,33 @@ func (q *Queries) InserirEvento(ctx context.Context, arg InserirEventoParams) (i
 
 const listarCotasDaExecucao = `-- name: ListarCotasDaExecucao :many
 SELECT id, cota_id, ordem, grupo, cota, versao, cliente_nome, modalidade, status, erro_tipo, erro,
-       detalhes, screenshot_id, tentativas, iniciada_em, finalizada_em
+       detalhes, screenshot_id, tentativas, iniciada_em, finalizada_em,
+       assembleia_aprovada, permitir_lance_existente, protocolo
 FROM execucao_cotas
 WHERE execucao_id = $1
 ORDER BY ordem
 `
 
 type ListarCotasDaExecucaoRow struct {
-	ID           int64
-	CotaID       int64
-	Ordem        int32
-	Grupo        string
-	Cota         string
-	Versao       string
-	ClienteNome  string
-	Modalidade   string
-	Status       string
-	ErroTipo     *string
-	Erro         *string
-	Detalhes     []byte
-	ScreenshotID *string
-	Tentativas   int32
-	IniciadaEm   *time.Time
-	FinalizadaEm *time.Time
+	ID                     int64
+	CotaID                 int64
+	Ordem                  int32
+	Grupo                  string
+	Cota                   string
+	Versao                 string
+	ClienteNome            string
+	Modalidade             string
+	Status                 string
+	ErroTipo               *string
+	Erro                   *string
+	Detalhes               []byte
+	ScreenshotID           *string
+	Tentativas             int32
+	IniciadaEm             *time.Time
+	FinalizadaEm           *time.Time
+	AssembleiaAprovada     *string
+	PermitirLanceExistente bool
+	Protocolo              *string
 }
 
 func (q *Queries) ListarCotasDaExecucao(ctx context.Context, execucaoID int64) ([]ListarCotasDaExecucaoRow, error) {
@@ -473,6 +735,9 @@ func (q *Queries) ListarCotasDaExecucao(ctx context.Context, execucaoID int64) (
 			&i.Tentativas,
 			&i.IniciadaEm,
 			&i.FinalizadaEm,
+			&i.AssembleiaAprovada,
+			&i.PermitirLanceExistente,
+			&i.Protocolo,
 		); err != nil {
 			return nil, err
 		}
@@ -536,11 +801,12 @@ func (q *Queries) ListarEventos(ctx context.Context, arg ListarEventosParams) ([
 
 const listarExecucoes = `-- name: ListarExecucoes :many
 SELECT e.id, e.tipo, e.status, e.criada_em, e.iniciada_em, e.finalizada_em, e.cancelamento_solicitado, e.erro,
+       e.dry_run_origem_id,
        u.nome                                                                                    AS criada_por_nome,
        count(ec.id)::int                                                                         AS total,
-       (count(ec.id) FILTER (WHERE ec.status IN ('verificada', 'confirmada')))::int              AS sucesso,
+       (count(ec.id) FILTER (WHERE ec.status IN ('verificada', 'confirmada', 'reimpressa')))::int AS sucesso,
        (count(ec.id) FILTER (WHERE ec.status IN ('erro_antes_confirmar', 'erro_apos_confirmar')))::int AS com_erro,
-       (count(ec.id) FILTER (WHERE ec.status IN ('pendente', 'em_andamento')))::int              AS restantes
+       (count(ec.id) FILTER (WHERE ec.status IN ('pendente', 'em_andamento', 'confirmacao_iniciada')))::int AS restantes
 FROM execucoes e
 JOIN usuarios u ON u.id = e.criada_por
 LEFT JOIN execucao_cotas ec ON ec.execucao_id = e.id
@@ -558,6 +824,7 @@ type ListarExecucoesRow struct {
 	FinalizadaEm           *time.Time
 	CancelamentoSolicitado bool
 	Erro                   *string
+	DryRunOrigemID         *int64
 	CriadaPorNome          string
 	Total                  int32
 	Sucesso                int32
@@ -583,6 +850,7 @@ func (q *Queries) ListarExecucoes(ctx context.Context) ([]ListarExecucoesRow, er
 			&i.FinalizadaEm,
 			&i.CancelamentoSolicitado,
 			&i.Erro,
+			&i.DryRunOrigemID,
 			&i.CriadaPorNome,
 			&i.Total,
 			&i.Sucesso,
@@ -597,6 +865,38 @@ func (q *Queries) ListarExecucoes(ctx context.Context) ([]ListarExecucoesRow, er
 		return nil, err
 	}
 	return items, nil
+}
+
+const marcarConfirmacaoIniciada = `-- name: MarcarConfirmacaoIniciada :execrows
+UPDATE execucao_cotas
+SET status = 'confirmacao_iniciada'
+WHERE id = $1 AND status = 'em_andamento'
+`
+
+// Gravado ANTES do clique em Confirmar. Sem esta linha atualizada, o worker não clica.
+func (q *Queries) MarcarConfirmacaoIniciada(ctx context.Context, id int64) (int64, error) {
+	result, err := q.db.Exec(ctx, marcarConfirmacaoIniciada, id)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const marcarConfirmacoesPendentesComoErro = `-- name: MarcarConfirmacoesPendentesComoErro :execrows
+UPDATE execucao_cotas
+SET status = 'erro_apos_confirmar', erro_tipo = 'inesperado', finalizada_em = now(),
+    erro = 'o resultado da confirmação não chegou à plataforma: o lance pode ter sido registrado, confira no Histórico'
+WHERE execucao_id = $1 AND status = 'confirmacao_iniciada'
+`
+
+// Na finalização, cota que ficou em confirmacao_iniciada (o worker não conseguiu informar
+// o resultado) vai para conferência manual.
+func (q *Queries) MarcarConfirmacoesPendentesComoErro(ctx context.Context, execucaoID int64) (int64, error) {
+	result, err := q.db.Exec(ctx, marcarConfirmacoesPendentesComoErro, execucaoID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const posicaoNaFila = `-- name: PosicaoNaFila :one

@@ -15,13 +15,47 @@ FROM cotas q
 JOIN clientes c ON c.id = q.cliente_id
 WHERE q.id = ANY(@cota_ids::bigint[]) AND q.ativa;
 
+-- Execução real: sempre aprovada a partir de um dry-run.
+-- name: CriarExecucaoReal :one
+INSERT INTO execucoes (tipo, criada_por, aprovada_por, dry_run_origem_id)
+VALUES ('real', @usuario_id, @usuario_id, @dry_run_origem_id)
+RETURNING id, tipo, status, criada_em;
+
+-- name: CriarExecucaoReimpressao :one
+INSERT INTO execucoes (tipo, criada_por)
+VALUES ('reimpressao', @criada_por)
+RETURNING id, tipo, status, criada_em;
+
+-- name: CotasVerificadasDoDryRun :many
+SELECT ec.id, ec.cota_id, ec.ordem, ec.grupo, ec.cota, ec.versao, ec.cliente_nome, ec.modalidade, ec.detalhes,
+       ec.screenshot_id, ec.finalizada_em, q.ativa, q.administradora
+FROM execucao_cotas ec
+JOIN cotas q ON q.id = ec.cota_id
+WHERE ec.execucao_id = @execucao_id AND ec.status = 'verificada'
+ORDER BY ec.ordem;
+
+-- name: InserirCotaReal :exec
+INSERT INTO execucao_cotas (execucao_id, cota_id, ordem, grupo, cota, versao, cliente_nome, modalidade,
+                            assembleia_aprovada, permitir_lance_existente, detalhes)
+VALUES (@execucao_id, @cota_id, @ordem, @grupo, @cota, @versao, @cliente_nome, @modalidade,
+        @assembleia_aprovada, @permitir_lance_existente, @detalhes);
+
+-- detalhes guarda o pedido ({"enviar_drive": bool}) até o worker concluir.
+-- name: InserirCotaReimpressao :execrows
+INSERT INTO execucao_cotas (execucao_id, cota_id, ordem, grupo, cota, versao, cliente_nome, modalidade, protocolo, detalhes)
+SELECT @execucao_id::bigint, q.id, 1, q.grupo, q.cota, q.versao, c.nome, q.modalidade_padrao, @protocolo::text, @detalhes::jsonb
+FROM cotas q
+JOIN clientes c ON c.id = q.cliente_id
+WHERE q.id = @cota_id::bigint;
+
 -- name: ListarExecucoes :many
 SELECT e.id, e.tipo, e.status, e.criada_em, e.iniciada_em, e.finalizada_em, e.cancelamento_solicitado, e.erro,
+       e.dry_run_origem_id,
        u.nome                                                                                    AS criada_por_nome,
        count(ec.id)::int                                                                         AS total,
-       (count(ec.id) FILTER (WHERE ec.status IN ('verificada', 'confirmada')))::int              AS sucesso,
+       (count(ec.id) FILTER (WHERE ec.status IN ('verificada', 'confirmada', 'reimpressa')))::int AS sucesso,
        (count(ec.id) FILTER (WHERE ec.status IN ('erro_antes_confirmar', 'erro_apos_confirmar')))::int AS com_erro,
-       (count(ec.id) FILTER (WHERE ec.status IN ('pendente', 'em_andamento')))::int              AS restantes
+       (count(ec.id) FILTER (WHERE ec.status IN ('pendente', 'em_andamento', 'confirmacao_iniciada')))::int AS restantes
 FROM execucoes e
 JOIN usuarios u ON u.id = e.criada_por
 LEFT JOIN execucao_cotas ec ON ec.execucao_id = e.id
@@ -31,10 +65,11 @@ LIMIT 50;
 
 -- name: BuscarExecucao :one
 SELECT e.id, e.tipo, e.status, e.criada_em, e.iniciada_em, e.finalizada_em, e.cancelamento_solicitado, e.erro,
-       u.nome AS criada_por_nome, uc.nome AS cancelada_por_nome
+       e.dry_run_origem_id, u.nome AS criada_por_nome, uc.nome AS cancelada_por_nome, ua.nome AS aprovada_por_nome
 FROM execucoes e
 JOIN usuarios u ON u.id = e.criada_por
 LEFT JOIN usuarios uc ON uc.id = e.cancelada_por
+LEFT JOIN usuarios ua ON ua.id = e.aprovada_por
 WHERE e.id = @id;
 
 -- name: PosicaoNaFila :one
@@ -44,7 +79,8 @@ WHERE e.id = @id AND o.status = 'na_fila' AND (o.criada_em, o.id) <= (e.criada_e
 
 -- name: ListarCotasDaExecucao :many
 SELECT id, cota_id, ordem, grupo, cota, versao, cliente_nome, modalidade, status, erro_tipo, erro,
-       detalhes, screenshot_id, tentativas, iniciada_em, finalizada_em
+       detalhes, screenshot_id, tentativas, iniciada_em, finalizada_em,
+       assembleia_aprovada, permitir_lance_existente, protocolo
 FROM execucao_cotas
 WHERE execucao_id = @execucao_id
 ORDER BY ordem;
@@ -137,10 +173,12 @@ WHERE id = @id AND worker = @worker AND status = 'em_andamento'
 RETURNING cancelamento_solicitado;
 
 -- name: BuscarExecucaoCotaParaWorker :one
-SELECT ec.id, ec.execucao_id, ec.status, ec.grupo, ec.cota, ec.versao,
+SELECT ec.id, ec.execucao_id, ec.cota_id, ec.status, ec.grupo, ec.cota, ec.versao, ec.cliente_nome,
+       ec.assembleia_aprovada, ec.permitir_lance_existente, ec.protocolo, ec.detalhes, q.administradora,
        e.tipo, e.status AS execucao_status, e.worker, e.cancelamento_solicitado
 FROM execucao_cotas ec
 JOIN execucoes e ON e.id = ec.execucao_id
+JOIN cotas q ON q.id = ec.cota_id
 WHERE ec.id = @id
 FOR UPDATE OF e;
 
@@ -152,8 +190,29 @@ WHERE id = @id AND status IN ('pendente', 'erro_antes_confirmar');
 
 -- name: ConcluirExecucaoCota :execrows
 UPDATE execucao_cotas
-SET status = @status, erro_tipo = sqlc.narg(erro_tipo), erro = sqlc.narg(erro), detalhes = @detalhes, finalizada_em = now()
+SET status = @status, erro_tipo = sqlc.narg(erro_tipo), erro = sqlc.narg(erro), detalhes = @detalhes,
+    protocolo = COALESCE(sqlc.narg(protocolo), protocolo), finalizada_em = now()
 WHERE id = @id AND status = 'em_andamento';
+
+-- Gravado ANTES do clique em Confirmar. Sem esta linha atualizada, o worker não clica.
+-- name: MarcarConfirmacaoIniciada :execrows
+UPDATE execucao_cotas
+SET status = 'confirmacao_iniciada'
+WHERE id = @id AND status = 'em_andamento';
+
+-- name: ConcluirConfirmacao :execrows
+UPDATE execucao_cotas
+SET status = @status, erro_tipo = sqlc.narg(erro_tipo), erro = sqlc.narg(erro), detalhes = @detalhes,
+    protocolo = sqlc.narg(protocolo), finalizada_em = now()
+WHERE id = @id AND status = 'confirmacao_iniciada';
+
+-- Na finalização, cota que ficou em confirmacao_iniciada (o worker não conseguiu informar
+-- o resultado) vai para conferência manual.
+-- name: MarcarConfirmacoesPendentesComoErro :execrows
+UPDATE execucao_cotas
+SET status = 'erro_apos_confirmar', erro_tipo = 'inesperado', finalizada_em = now(),
+    erro = 'o resultado da confirmação não chegou à plataforma: o lance pode ter sido registrado, confira no Histórico'
+WHERE execucao_id = @execucao_id AND status = 'confirmacao_iniciada';
 
 -- name: InserirArquivo :one
 INSERT INTO arquivos (tipo, nome, content_type, tamanho, sha256, conteudo, expira_em)
@@ -185,3 +244,11 @@ WHERE execucao_id = @execucao_id AND status = 'em_andamento';
 UPDATE execucoes
 SET status = 'na_fila', worker = NULL, trava_ate = NULL
 WHERE id = @id AND worker = @worker AND status = 'em_andamento';
+
+-- Um dry-run só pode originar uma execução real (que não tenha sido cancelada ou falhado).
+-- name: ExecucaoRealDoDryRun :one
+SELECT id, status
+FROM execucoes
+WHERE dry_run_origem_id = @dry_run_id AND tipo = 'real' AND status NOT IN ('cancelada', 'falhou')
+ORDER BY id DESC
+LIMIT 1;

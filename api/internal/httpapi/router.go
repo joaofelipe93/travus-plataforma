@@ -11,12 +11,20 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/joaofelipe93/travus-plataforma/api/internal/cripto"
 	"github.com/joaofelipe93/travus-plataforma/api/internal/db"
+	"github.com/joaofelipe93/travus-plataforma/api/internal/drive"
 )
 
 // Pinger é o que o /health precisa do banco (o *pgxpool.Pool satisfaz).
 type Pinger interface {
 	Ping(ctx context.Context) error
+}
+
+type ConfigGoogle struct {
+	ClientID     string
+	ClientSecret string
+	PastaDrive   string
 }
 
 // Config do servidor HTTP.
@@ -32,6 +40,13 @@ type Config struct {
 	TokenWorker string
 	// Screenshots têm dados pessoais: são apagados depois deste prazo.
 	RetencaoScreenshots time.Duration
+	// Lance real só com LANCE_REAL_HABILITADO=true. O worker tem a sua própria chave.
+	LanceRealHabilitado bool
+	// Prazo, contado do fim do dry-run, para aprová-lo como lance real.
+	ValidadeDryRun time.Duration
+	// Cifra segredos de integrações (token do Google). Sem cofre, não há envio ao Drive.
+	Cofre  *cripto.Cofre
+	Google ConfigGoogle
 }
 
 type Servidor struct {
@@ -45,12 +60,24 @@ type Servidor struct {
 	// Fechado no desligamento: encerra os streams SSE abertos.
 	encerrando     chan struct{}
 	encerrarUmaVez sync.Once
+
+	// Fila do Drive: acordada quando um lance ganha PDF. enviadorDrive substitui o
+	// cliente do Google nos testes.
+	acordarDrive  chan struct{}
+	enviadorDrive drive.Enviador
+	driveMu       sync.Mutex
+	driveCliente  drive.Enviador
+	driveVersao   time.Time
+	avisouDrive   string
 }
 
 func NovoServidor(cfg Config, pool *pgxpool.Pool) *Servidor {
+	if cfg.ValidadeDryRun == 0 {
+		cfg.ValidadeDryRun = 2 * time.Hour
+	}
 	return &Servidor{
 		cfg: cfg, pool: pool, q: db.New(pool), ping: pool, hub: NovoHub(pool), agora: time.Now,
-		encerrando: make(chan struct{}),
+		encerrando: make(chan struct{}), acordarDrive: make(chan struct{}, 1),
 	}
 }
 
@@ -59,9 +86,11 @@ func (s *Servidor) Encerrar() {
 	s.encerrarUmaVez.Do(func() { close(s.encerrando) })
 }
 
-// RodarTarefasDeFundo: escuta de eventos para o SSE e limpeza de screenshots vencidos.
+// RodarTarefasDeFundo: escuta de eventos para o SSE, limpeza de screenshots vencidos e
+// envio de comprovantes ao Google Drive.
 func (s *Servidor) RodarTarefasDeFundo(ctx context.Context) {
 	go s.hub.Rodar(ctx)
+	go s.rodarFilaDrive(ctx)
 	go func() {
 		t := time.NewTicker(time.Hour)
 		defer t.Stop()
@@ -88,6 +117,7 @@ func (s *Servidor) RodarTarefasDeFundo(ctx context.Context) {
 // As rotas do worker ficam em RotasInternas, em outra porta.
 func (s *Servidor) Rotas() http.Handler {
 	editores := []db.PerfilUsuario{db.PerfilUsuarioAdmin, db.PerfilUsuarioOperador}
+	admins := []db.PerfilUsuario{db.PerfilUsuarioAdmin}
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("GET /health", s.health)
@@ -115,6 +145,13 @@ func (s *Servidor) Rotas() http.Handler {
 	mux.Handle("POST /execucoes/{id}/cancelar", s.autenticado(exigirPerfil(s.cancelarExecucao, editores...)))
 	mux.Handle("GET /execucoes/{id}/eventos", s.autenticado(s.eventosExecucao))
 	mux.Handle("GET /arquivos/{id}", s.autenticado(s.baixarArquivo))
+
+	// Etapa 3: lance real (só admin aprova) e reimpressão de comprovante.
+	mux.Handle("GET /execucoes/{id}/revisao", s.autenticado(s.revisaoDryRun))
+	mux.Handle("POST /execucoes/reais", s.autenticado(exigirPerfil(s.aprovarExecucaoReal, admins...)))
+	mux.Handle("POST /execucoes/reimpressoes", s.autenticado(exigirPerfil(s.criarReimpressao, editores...)))
+	mux.Handle("POST /lances/{id}/reenviar-drive", s.autenticado(exigirPerfil(s.reenviarAoDrive, editores...)))
+	mux.Handle("GET /integracoes/google-drive", s.autenticado(exigirPerfil(s.situacaoGoogleDrive, admins...)))
 
 	return recuperar(mux)
 }

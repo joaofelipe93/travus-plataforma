@@ -3,6 +3,7 @@
 //	api serve                  sobe a API: pública em API_ADDR (:8080), interna em API_ADDR_INTERNO (:8081)
 //	api migrate up|down|status aplica, desfaz (a última) ou lista as migrações
 //	api usuario ...            cria, lista e desativa usuários (api usuario para ajuda)
+//	api google ...             token do Google Drive cifrado no banco (api google para ajuda)
 //	api healthcheck            consulta o /health local (healthcheck do Docker)
 package main
 
@@ -25,6 +26,7 @@ import (
 	_ "github.com/jackc/pgx/v5/stdlib"
 	"github.com/pressly/goose/v3"
 
+	"github.com/joaofelipe93/travus-plataforma/api/internal/cripto"
 	"github.com/joaofelipe93/travus-plataforma/api/internal/httpapi"
 	"github.com/joaofelipe93/travus-plataforma/api/migrations"
 )
@@ -49,10 +51,15 @@ func main() {
 			fmt.Fprintln(os.Stderr, "erro:", err)
 			os.Exit(1)
 		}
+	case "google":
+		if err = google(os.Args[2:]); err != nil {
+			fmt.Fprintln(os.Stderr, "erro:", err)
+			os.Exit(1)
+		}
 	case "healthcheck":
 		err = healthcheck()
 	default:
-		err = fmt.Errorf("comando desconhecido %q (use serve, migrate, usuario ou healthcheck)", cmd)
+		err = fmt.Errorf("comando desconhecido %q (use serve, migrate, usuario, google ou healthcheck)", cmd)
 	}
 	if err != nil {
 		slog.Error("encerrando com erro", "comando", cmd, "erro", err)
@@ -85,6 +92,10 @@ func serve() error {
 	}
 	defer pool.Close()
 
+	cofre, err := cripto.NovoCofre(os.Getenv("CHAVE_CRIPTOGRAFIA"))
+	if err != nil {
+		return err
+	}
 	cfg := httpapi.Config{
 		AppOrigin:           strings.TrimRight(envOr("APP_ORIGIN", "http://app.localhost"), "/"),
 		CookieSecure:        envOr("COOKIE_SECURE", "true") != "false",
@@ -92,6 +103,15 @@ func serve() error {
 		SessaoMaxima:        7 * 24 * time.Hour,
 		TokenWorker:         tokenWorker,
 		RetencaoScreenshots: 30 * 24 * time.Hour,
+		// Só "true" liga. Desligado, a API recusa aprovar e entregar execuções reais.
+		LanceRealHabilitado: os.Getenv("LANCE_REAL_HABILITADO") == "true",
+		ValidadeDryRun:      2 * time.Hour,
+		Cofre:               cofre,
+		Google: httpapi.ConfigGoogle{
+			ClientID:     os.Getenv("GOOGLE_CLIENT_ID"),
+			ClientSecret: os.Getenv("GOOGLE_CLIENT_SECRET"),
+			PastaDrive:   os.Getenv("GOOGLE_DRIVE_PASTA_ID"),
+		},
 	}
 	servidor := httpapi.NovoServidor(cfg, pool)
 	servidor.RodarTarefasDeFundo(ctx)
@@ -108,7 +128,7 @@ func serve() error {
 		Handler:           servidor.RotasInternas(),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
-	slog.Info("configuração", "app_origin", cfg.AppOrigin, "cookie_secure", cfg.CookieSecure)
+	slog.Info("configuração", "app_origin", cfg.AppOrigin, "cookie_secure", cfg.CookieSecure, "lance_real_habilitado", cfg.LanceRealHabilitado, "drive_configurado", cfg.Google.ClientID != "" && cfg.Google.PastaDrive != "")
 
 	errc := make(chan error, 2)
 	for _, srv := range []*http.Server{publico, interno} {

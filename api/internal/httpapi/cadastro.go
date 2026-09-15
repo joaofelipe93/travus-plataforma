@@ -91,10 +91,52 @@ func (s *Servidor) buscarCliente(w http.ResponseWriter, r *http.Request, _ *Usua
 		erroInterno(w, r, err)
 		return
 	}
+	lancesRows, err := s.q.ListarLancesDoCliente(r.Context(), id)
+	if err != nil {
+		erroInterno(w, r, err)
+		return
+	}
+	lances := make([]lanceClienteJSON, 0, len(lancesRows))
+	for _, l := range lancesRows {
+		var assembleia *string
+		if l.AssembleiaData != nil {
+			texto := l.AssembleiaData.Format("02/01/2006")
+			assembleia = &texto
+		}
+		lances = append(lances, lanceClienteJSON{
+			ID: l.ID, CotaID: l.CotaID, Grupo: l.Grupo, Cota: l.Cota, Versao: l.Versao, Origem: l.Origem, Protocolo: l.Protocolo,
+			AssembleiaData: assembleia, AssembleiaNumero: l.AssembleiaNumero, Modalidade: l.Modalidade, Percentual: l.Percentual,
+			ParcelasEmAtraso: l.ParcelasEmAtraso, LanceExistenteAutorizado: l.LanceExistenteAutorizado, PdfID: l.PdfID,
+			DriveStatus: l.DriveStatus, DriveLink: l.DriveLink, DriveErro: l.DriveErro, RegistradoEm: l.RegistradoEm, ExecucaoID: l.ExecucaoID,
+		})
+	}
 	responderJSON(w, http.StatusOK, map[string]any{
 		"cliente": clienteJSON{c.ID, c.Nome, c.Telefone, c.Email, c.Origem, c.CriadoEm, c.AtualizadoEm},
 		"cotas":   cotasParaJSON(cotas),
+		"lances":  lances,
 	})
+}
+
+type lanceClienteJSON struct {
+	ID                       int64      `json:"id"`
+	CotaID                   int64      `json:"cota_id"`
+	Grupo                    string     `json:"grupo"`
+	Cota                     string     `json:"cota"`
+	Versao                   string     `json:"versao"`
+	Origem                   string     `json:"origem"`
+	Protocolo                string     `json:"protocolo"`
+	AssembleiaData           *string    `json:"assembleia_data"`
+	AssembleiaNumero         *string    `json:"assembleia_numero"`
+	Modalidade               string     `json:"modalidade"`
+	Percentual               *string    `json:"percentual"`
+	ParcelasEmAtraso         bool       `json:"parcelas_em_atraso"`
+	LanceExistenteAutorizado bool       `json:"lance_existente_autorizado"`
+	PdfID                    *string    `json:"pdf_id"`
+	DriveStatus              string     `json:"drive_status"`
+	DriveLink                *string    `json:"drive_link"`
+	DriveErro                *string    `json:"drive_erro"`
+	RegistradoEm             *time.Time `json:"registrado_em"`
+	ExecucaoID               *int64     `json:"execucao_id"`
 }
 
 func (s *Servidor) listarCotas(w http.ResponseWriter, r *http.Request, _ *UsuarioSessao) {

@@ -35,6 +35,7 @@ type execucaoResumoJSON struct {
 	FinalizadaEm           *time.Time `json:"finalizada_em"`
 	CancelamentoSolicitado bool       `json:"cancelamento_solicitado"`
 	Erro                   *string    `json:"erro"`
+	DryRunOrigemID         *int64     `json:"dry_run_origem_id"`
 	Total                  int32      `json:"total"`
 	Sucesso                int32      `json:"sucesso"`
 	ComErro                int32      `json:"com_erro"`
@@ -42,22 +43,46 @@ type execucaoResumoJSON struct {
 }
 
 type cotaExecucaoJSON struct {
-	ID           int64           `json:"id"`
-	CotaID       int64           `json:"cota_id"`
-	Ordem        int32           `json:"ordem"`
-	Grupo        string          `json:"grupo"`
-	Cota         string          `json:"cota"`
-	Versao       string          `json:"versao"`
-	ClienteNome  string          `json:"cliente_nome"`
-	Modalidade   string          `json:"modalidade"`
-	Status       string          `json:"status"`
-	ErroTipo     *string         `json:"erro_tipo"`
-	Erro         *string         `json:"erro"`
-	Detalhes     json.RawMessage `json:"detalhes"`
-	ScreenshotID *string         `json:"screenshot_id"`
-	Tentativas   int32           `json:"tentativas"`
-	IniciadaEm   *time.Time      `json:"iniciada_em"`
-	FinalizadaEm *time.Time      `json:"finalizada_em"`
+	ID                     int64           `json:"id"`
+	CotaID                 int64           `json:"cota_id"`
+	Ordem                  int32           `json:"ordem"`
+	Grupo                  string          `json:"grupo"`
+	Cota                   string          `json:"cota"`
+	Versao                 string          `json:"versao"`
+	ClienteNome            string          `json:"cliente_nome"`
+	Modalidade             string          `json:"modalidade"`
+	Status                 string          `json:"status"`
+	ErroTipo               *string         `json:"erro_tipo"`
+	Erro                   *string         `json:"erro"`
+	Detalhes               json.RawMessage `json:"detalhes"`
+	ScreenshotID           *string         `json:"screenshot_id"`
+	Tentativas             int32           `json:"tentativas"`
+	IniciadaEm             *time.Time      `json:"iniciada_em"`
+	FinalizadaEm           *time.Time      `json:"finalizada_em"`
+	AssembleiaAprovada     *string         `json:"assembleia_aprovada"`
+	PermitirLanceExistente bool            `json:"permitir_lance_existente"`
+	Protocolo              *string         `json:"protocolo"`
+}
+
+func cotaParaJSON(c db.ListarCotasDaExecucaoRow) cotaExecucaoJSON {
+	return cotaExecucaoJSON{
+		ID: c.ID, CotaID: c.CotaID, Ordem: c.Ordem, Grupo: c.Grupo, Cota: c.Cota, Versao: c.Versao,
+		ClienteNome: c.ClienteNome, Modalidade: c.Modalidade, Status: c.Status, ErroTipo: c.ErroTipo,
+		Erro: c.Erro, Detalhes: json.RawMessage(c.Detalhes), ScreenshotID: c.ScreenshotID, Tentativas: c.Tentativas,
+		IniciadaEm: c.IniciadaEm, FinalizadaEm: c.FinalizadaEm, AssembleiaAprovada: c.AssembleiaAprovada,
+		PermitirLanceExistente: c.PermitirLanceExistente, Protocolo: c.Protocolo,
+	}
+}
+
+type lanceExecucaoJSON struct {
+	ID               int64   `json:"id"`
+	ExecucaoCotaID   int64   `json:"execucao_cota_id"`
+	Protocolo        string  `json:"protocolo"`
+	PdfID            *string `json:"pdf_id"`
+	DriveStatus      string  `json:"drive_status"`
+	DriveLink        *string `json:"drive_link"`
+	DriveErro        *string `json:"drive_erro"`
+	ParcelasEmAtraso bool    `json:"parcelas_em_atraso"`
 }
 
 type pedidoExecucao struct {
@@ -65,6 +90,7 @@ type pedidoExecucao struct {
 	CotaIDs []int64 `json:"cota_ids"`
 }
 
+// criarExecucao cria um dry-run. Lance real só por POST /execucoes/reais (revisão + admin).
 func (s *Servidor) criarExecucao(w http.ResponseWriter, r *http.Request, u *UsuarioSessao) {
 	var p pedidoExecucao
 	if err := lerJSON(w, r, &p, 64<<10); err != nil {
@@ -72,7 +98,7 @@ func (s *Servidor) criarExecucao(w http.ResponseWriter, r *http.Request, u *Usua
 		return
 	}
 	if p.Tipo != "dry_run" {
-		responderErro(w, http.StatusUnprocessableEntity, "só o dry-run está disponível: a execução real ainda não foi liberada")
+		responderErro(w, http.StatusUnprocessableEntity, "aqui só se cria dry-run: lance real é aprovado na revisão de um dry-run concluído")
 		return
 	}
 	ids := make([]int64, 0, len(p.CotaIDs))
@@ -145,7 +171,7 @@ func (s *Servidor) listarExecucoes(w http.ResponseWriter, r *http.Request, _ *Us
 		out = append(out, execucaoResumoJSON{
 			ID: e.ID, Tipo: e.Tipo, Status: e.Status, CriadaPorNome: e.CriadaPorNome, CriadaEm: e.CriadaEm,
 			IniciadaEm: e.IniciadaEm, FinalizadaEm: e.FinalizadaEm, CancelamentoSolicitado: e.CancelamentoSolicitado,
-			Erro: e.Erro, Total: e.Total, Sucesso: e.Sucesso, ComErro: e.ComErro, Restantes: e.Restantes,
+			Erro: e.Erro, DryRunOrigemID: e.DryRunOrigemID, Total: e.Total, Sucesso: e.Sucesso, ComErro: e.ComErro, Restantes: e.Restantes,
 		})
 	}
 	responderJSON(w, http.StatusOK, map[string]any{"execucoes": out})
@@ -176,12 +202,16 @@ func (s *Servidor) buscarExecucao(w http.ResponseWriter, r *http.Request, _ *Usu
 	totais := map[string]int{}
 	for _, c := range rows {
 		totais[c.Status]++
-		cotas = append(cotas, cotaExecucaoJSON{
-			ID: c.ID, CotaID: c.CotaID, Ordem: c.Ordem, Grupo: c.Grupo, Cota: c.Cota, Versao: c.Versao,
-			ClienteNome: c.ClienteNome, Modalidade: c.Modalidade, Status: c.Status, ErroTipo: c.ErroTipo,
-			Erro: c.Erro, Detalhes: json.RawMessage(c.Detalhes), ScreenshotID: c.ScreenshotID, Tentativas: c.Tentativas,
-			IniciadaEm: c.IniciadaEm, FinalizadaEm: c.FinalizadaEm,
-		})
+		cotas = append(cotas, cotaParaJSON(c))
+	}
+	lancesRows, err := s.q.ListarLancesDaExecucao(ctx, id)
+	if err != nil {
+		erroInterno(w, r, err)
+		return
+	}
+	lances := make([]lanceExecucaoJSON, 0, len(lancesRows))
+	for _, l := range lancesRows {
+		lances = append(lances, lanceExecucaoJSON{l.ID, l.ExecucaoCotaID, l.Protocolo, l.PdfID, l.DriveStatus, l.DriveLink, l.DriveErro, l.ParcelasEmAtraso})
 	}
 	var posicao *int32
 	if e.Status == "na_fila" {
@@ -195,12 +225,14 @@ func (s *Servidor) buscarExecucao(w http.ResponseWriter, r *http.Request, _ *Usu
 	responderJSON(w, http.StatusOK, map[string]any{
 		"execucao": map[string]any{
 			"id": e.ID, "tipo": e.Tipo, "status": e.Status, "criada_por_nome": e.CriadaPorNome,
+			"aprovada_por_nome": e.AprovadaPorNome, "dry_run_origem_id": e.DryRunOrigemID,
 			"criada_em": e.CriadaEm, "iniciada_em": e.IniciadaEm, "finalizada_em": e.FinalizadaEm,
 			"cancelamento_solicitado": e.CancelamentoSolicitado, "cancelada_por_nome": e.CanceladaPorNome,
 			"erro": e.Erro, "posicao_fila": posicao,
 		},
 		"totais": totais,
 		"cotas":  cotas,
+		"lances": lances,
 	})
 }
 
@@ -260,7 +292,7 @@ func (s *Servidor) cancelarExecucao(w http.ResponseWriter, r *http.Request, u *U
 		return
 	}
 	if err := qtx.RegistrarAuditoria(ctx, paramsAuditoria(r, &u.ID, "execucao_cancelada", "execucao", idTexto(id),
-		map[string]any{"situacao_anterior": e.Status})); err != nil {
+		map[string]any{"situacao_anterior": e.Status, "tipo": e.Tipo})); err != nil {
 		erroInterno(w, r, err)
 		return
 	}
@@ -273,7 +305,7 @@ func (s *Servidor) cancelarExecucao(w http.ResponseWriter, r *http.Request, u *U
 
 var formatoUUID = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
 
-// baixarArquivo entrega screenshots só para quem tem sessão (mostram CPF e data de nascimento).
+// baixarArquivo entrega screenshots e comprovantes só para quem tem sessão (dados pessoais).
 func (s *Servidor) baixarArquivo(w http.ResponseWriter, r *http.Request, _ *UsuarioSessao) {
 	id := r.PathValue("id")
 	if !formatoUUID.MatchString(id) {
