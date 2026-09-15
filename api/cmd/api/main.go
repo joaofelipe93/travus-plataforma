@@ -1,8 +1,9 @@
 // Comando da API da Travus Plataforma.
 //
-//	api serve                 sobe o servidor HTTP (padrão)
+//	api serve                  sobe o servidor HTTP (padrão)
 //	api migrate up|down|status aplica, desfaz (a última) ou lista as migrações
-//	api healthcheck           consulta o /health local (healthcheck do Docker)
+//	api usuario ...            cria, lista e desativa usuários (api usuario para ajuda)
+//	api healthcheck            consulta o /health local (healthcheck do Docker)
 package main
 
 import (
@@ -14,6 +15,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -39,10 +41,16 @@ func main() {
 		err = serve()
 	case "migrate":
 		err = migrate(os.Args[2:])
+	case "usuario":
+		if err = usuario(os.Args[2:]); err != nil {
+			// Comando de terminal: mensagem simples em vez de log JSON.
+			fmt.Fprintln(os.Stderr, "erro:", err)
+			os.Exit(1)
+		}
 	case "healthcheck":
 		err = healthcheck()
 	default:
-		err = fmt.Errorf("comando desconhecido %q (use serve, migrate ou healthcheck)", cmd)
+		err = fmt.Errorf("comando desconhecido %q (use serve, migrate, usuario ou healthcheck)", cmd)
 	}
 	if err != nil {
 		slog.Error("encerrando com erro", "comando", cmd, "erro", err)
@@ -65,11 +73,18 @@ func serve() error {
 	}
 	defer pool.Close()
 
+	cfg := httpapi.Config{
+		AppOrigin:         strings.TrimRight(envOr("APP_ORIGIN", "http://app.localhost"), "/"),
+		CookieSecure:      envOr("COOKIE_SECURE", "true") != "false",
+		SessaoInatividade: 12 * time.Hour,
+		SessaoMaxima:      7 * 24 * time.Hour,
+	}
 	srv := &http.Server{
 		Addr:              envOr("API_ADDR", ":8080"),
-		Handler:           httpapi.NewRouter(pool),
+		Handler:           httpapi.NovoServidor(cfg, pool).Rotas(),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
+	slog.Info("configuração", "app_origin", cfg.AppOrigin, "cookie_secure", cfg.CookieSecure)
 
 	errc := make(chan error, 1)
 	go func() {
