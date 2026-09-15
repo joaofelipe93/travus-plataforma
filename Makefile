@@ -9,7 +9,7 @@ export HOST_GID := $(shell id -g)
 ESPERAR_GATEWAY = for i in $$(seq 30); do [ "$$(curl -s -o /dev/null -w '%{http_code}' http://app.localhost/login)" = 200 ] && exit 0; sleep 1; done; echo "aviso: app.localhost/login ainda não responde 200 (veja make logs s=traefik)"
 
 .DEFAULT_GOAL := help
-.PHONY: help env up down logs ps migrate usuario test smoke dev-web sqlc paridade-csv worker-dry-run
+.PHONY: help env up down logs ps migrate usuario google-token google-status test smoke dev-web sqlc paridade-csv worker-dry-run
 
 help: ## Lista os comandos
 	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  make %-16s %s\n", $$1, $$2}'
@@ -32,7 +32,14 @@ migrate: env ## Aplica as migrações pendentes
 	$(COMPOSE) run --rm --build migrate
 
 usuario: env ## Usuários: make usuario args='criar --email a@b.com --nome "Ana" --perfil operador' (ou listar, senha, desativar, ativar)
-	$(COMPOSE) --profile cli run --rm --build cli $(args)
+	$(COMPOSE) --profile cli run --rm --build cli usuario $(args)
+
+google-token: env ## Importa workers/canopus/token.json (Google Drive) cifrado no banco
+	@test -f workers/canopus/token.json || { echo "workers/canopus/token.json não encontrado"; exit 1; }
+	$(COMPOSE) --profile cli run --rm -T --build cli google importar-token < workers/canopus/token.json
+
+google-status: env ## Mostra o que está configurado para o envio ao Google Drive
+	$(COMPOSE) --profile cli run --rm -T cli google status
 
 test: env ## Testes: api (unitários e integração com Postgres), web (lint e tipos), worker (node:test, sem Newcon)
 	$(COMPOSE) up -d --wait postgres
@@ -61,9 +68,10 @@ worker-dry-run: env ## Script legado: dry-run de 1 cota da planilha no container
 	$(COMPOSE) --profile canopus run --rm --build worker-legado
 	@echo "Screenshots em deploy/data/canopus/screenshots/"
 
-# Garante deploy/.env com senha do Postgres e WORKER_TOKEN (acrescenta o que faltar).
+# Garante deploy/.env com senha do Postgres, WORKER_TOKEN e CHAVE_CRIPTOGRAFIA (acrescenta o que faltar).
 env: deploy/.env
 	@grep -q '^WORKER_TOKEN=' deploy/.env || { umask 077; echo "WORKER_TOKEN=$$(openssl rand -hex 32)" >> deploy/.env; echo "Acrescentado WORKER_TOKEN ao deploy/.env"; }
+	@grep -q '^CHAVE_CRIPTOGRAFIA=' deploy/.env || { umask 077; echo "CHAVE_CRIPTOGRAFIA=$$(openssl rand -hex 32)" >> deploy/.env; echo "Acrescentada CHAVE_CRIPTOGRAFIA ao deploy/.env (guarde com o backup do banco: sem ela, o token do Google não decifra)"; }
 
 deploy/.env:
 	@umask 077 && sed "s/troque-esta-senha/$$(openssl rand -hex 24)/" deploy/.env.example > $@

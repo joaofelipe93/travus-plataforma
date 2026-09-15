@@ -5,7 +5,10 @@
 #   make worker-dry-run  script legado: dry-run de 1 cota da planilha (nunca confirma lance)
 #
 # Sem o Makefile: cd deploy && docker compose up -d --build
-# (as variáveis vêm de deploy/.env: POSTGRES_* e WORKER_TOKEN; veja .env.example)
+# (as variáveis vêm de deploy/.env: POSTGRES_*, WORKER_TOKEN, CHAVE_CRIPTOGRAFIA; veja .env.example)
+#
+# LANCE REAL: desligado por padrão (LANCE_REAL_HABILITADO=false na API e no worker).
+# Só ligue quando o usuário pedir o lance real, na hora.
 name: travus
 
 x-api: &api-base
@@ -15,6 +18,12 @@ x-api: &api-base
     DATABASE_URL: postgres://${POSTGRES_USER:-travus}:${POSTGRES_PASSWORD:?defina POSTGRES_PASSWORD em deploy/.env}@postgres:5432/${POSTGRES_DB:-travus}?sslmode=disable
     APP_ORIGIN: http://app.localhost
     WORKER_TOKEN: ${WORKER_TOKEN:?defina WORKER_TOKEN em deploy/.env (make up gera)}
+    CHAVE_CRIPTOGRAFIA: ${CHAVE_CRIPTOGRAFIA:?defina CHAVE_CRIPTOGRAFIA em deploy/.env (make up gera)}
+    LANCE_REAL_HABILITADO: ${LANCE_REAL_HABILITADO:-false}
+    # Google Drive (opcional): sem os três, os comprovantes ficam só na plataforma.
+    GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+    GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
+    GOOGLE_DRIVE_PASTA_ID: ${GOOGLE_DRIVE_PASTA_ID:-}
     TZ: America/Sao_Paulo
   mem_limit: 256m
 
@@ -143,8 +152,9 @@ services:
       - traefik.http.routers.web.middlewares=sessao-pagina@file,cabecalhos-seguranca@file
     mem_limit: 384m
 
-  # Worker Canopus: pega execuções da fila na API interna. Etapa 2: só dry-run (não há
-  # código de confirmar). Fora do Traefik; só na rede interna (precisa de saída para o Newcon).
+  # Worker Canopus: pega execuções da fila na API interna (dry-run, reimpressão e, só com
+  # LANCE_REAL_HABILITADO=true, lance real). Fora do Traefik; só na rede interna (precisa
+  # de saída para o Newcon).
   worker-canopus:
     build: ../workers/canopus
     image: travus/worker-canopus:dev
@@ -159,6 +169,7 @@ services:
       API_INTERNA_URL: http://api:8081
       WORKER_TOKEN: ${WORKER_TOKEN:?defina WORKER_TOKEN em deploy/.env (make up gera)}
       WORKER_NOME: canopus-1
+      LANCE_REAL_HABILITADO: ${LANCE_REAL_HABILITADO:-false}
       TZ: America/Sao_Paulo
     depends_on:
       api:
@@ -169,11 +180,11 @@ services:
     networks: [interna]
     mem_limit: 1536m
 
-  # Comando de usuários: make usuario args='criar --email … --nome "…" --perfil operador'
+  # Comandos da API: make usuario args='criar …', make google-token, make google-status.
   cli:
     <<: *api-base
     profiles: [cli]
-    entrypoint: ["/api", "usuario"]
+    entrypoint: ["/api"]
     restart: "no"
     depends_on:
       postgres:
