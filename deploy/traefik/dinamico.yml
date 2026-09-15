@@ -2,10 +2,13 @@
 http:
   middlewares:
     # Barreira de sessão no gateway. A API responde 204 (libera) ou 401.
+    # trustForwardHeader false: X-Forwarded-* vindos do cliente são descartados.
     sessao-api:
       forwardAuth:
         address: http://api:8080/auth/verificar
         authRequestHeaders: ["Cookie"]
+        trustForwardHeader: false
+        maxResponseBodySize: 65536
 
     # Mesma checagem para páginas do app: sem sessão, redireciona para /login.
     sessao-pagina:
@@ -13,6 +16,8 @@ http:
         address: http://api:8080/auth/verificar?modo=pagina
         authRequestHeaders: ["Cookie"]
         preserveLocationHeader: true
+        trustForwardHeader: false
+        maxResponseBodySize: 65536
 
     # O navegador chama app.<domínio>/api/...; a API não conhece o prefixo.
     remover-prefixo-api:

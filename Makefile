@@ -5,6 +5,9 @@ COMPOSE := docker compose -f deploy/docker-compose.yml
 export HOST_UID := $(shell id -u)
 export HOST_GID := $(shell id -g)
 
+# O Traefik leva alguns segundos para ligar as rotas depois que o container fica saudável.
+ESPERAR_GATEWAY = for i in $$(seq 30); do [ "$$(curl -s -o /dev/null -w '%{http_code}' http://app.localhost/login)" = 200 ] && exit 0; sleep 1; done; echo "aviso: app.localhost/login ainda não responde 200 (veja make logs s=traefik)"
+
 .DEFAULT_GOAL := help
 .PHONY: help up down logs ps migrate usuario test smoke sqlc paridade-csv worker-dry-run
 
@@ -13,6 +16,7 @@ help: ## Lista os comandos
 
 up: deploy/.env ## Sobe traefik, postgres, migrações, api e web
 	$(COMPOSE) up -d --build --wait
+	@$(ESPERAR_GATEWAY)
 	@echo "Pronto: http://app.localhost  |  http://api.localhost/health  |  http://traefik.localhost"
 
 down: ## Derruba os containers (o banco fica no volume)
@@ -40,6 +44,7 @@ test: deploy/.env ## Testes: api (unitários e integração com Postgres), web (
 dev-web: deploy/.env ## Web em modo desenvolvimento (next dev) atrás do Traefik; make up volta ao normal
 	cd web && npm ci --no-audit --no-fund
 	$(COMPOSE) -f deploy/docker-compose.dev.yml up -d --wait web
+	@$(ESPERAR_GATEWAY)
 	@echo "Web em modo dev: http://app.localhost (logs: make logs s=web)"
 
 smoke: ## Checagens pelo gateway com curl (precisa de make up)
