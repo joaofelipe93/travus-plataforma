@@ -105,7 +105,9 @@ export async function connect(): Promise<void> {
       keys: makeCacheableSignalKeyStore(state.keys, baileysLogger),
     },
     logger: baileysLogger,
-    browser: Browsers.ubuntu('Check-in Notifier'),
+    // Nome em "Dispositivos conectados" no celular. Diferente do "Check-in Notifier" da VM appairbnb:
+    // na migração, é por ele que se sabe qual aparelho remover.
+    browser: Browsers.ubuntu('Travus Plataforma'),
     // Não marcar como online: evita que as notificações do celular parem
     // de chegar enquanto este serviço estiver rodando.
     markOnlineOnConnect: false,
