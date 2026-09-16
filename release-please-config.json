@@ -3,6 +3,7 @@
   "release-type": "simple",
   "include-component-in-tag": false,
   "include-v-in-tag": true,
+  "initial-version": "0.1.0",
   "pull-request-title-pattern": "chore${scope}: versão ${version}",
   "pull-request-header": "Nova versão da Travus Plataforma. O merge deste PR cria a tag e o release no GitHub (o deploy continua com aprovação).",
   "packages": {
@@ -12,17 +13,57 @@
       "bump-minor-pre-major": true,
       "bump-patch-for-minor-pre-major": false,
       "changelog-sections": [
-        { "type": "feat", "section": "Novidades" },
-        { "type": "fix", "section": "Correções" },
-        { "type": "perf", "section": "Desempenho" },
-        { "type": "revert", "section": "Revertido" },
-        { "type": "docs", "section": "Documentação", "hidden": true },
-        { "type": "ci", "section": "CI", "hidden": true },
-        { "type": "build", "section": "Build", "hidden": true },
-        { "type": "refactor", "section": "Refatoração", "hidden": true },
-        { "type": "test", "section": "Testes", "hidden": true },
-        { "type": "chore", "section": "Manutenção", "hidden": true },
-        { "type": "style", "section": "Estilo", "hidden": true }
+        {
+          "type": "feat",
+          "section": "Novidades"
+        },
+        {
+          "type": "fix",
+          "section": "Correções"
+        },
+        {
+          "type": "perf",
+          "section": "Desempenho"
+        },
+        {
+          "type": "revert",
+          "section": "Revertido"
+        },
+        {
+          "type": "docs",
+          "section": "Documentação",
+          "hidden": true
+        },
+        {
+          "type": "ci",
+          "section": "CI",
+          "hidden": true
+        },
+        {
+          "type": "build",
+          "section": "Build",
+          "hidden": true
+        },
+        {
+          "type": "refactor",
+          "section": "Refatoração",
+          "hidden": true
+        },
+        {
+          "type": "test",
+          "section": "Testes",
+          "hidden": true
+        },
+        {
+          "type": "chore",
+          "section": "Manutenção",
+          "hidden": true
+        },
+        {
+          "type": "style",
+          "section": "Estilo",
+          "hidden": true
+        }
       ]
     }
   }
