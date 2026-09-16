@@ -86,6 +86,13 @@ type Auditoria struct {
 	CriadoEm   time.Time
 }
 
+type CheckinConfiguracao struct {
+	ID           bool
+	GrupoJid     string
+	GrupoNome    string
+	AtualizadoEm time.Time
+}
+
 type CheckinEvento struct {
 	ID         int64
 	ChaveDedup string

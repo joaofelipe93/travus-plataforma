@@ -1,4 +1,4 @@
-import { TEST_SECRET } from '../helpers/setup.js'
+import { TEST_SECRET, TEST_ADMIN_TOKEN } from '../helpers/setup.js'
 import { buildProtectedApp } from '../helpers/app.js'
 import { test, describe, before, after } from 'node:test'
 import assert from 'node:assert/strict'
@@ -66,5 +66,33 @@ describe('requireToken', () => {
   test('não vaza o segredo no corpo da resposta', async () => {
     const res = await get({ 'x-webhook-token': 'invalido' })
     assert.equal(res.body.includes(TEST_SECRET), false)
+  })
+})
+
+describe('requireAdminToken', () => {
+  let app: FastifyInstance
+
+  before(async () => {
+    app = await buildProtectedApp()
+  })
+  after(async () => {
+    await app.close()
+  })
+
+  test('aceita o token de administração', async () => {
+    const res = await app.inject({ method: 'GET', url: '/admin', headers: { authorization: `Bearer ${TEST_ADMIN_TOKEN}` } })
+    assert.equal(res.statusCode, 200)
+  })
+
+  test('o token do webhook não abre as rotas de administração (QR, payloads)', async () => {
+    for (const headers of [{ 'x-webhook-token': TEST_SECRET }, { authorization: `Bearer ${TEST_SECRET}` }]) {
+      const res = await app.inject({ method: 'GET', url: '/admin', headers })
+      assert.equal(res.statusCode, 401)
+    }
+  })
+
+  test('o token de administração não serve para o webhook', async () => {
+    const res = await app.inject({ method: 'GET', url: '/protegida', headers: { 'x-webhook-token': TEST_ADMIN_TOKEN } })
+    assert.equal(res.statusCode, 401)
   })
 })

@@ -16,11 +16,13 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 export const TEST_SECRET = 'segredo-de-teste-32-chars'
+export const TEST_ADMIN_TOKEN = 'token-de-administracao-de-teste-0123456789'
 export const TEST_GROUP_JID = '1234567890-1234567890@g.us'
 
 const dir = mkdtempSync(join(tmpdir(), 'checkin-test-'))
 
 process.env.WEBHOOK_SECRET = TEST_SECRET
+process.env.ADMIN_TOKEN = TEST_ADMIN_TOKEN
 // Sem TEST_DATABASE_URL, só os testes que não tocam no banco funcionam: os demais
 // falham em helpers/db.ts com a explicação.
 process.env.DATABASE_URL = process.env.TEST_DATABASE_URL ?? 'postgres://sem-banco-de-teste.invalid/travus_teste'

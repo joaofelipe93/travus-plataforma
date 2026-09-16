@@ -18,11 +18,14 @@ const schema = z.object({
   // por um agregador (Loki, Datadog...). Cores só saem se houver TTY.
   LOG_FORMAT: z.enum(['pretty', 'json']).default('pretty'),
 
-  // Token exigido no header `x-webhook-token`.
+  // Token do webhook (header `x-webhook-token`), o que o provedor conhece.
   WEBHOOK_SECRET: z.string().min(8, 'WEBHOOK_SECRET precisa ter ao menos 8 caracteres'),
 
-  // Opcional no boot: permite subir o serviço, parear o QR e descobrir o JID
-  // via GET /whatsapp/groups antes de preencher.
+  // Token das rotas de administração (/whatsapp/*, /events), só da API da plataforma.
+  ADMIN_TOKEN: z.string().min(32, 'ADMIN_TOKEN precisa ter ao menos 32 caracteres'),
+
+  // Grupo usado enquanto o admin não escolhe um pela tela (checkin.configuracao). Opcional:
+  // sem nenhum dos dois, os eventos são gravados sem envio.
   WHATSAPP_GROUP_JID: z
     .string()
     .regex(/@g\.us$/, 'WHATSAPP_GROUP_JID deve terminar em @g.us')

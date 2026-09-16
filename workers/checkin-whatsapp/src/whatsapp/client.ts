@@ -30,6 +30,12 @@ let reconnectAttempts = 0
 let reconnectTimer: NodeJS.Timeout | undefined
 let stopped = false
 let openedAt: number | undefined
+/**
+ * Muda a cada reiniciarSessao. Um connect() que começou antes (lendo arquivos, buscando a
+ * versão) desiste ao ver outra geração: senão haveria dois sockets na mesma sessão.
+ */
+let geracao = 0
+let reiniciando: Promise<void> | undefined
 
 /** Nome do código de desconexão do Baileys — 428 sozinho não diz nada no log. */
 function nomeDoMotivo(code: number | undefined): string {
@@ -44,6 +50,11 @@ export function getStatus(): ConnectionStatus {
 
 export function getQr(): string | undefined {
   return currentQr
+}
+
+/** Número pareado (ex.: `5511999999999:12@s.whatsapp.net`), só com a conexão aberta. */
+export function getConta(): string | undefined {
+  return status === 'open' ? sock?.user?.id : undefined
 }
 
 export function isConnected(): boolean {
@@ -76,14 +87,17 @@ function scheduleReconnect() {
 }
 
 export async function connect(): Promise<void> {
-  if (stopped) return
+  if (stopped || reiniciando) return
+  const minhaGeracao = geracao
   status = 'connecting'
 
   const { state, saveCreds } = await useMultiFileAuthState(env.AUTH_DIR)
   const { version } = await fetchLatestBaileysVersion()
+  // Uma reinicialização pode ter começado enquanto os arquivos e a versão eram lidos.
+  if (stopped || minhaGeracao !== geracao) return
   log.info({ waVersion: version.join('.') }, 'abrindo socket')
 
-  sock = makeWASocket({
+  const este = makeWASocket({
     version,
     auth: {
       creds: state.creds,
@@ -98,9 +112,17 @@ export async function connect(): Promise<void> {
     syncFullHistory: false,
   })
 
-  sock.ev.on('creds.update', saveCreds)
+  sock = este
 
-  sock.ev.on('connection.update', (update) => {
+  // Eventos de um socket que já foi substituído (reiniciarSessao) são ignorados: senão o
+  // fechamento dele agendaria outra reconexão e as credenciais antigas seriam regravadas
+  // na pasta recém-apagada.
+  este.ev.on('creds.update', () => {
+    if (este === sock) void saveCreds()
+  })
+
+  este.ev.on('connection.update', (update) => {
+    if (este !== sock) return
     const { connection, lastDisconnect, qr } = update
 
     if (qr) {
@@ -175,6 +197,55 @@ export async function connect(): Promise<void> {
       scheduleReconnect()
     }
   })
+}
+
+/**
+ * "Desconectar e gerar novo QR" (tela WhatsApp da plataforma): desvincula o aparelho quando
+ * há sessão aberta, apaga as credenciais e abre um socket novo, que emite um QR. As
+ * notificações ficam na fila até alguém escanear. Duas chamadas seguidas viram uma só.
+ */
+export function reiniciarSessao(): Promise<void> {
+  if (reiniciando) return reiniciando
+  if (stopped) return Promise.resolve()
+  geracao += 1
+  const pedido = (async () => {
+    const antigo = sock
+    const estavaAberto = status === 'open'
+    // Desliga o socket atual antes de tudo: os eventos dele passam a ser ignorados.
+    sock = undefined
+    status = 'disconnected'
+    currentQr = undefined
+    openedAt = undefined
+    if (reconnectTimer) clearTimeout(reconnectTimer)
+    reconnectAttempts = 0
+
+    if (antigo && estavaAberto) {
+      try {
+        // Remove o dispositivo em "Dispositivos conectados" no celular.
+        await antigo.logout()
+      } catch (err) {
+        log.warn({ err }, 'falha ao desvincular no WhatsApp; apagando as credenciais mesmo assim')
+      }
+    }
+    try {
+      antigo?.end(undefined)
+    } catch (err) {
+      log.debug({ err }, 'erro ao fechar o socket antigo')
+    }
+    await rm(env.AUTH_DIR, { recursive: true, force: true })
+    log.warn({ estavaAberto }, 'sessão do WhatsApp apagada a pedido — gerando novo QR')
+  })().finally(() => {
+    reiniciando = undefined
+  })
+  reiniciando = pedido
+  // Reconecta depois de liberar a trava (connect() recusa enquanto reinicia).
+  void pedido
+    .then(() => connect())
+    .catch((err) => {
+      log.error({ err }, 'falha ao reiniciar a sessão do WhatsApp')
+      scheduleReconnect()
+    })
+  return pedido
 }
 
 export async function disconnect(): Promise<void> {

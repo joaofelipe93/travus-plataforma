@@ -16,7 +16,7 @@ if (!new URL(url).pathname.includes('teste')) {
 
 /** Zera as tabelas entre testes. */
 export async function resetDb(): Promise<void> {
-  await pool.query('TRUNCATE checkin.mensagens, checkin.eventos RESTART IDENTITY')
+  await pool.query('TRUNCATE checkin.mensagens, checkin.eventos, checkin.configuracao RESTART IDENTITY')
 }
 
 /** Cria um evento direto no banco, para testes que só precisam do id. */

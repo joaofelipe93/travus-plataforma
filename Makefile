@@ -139,6 +139,7 @@ backup-baixar: ## Copia o último backup da VM para deploy/backups: make backup-
 env: deploy/.env
 	@grep -q '^WORKER_TOKEN=' deploy/.env || { umask 077; echo "WORKER_TOKEN=$$(openssl rand -hex 32)" >> deploy/.env; echo "Acrescentado WORKER_TOKEN ao deploy/.env"; }
 	@grep -q '^CHECKIN_WEBHOOK_SECRET=' deploy/.env || { umask 077; echo "CHECKIN_WEBHOOK_SECRET=$$(openssl rand -hex 32)" >> deploy/.env; echo "Acrescentado CHECKIN_WEBHOOK_SECRET ao deploy/.env"; }
+	@grep -q '^CHECKIN_ADMIN_TOKEN=' deploy/.env || { umask 077; echo "CHECKIN_ADMIN_TOKEN=$$(openssl rand -hex 32)" >> deploy/.env; echo "Acrescentado CHECKIN_ADMIN_TOKEN ao deploy/.env"; }
 	@grep -q '^CHECKIN_DB_SENHA=' deploy/.env || { umask 077; echo "CHECKIN_DB_SENHA=$$(openssl rand -hex 32)" >> deploy/.env; echo "Acrescentada CHECKIN_DB_SENHA ao deploy/.env (aplique com make migrate ou make up)"; }
 	@grep -q '^CHAVE_CRIPTOGRAFIA=' deploy/.env || { umask 077; echo "CHAVE_CRIPTOGRAFIA=$$(openssl rand -hex 32)" >> deploy/.env; echo "Acrescentada CHAVE_CRIPTOGRAFIA ao deploy/.env (guarde com o backup do banco: sem ela, o token do Google não decifra)"; }
 

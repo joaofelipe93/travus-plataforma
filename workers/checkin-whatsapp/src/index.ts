@@ -2,6 +2,7 @@ import { env } from './config/env.js'
 import { logger } from './logger.js'
 import { closeDb } from './db/index.js'
 import { stats } from './db/outbox.js'
+import { grupoDestino } from './db/configuracao.js'
 import { buildServer } from './server.js'
 import { connect, disconnect, getStatus } from './whatsapp/client.js'
 import { startOutboxWorker, stopOutboxWorker } from './whatsapp/outbox.js'
@@ -49,7 +50,7 @@ async function main() {
       port: env.PORT,
       host: env.HOST,
       authDir: env.AUTH_DIR,
-      groupJid: env.WHATSAPP_GROUP_JID ?? null,
+      groupJidAmbiente: env.WHATSAPP_GROUP_JID ?? null,
     },
     'iniciando notificador de check-in',
   )
@@ -69,10 +70,13 @@ async function main() {
   const pendentes = Object.fromEntries((await stats()).map((s) => [s.status, s.count]))
   logger.info({ port: env.PORT, outbox: pendentes }, 'servidor pronto')
 
-  if (!env.WHATSAPP_GROUP_JID) {
+  const destino = await grupoDestino()
+  if (destino) {
+    logger.info({ grupo: destino.jid, nome: destino.nome, origem: destino.origem }, 'grupo de destino')
+  } else {
     logger.warn(
-      'WHATSAPP_GROUP_JID não definido — eventos serão salvos mas não enviados. ' +
-        'Pareie o QR e chame GET /whatsapp/groups para descobrir o JID.',
+      'nenhum grupo do WhatsApp escolhido — eventos serão salvos mas não enviados. ' +
+        'Conecte e escolha o grupo na tela WhatsApp da plataforma.',
     )
   }
 

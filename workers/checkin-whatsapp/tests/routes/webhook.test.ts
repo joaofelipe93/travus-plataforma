@@ -7,6 +7,7 @@ import { createHash } from 'node:crypto'
 import type { FastifyInstance } from 'fastify'
 import { env } from '../../src/config/env.js'
 import { listRecentEvents } from '../../src/db/events.js'
+import { definirGrupoDestino } from '../../src/db/configuracao.js'
 
 const URL = '/webhooks/nova-reserva'
 
@@ -302,9 +303,19 @@ describe('POST /webhooks/nova-reserva — sem grupo configurado', () => {
     assert.equal(res.statusCode, 200)
     assert.equal(body.status, 'stored_no_target')
     assert.ok(body.eventId > 0)
-    assert.match(body.hint, /WHATSAPP_GROUP_JID/)
+    assert.match(body.hint, /escolha o grupo/)
     assert.equal((await contaMensagens()), 0)
     assert.equal((await listRecentEvents()).length, 1)
+  })
+
+  test('o grupo escolhido pela tela vale mais que o do ambiente', async () => {
+    env.WHATSAPP_GROUP_JID = TEST_GROUP_JID
+    await definirGrupoDestino('5511900000000-1600000000@g.us', 'Grupo da tela')
+
+    const res = await post({ id: 'RES-TELA' })
+    assert.equal(res.json().status, 'queued')
+    const row = await getOutboxRow((res.json() as { outboxId: number }).outboxId)
+    assert.equal(row.destino_jid, '5511900000000-1600000000@g.us')
   })
 
   test('reenvio depois de configurar o grupo recupera o evento preso', async () => {

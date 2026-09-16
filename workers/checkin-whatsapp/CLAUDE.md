@@ -31,16 +31,20 @@ Os testes usam o runner nativo do Node — sem framework. Cada arquivo roda em p
 
 **A suíte só roda no Node 24.** No 22 o `mock.module` não expõe os named exports do dublê para quem importa estaticamente, e `src/whatsapp/outbox.ts` importa `getStatus`/`isConnected` de `./client.js` assim — o arquivo do worker nem carrega. Isso é limitação do dublê, não da aplicação: no 22 o typecheck e o build passam e quase todos os testes rodam, e por isso `engines` continua em `>=22`. Se for preciso rodar a suíte no 22, o caminho é trocar `mock.module` por injeção de dependência em `startOutboxWorker` — não mexer no especificador do mock, que já foi testado e não resolve.
 
-Endpoints exigem `x-webhook-token: <WEBHOOK_SECRET>` (ou `Authorization: Bearer`), exceto `/health`:
+Dois tokens (header `x-webhook-token` ou `Authorization: Bearer`), de propósito separados: o **`WEBHOOK_SECRET`** é o que o provedor do webhook conhece e só abre o webhook; o **`ADMIN_TOKEN`** (`CHECKIN_ADMIN_TOKEN` no `deploy/.env`) é só da API da plataforma e abre as rotas de administração. Quem tem o token do webhook não lê o QR nem os payloads.
 
-| Método | Rota | Descrição |
-|---|---|---|
-| `POST` | `/webhooks/nova-reserva` | Recebe o webhook (qualquer JSON). Responde `queued`, `duplicate` ou `stored_no_target`. |
-| `GET` | `/health` | Estado do serviço, da conexão e do outbox. |
-| `GET` | `/whatsapp/status` | Estado da conexão + **string do QR**. |
-| `GET` | `/whatsapp/groups` | Grupos e JIDs. |
-| `POST` | `/whatsapp/test` | Mensagem de teste **no grupo real**. |
-| `GET` | `/events?limit=20` | Payloads recebidos (dados de hóspedes). |
+| Método | Rota | Token | Descrição |
+|---|---|---|---|
+| `POST` | `/webhooks/nova-reserva` | webhook | Recebe o webhook (qualquer JSON). Responde `queued`, `duplicate` ou `stored_no_target`. **Única rota no gateway.** |
+| `GET` | `/health` | — | Estado do serviço, da conexão e da fila. |
+| `GET` | `/whatsapp/status` | admin | Conexão, número pareado, **string do QR**, grupo de destino e fila. |
+| `GET` | `/whatsapp/groups` | admin | Grupos do número pareado e JIDs. |
+| `PUT` | `/whatsapp/grupo` | admin | Escolhe o grupo de destino (`{"jid"}`; só grupo de que o número participa). Grava em `checkin.configuracao`. |
+| `POST` | `/whatsapp/test` | admin | Mensagem de teste **no grupo real**. |
+| `POST` | `/whatsapp/desconectar` | admin | Desvincula o aparelho, apaga a sessão e gera QR novo (`reiniciarSessao`). A fila espera. |
+| `GET` | `/events?limit=20` | admin | Payloads recebidos (dados de hóspedes). |
+
+O grupo de destino é o escolhido na tela (`checkin.configuracao`) ou, enquanto ninguém escolheu, `WHATSAPP_GROUP_JID`. É lido a cada webhook: trocar o grupo não pede reinício.
 
 ## Arquitetura
 
@@ -88,6 +92,7 @@ Consequência para quem for mexer: ao adicionar um novo tipo de evento que reapr
 
 ### Detalhes do Baileys que já causaram problema
 
+- **Um socket por vez.** Cada socket só trata os próprios eventos enquanto for o atual (`este === sock`), e `connect()` desiste se `reiniciarSessao` começou no meio (contador `geracao`). Sem isso, o fechamento do socket antigo agendaria outra reconexão (dois sockets na mesma sessão) e o `creds.update` dele regravaria as credenciais na pasta recém-apagada.
 - `printQRInTerminal` está deprecado — o QR é tratado no evento `connection.update` (campo `qr`) em `src/whatsapp/client.ts`.
 - `creds.update` → `saveCreds` é obrigatório, senão a sessão não persiste e o QR reaparece a cada restart.
 - `DisconnectReason.restartRequired` (515) é **esperado** logo após o pareamento e exige reconexão imediata — não confundir com `loggedOut` (401), que invalida as credenciais e exige apagar `AUTH_DIR`.

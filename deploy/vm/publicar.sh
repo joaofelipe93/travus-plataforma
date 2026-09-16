@@ -38,7 +38,7 @@ preparar_segredos() { # pasta da versão
   fi
   # Segredos que versões novas passaram a exigir: acrescenta o que faltar (nunca troca um existente).
   local nome
-  for nome in CHECKIN_WEBHOOK_SECRET CHECKIN_DB_SENHA; do
+  for nome in CHECKIN_WEBHOOK_SECRET CHECKIN_ADMIN_TOKEN CHECKIN_DB_SENHA; do
     if ! grep -q "^$nome=" "$COMP/.env"; then
       (umask 077; printf '%s=%s\n' "$nome" "$(openssl rand -hex 32)" >> "$COMP/.env")
       echo "Acrescentado $nome em $COMP/.env."

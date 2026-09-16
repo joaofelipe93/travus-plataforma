@@ -1,7 +1,7 @@
 import './setup.js'
 import Fastify, { type FastifyInstance } from 'fastify'
 import { webhookRoutes } from '../../src/routes/webhook.js'
-import { requireToken } from '../../src/routes/auth.js'
+import { requireAdminToken, requireToken } from '../../src/routes/auth.js'
 
 /**
  * Monta só as rotas sob teste, sem `buildServer()`: assim os testes de HTTP não
@@ -18,6 +18,7 @@ export async function buildWebhookApp(): Promise<FastifyInstance> {
 export async function buildProtectedApp(): Promise<FastifyInstance> {
   const app = Fastify({ logger: false })
   app.get('/protegida', { preHandler: requireToken }, async () => ({ ok: true }))
+  app.get('/admin', { preHandler: requireAdminToken }, async () => ({ ok: true }))
   await app.ready()
   return app
 }

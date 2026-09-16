@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto'
 import type { FastifyInstance } from 'fastify'
-import { env } from '../config/env.js'
+import { grupoDestino } from '../db/configuracao.js'
 import { insertEvent } from '../db/events.js'
 import { enqueue, hasMessageForEvent } from '../db/outbox.js'
 import { normalizeCheckin, isUnmapped } from '../domain/checkin.js'
@@ -78,13 +78,14 @@ export async function webhookRoutes(app: FastifyInstance) {
         return reply.code(200).send({ status: 'duplicate', eventId: event.id })
       }
 
-      if (!env.WHATSAPP_GROUP_JID) {
+      const destino = await grupoDestino()
+      if (!destino) {
         // O evento fica gravado; sem destino não há o que enfileirar.
-        req.log.error({ eventId: event.id }, 'WHATSAPP_GROUP_JID não configurado — evento salvo sem envio')
+        req.log.error({ eventId: event.id }, 'nenhum grupo do WhatsApp escolhido — evento salvo sem envio')
         return reply.code(200).send({
           status: 'stored_no_target',
           eventId: event.id,
-          hint: 'configure WHATSAPP_GROUP_JID (veja GET /whatsapp/groups)',
+          hint: 'escolha o grupo na tela WhatsApp da plataforma',
         })
       }
 
@@ -92,7 +93,7 @@ export async function webhookRoutes(app: FastifyInstance) {
       const body = formatCheckinMessage(evt)
       const outboxId = await enqueue({
         eventId: event.id,
-        targetJid: env.WHATSAPP_GROUP_JID,
+        targetJid: destino.jid,
         body,
       })
 

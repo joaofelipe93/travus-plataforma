@@ -214,6 +214,8 @@ services:
     restart: unless-stopped
     environment:
       WEBHOOK_SECRET: ${CHECKIN_WEBHOOK_SECRET:?defina CHECKIN_WEBHOOK_SECRET em deploy/.env (make up gera)}
+      # Rotas de administração (QR, grupos, teste, desconectar): só a API usa este token.
+      ADMIN_TOKEN: ${CHECKIN_ADMIN_TOKEN:?defina CHECKIN_ADMIN_TOKEN em deploy/.env (make up gera)}
       # Grupo inicial; depois de parear, o admin escolhe pela tela.
       WHATSAPP_GROUP_JID: ${CHECKIN_WHATSAPP_GROUP_JID:-}
       DATABASE_URL: postgres://checkin:${CHECKIN_DB_SENHA:?defina CHECKIN_DB_SENHA em deploy/.env (make up gera)}@postgres:5432/${POSTGRES_DB:-travus}?sslmode=disable
