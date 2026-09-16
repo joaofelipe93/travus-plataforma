@@ -19,7 +19,7 @@ export function definirCsrf(token: string | null) {
 }
 
 type Opcoes = {
-  metodo?: "GET" | "POST" | "PATCH" | "DELETE";
+  metodo?: "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
   json?: unknown;
   formulario?: FormData;
 };

@@ -288,3 +288,28 @@ export type ImportacaoResumo = {
   criada_em: string;
   finalizada_em: string | null;
 };
+
+export type EstadoWhatsapp = "conectado" | "aguardando_qr" | "conectando" | "desconectado" | "indisponivel";
+
+export type GrupoDestinoWhatsapp = {
+  jid: string;
+  nome: string | null;
+  // tela: escolhido pelo admin; ambiente: CHECKIN_WHATSAPP_GROUP_JID enquanto ninguém escolheu.
+  origem: "tela" | "ambiente";
+};
+
+export type SituacaoWhatsapp = {
+  disponivel: boolean;
+  motivo?: string;
+  estado: EstadoWhatsapp;
+  numero: string | null;
+  qr: string | null;
+  grupo: GrupoDestinoWhatsapp | null;
+  fila: Partial<Record<"pendente" | "enviada" | "falhou", number>>;
+};
+
+export type GrupoWhatsapp = {
+  jid: string;
+  nome: string;
+  participantes: number;
+};

@@ -16,16 +16,17 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { api, definirCsrf } from "@/lib/api";
-import { nomePerfil, podeEditar } from "@/lib/sessao";
-import type { Usuario } from "@/lib/tipos";
+import { nomePerfil } from "@/lib/sessao";
+import type { Perfil, Usuario } from "@/lib/tipos";
 import { cn } from "@/lib/utils";
 
 const links = [
-  { href: "/execucoes", rotulo: "Execuções", soEditores: false },
-  { href: "/cotas", rotulo: "Cotas", soEditores: false },
-  { href: "/clientes", rotulo: "Clientes", soEditores: false },
-  { href: "/importar", rotulo: "Importar planilha", soEditores: true },
-] as const;
+  { href: "/execucoes", rotulo: "Execuções", perfis: null },
+  { href: "/cotas", rotulo: "Cotas", perfis: null },
+  { href: "/clientes", rotulo: "Clientes", perfis: null },
+  { href: "/importar", rotulo: "Importar planilha", perfis: ["admin", "operador"] },
+  { href: "/whatsapp", rotulo: "WhatsApp", perfis: ["admin"] },
+] as const satisfies readonly { href: string; rotulo: string; perfis: readonly Perfil[] | null }[];
 
 export function Cabecalho({ usuario }: { usuario: Usuario }) {
   const caminho = usePathname();
@@ -48,7 +49,7 @@ export function Cabecalho({ usuario }: { usuario: Usuario }) {
         </Link>
         <nav className="flex flex-wrap items-center gap-1 text-sm">
           {links
-            .filter((l) => !l.soEditores || podeEditar(usuario.perfil))
+            .filter((l) => l.perfis === null || (l.perfis as readonly Perfil[]).includes(usuario.perfil))
             .map((l) => (
               <Link
                 key={l.href}

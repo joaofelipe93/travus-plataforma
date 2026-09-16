@@ -134,6 +134,11 @@ for caminho in /whatsapp/status /whatsapp/groups /events; do
   RESPOSTA=$(curl -s -w '\n%{http_code}' -H "Cookie: $ADMIN_COOKIE" "$APP/api$caminho")
   esperar "GET app.localhost/api$caminho (admin) não chega ao serviço" 404 "$(tail -1 <<<"$RESPOSTA")"
 done
+esperar "tela WhatsApp: situação (operador)" 403 "$(codigo -H "Cookie: $OPERADOR_COOKIE" "$APP/api/integracoes/whatsapp")"
+esperar "tela WhatsApp: desconectar (operador)" 403 "$(post_json "$OPERADOR_COOKIE" "$OPERADOR_CSRF" /integracoes/whatsapp/desconectar '{"confirmar":true}')"
+esperar "tela WhatsApp: desconectar sem confirmar (admin, nada acontece)" 422 "$(post_json "$ADMIN_COOKIE" "$ADMIN_CSRF" /integracoes/whatsapp/desconectar '{}')"
+WHATSAPP=$(curl -s -w '\n%{http_code}' -H "Cookie: $ADMIN_COOKIE" "$APP/api/integracoes/whatsapp")
+esperar "tela WhatsApp: situação (admin)" 200 "$(tail -1 <<<"$WHATSAPP")"
 esperar "GET api.localhost/webhooks/nova-reserva (só POST vai ao serviço)" 401 "$(codigo "$API/webhooks/nova-reserva")"
 if [[ -n "$("${COMPOSE[@]}" ps --status running -q checkin-whatsapp 2>/dev/null)" ]]; then
   RESPOSTA=$(curl -s -w '\n%{http_code}' -X POST -H 'Content-Type: application/json' -d '{"id":"smoke"}' "$API/webhooks/nova-reserva")
