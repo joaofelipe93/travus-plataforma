@@ -6,6 +6,7 @@ Roteiro para colocar a Travus Plataforma numa VM e mantê-la. Decisões do usuá
 - **Domínio**: a definir (`app.<domínio>` e `api.<domínio>`).
 - **Backup do Postgres**: na própria VM, com cópia manual para fora (`make backup-baixar`).
 - **Alertas**: e-mail (vigia da API) + monitor externo.
+- **Notificador de check-in (WhatsApp)**: sai da VM `appairbnb` e passa a rodar nesta VM, com fila e eventos no mesmo Postgres. O número é **pareado de novo** pela tela WhatsApp (sem copiar a sessão nem o histórico da `appairbnb`). Roteiro na seção 9.
 
 Nada disso roda sem pedido: criar a VM, mexer no DNS, publicar e ligar o lance real são decisões do usuário, na hora.
 
@@ -30,7 +31,7 @@ make deploy VM=travus@<ip>  ── git archive ─► releases/<commit>/        
 
 1. Droplet de 4 GB e 2 vCPU, **Ubuntu 24.04 LTS**, autenticação **por chave SSH** (sua chave pública), nome `travus-producao`.
 2. Opcional e pago: backups semanais da própria DigitalOcean. Os backups do Postgres ficam na mesma VM; se ela se perder, só sobra a última cópia baixada.
-3. Anote o IP. **Não use nem altere a VM `appairbnb`**: o `preparar.sh` para se encontrar o usuário `checkin` ou o PM2.
+3. Anote o IP. **Não use nem altere a VM `appairbnb`**: o `preparar.sh` para se encontrar o usuário `checkin` ou o PM2. Ela continua mandando as notificações até a seção 9, e quem a desliga é você.
 
 ## 2. Preparar a VM
 
@@ -65,7 +66,7 @@ ssh travus@<ip> 'umask 077; cat > /opt/travus/compartilhado/canopus.env'
 # NEWCON_PASS=...
 ```
 
-**deploy/.env de produção**: o primeiro `make deploy` cria `/opt/travus/compartilhado/.env` a partir de `deploy/.env.producao.example`, com senha do Postgres, `WORKER_TOKEN` e `CHAVE_CRIPTOGRAFIA` novos, e para. Então:
+**deploy/.env de produção**: o primeiro `make deploy` cria `/opt/travus/compartilhado/.env` a partir de `deploy/.env.producao.example`, com senha do Postgres, `WORKER_TOKEN` e `CHAVE_CRIPTOGRAFIA` novos, e para. A cada deploy, o `publicar.sh` acrescenta os segredos que faltarem sem trocar os existentes (`CHECKIN_WEBHOOK_SECRET`, `CHECKIN_ADMIN_TOKEN`, `CHECKIN_DB_SENHA`). Então:
 
 ```bash
 ssh -t travus@<ip> 'nano /opt/travus/compartilhado/.env'
@@ -119,13 +120,38 @@ O vigia só avisa enquanto a API está de pé. Para a VM inteira fora do ar:
 
 Só com o ok do usuário, e com **nenhuma outra sessão do Newcon** aberta (script antigo parado). Crie um dry-run de 1 cota pela tela e acompanhe. O lance real continua desligado.
 
+## 9. Notificador de check-in: migrar da `appairbnb`
+
+O notificador (`workers/checkin-whatsapp`) sobe junto com a plataforma, desde o primeiro deploy, e fica esperando o pareamento: sem sessão do WhatsApp nem grupo, os webhooks que chegarem são gravados e nada é enviado. A `appairbnb` continua de pé até o passo 7, e **só ela recebe os webhooks do PMS até o passo 5**: não há mensagem em dobro no grupo.
+
+Só com o ok do usuário, com a plataforma já no ar pela seção 5 e um usuário admin criado.
+
+1. **Parear** (admin, pela tela): `https://app.<domínio>/whatsapp` → aparece o QR. No celular do **chip dedicado** (o mesmo da `appairbnb`): WhatsApp → Configurações → Dispositivos conectados → Conectar dispositivo → escaneie. A tela mostra "conectado como +55 …". O aparelho novo aparece no celular como **Travus Plataforma**; o da `appairbnb` continua lá como **Check-in Notifier** (cada um tem a própria sessão, os dois funcionam ao mesmo tempo).
+2. **Grupo**: "Escolher grupo" → o mesmo grupo que recebe as notificações hoje → "Usar este grupo". Se ele não aparece na lista, o número não participa do grupo.
+3. **Teste**: "Enviar mensagem de teste" (todos do grupo recebem; avise antes).
+4. **Token do webhook** (novo, diferente do da `appairbnb`):
+   ```bash
+   ssh travus@<ip> 'grep ^CHECKIN_WEBHOOK_SECRET= /opt/travus/compartilhado/.env'
+   ```
+5. **Trocar no PMS** (usuário): URL do webhook `https://api.<domínio>/webhooks/nova-reserva`, cabeçalho `x-webhook-token: <token do passo 4>` (ou `Authorization: Bearer <token>`), o mesmo formato de hoje. Só `POST` nessa rota chega ao notificador.
+   - **Não reprocesse reservas antigas no PMS logo depois da troca**: o banco novo não conhece as que a `appairbnb` já notificou e mandaria de novo ao grupo.
+6. **Conferir** na próxima reserva ou cancelamento real: a mensagem chega **uma vez** no grupo e a tela WhatsApp mostra "Enviadas: 1". Se algo der errado, volte a URL e o token antigos no PMS: a `appairbnb` ainda está de pé.
+7. **Desligar a `appairbnb`** (usuário, depois de alguns dias sem problema): pare o notificador antigo na `appairbnb` (instalada pelo `bootstrap-vps.sh` do projeto airbnb: `sudo -iu checkin pm2 stop checkin-notifier && sudo -iu checkin pm2 save`) e, no celular, em Dispositivos conectados, **remova o "Check-in Notifier"** (nunca o "Travus Plataforma"). Destruir a VM é decisão sua, depois; o `data/` dela tem o histórico antigo de reservas.
+
+Depois da migração:
+
+- **Sessão caiu** (removida no celular, número trocado, conexão travada): o vigia avisa em 10 min com o link da tela; um admin escaneia o QR de novo. "Desconectar e gerar novo QR" na tela força uma sessão nova (as mensagens esperam na fila).
+- **Trocar o token do webhook**: apague a linha `CHECKIN_WEBHOOK_SECRET` do `.env` da VM, publique (o `publicar.sh` gera outro) e atualize o PMS.
+- **Backup**: eventos e fila estão no Postgres (`checkin.eventos`, `checkin.mensagens`) e entram no dump; os payloads têm nome, telefone e e-mail de hóspedes. A sessão do WhatsApp fica no volume `travus_checkin-dados` e **não** tem backup: perdida a VM, pareie de novo.
+
 ## Rotina
 
 | Tarefa | Como |
 |---|---|
 | Publicar | commit → `make deploy VM=travus@<ip>` (recusa com execução em andamento) |
 | Voltar uma versão | `make deploy-voltar VM=travus@<ip>`. **Migrações não são desfeitas**: se a versão nova mudou o banco, voltar pode não funcionar |
-| Logs | `ssh -t travus@<ip> 'cd /opt/travus/atual && make logs s=api'` (api, worker-canopus, traefik, backup…) |
+| Logs | `ssh -t travus@<ip> 'cd /opt/travus/atual && make logs s=api'` (api, worker-canopus, checkin-whatsapp, traefik, backup…) |
+| WhatsApp do notificador | tela `https://app.<domínio>/whatsapp` (só admin): conexão, QR, grupo, teste, fila |
 | Estado | `ssh travus@<ip> 'cd /opt/travus/atual && make ps'` |
 | Cópia do backup | `make backup-baixar VM=travus@<ip>` (semanal; vai para `deploy/backups/`, fora do git; tem dados de clientes) |
 | Testar a restauração | `ssh -t travus@<ip> 'cd /opt/travus/atual && make restaurar-teste'` (mensal) |
@@ -154,9 +180,10 @@ Na VM, `make up`, `make prod-local` e `make dev-web` se recusam a rodar: a stack
 - **cota em `erro_apos_confirmar`** (clicou em Confirmar sem resultado: conferir no Histórico);
 - comprovante que não foi para o Drive depois de 5 tentativas, ou esperando há mais de 1 h;
 - backup atrasado (mais de 26 h) ou com erro; disco acima de 80%;
-- certificado HTTPS vencendo em menos de 14 dias ou não verificável (com `CERT_RESOLVER=le-teste`, esse alerta é esperado).
+- certificado HTTPS vencendo em menos de 14 dias ou não verificável (com `CERT_RESOLVER=le-teste`, esse alerta é esperado);
+- **notificador de check-in** (`VIGIA_CHECKIN=true`): serviço sem resposta ou WhatsApp desconectado/esperando QR há mais de 10 min; conectado sem grupo escolhido; mensagens que desistiram nas últimas 24 h; mensagens paradas há mais de 30 min com o WhatsApp conectado. Antes do passo 1 da seção 9, o alerta "esperando a leitura do QR" é esperado.
 
-Os e-mails não levam nome de cliente, só grupo, cota e versão.
+Os e-mails não levam nome de cliente nem de hóspede, só grupo, cota e versão.
 
 ### Lance real em produção
 

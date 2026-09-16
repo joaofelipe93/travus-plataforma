@@ -8,6 +8,8 @@ Guia para o Claude Code (e para quem mais trabalhar aqui). Interface, mensagens,
 
 Tudo o que se sabe do Newcon (seletores, fluxos, armadilhas) está em **`docs/canopus-newcon.md`. Leia inteiro antes de mexer no worker.**
 
+O segundo serviço é o **notificador de check-in** (`workers/checkin-whatsapp`): recebe o webhook de reserva/cancelamento do PMS e publica a mensagem num grupo do WhatsApp (Baileys). Veio de `/home/joao/Documentos/airbnb`, que roda com PM2 na VM `appairbnb` até a migração (`docs/producao.md`, seção 9). **Antes de mexer nele, leia `workers/checkin-whatsapp/CLAUDE.md`** (deduplicação, Baileys, um processo só).
+
 ## Regras inegociáveis
 
 1. **Nunca registre lance real.** Não rode `--confirm`, `npm run real` nem nada que clique em "Confirmar" (`#ctl00_Conteudo_btnConfirma`) no Newcon, nem para testar. O Newcon **aceita lances repetidos** na mesma assembleia: um teste errado vira lance duplicado de verdade. Para testar:
@@ -15,25 +17,27 @@ Tudo o que se sabe do Newcon (seletores, fluxos, armadilhas) está em **`docs/ca
    - **reimpressão pelo Histórico** para testar o PDF: na tela de credenciamento, `#ctl00_Conteudo_btnHistorico` → `input[id$="srcPrint"]` de uma linha.
 
    Execução real só com pedido explícito do usuário, na hora.
-2. **Segredos e dados de clientes nunca entram no git**: qualquer `.env` (exceto `.env.example`), `token.json`, `credentials.json`, `client_secret_*.json`, `cotasreal.csv` (nomes, telefones, e-mails), PDFs, screenshots, logs, `deploy/.env`, `deploy/data/`. Testes usam só dados fictícios. Antes de cada commit confira `git status` e o conteúdo adicionado. **O repositório no GitHub (`joaofelipe93/travus-plataforma`) é público.**
-3. **Não mexa na VM `appairbnb`.** Ela roda outra aplicação em produção e não faz parte desta plataforma. Nada da plataforma roda nela.
+2. **Segredos e dados de clientes nunca entram no git**: qualquer `.env` (exceto `.env.example`), `token.json`, `credentials.json`, `client_secret_*.json`, `cotasreal.csv` (nomes, telefones, e-mails), PDFs, screenshots, logs, `deploy/.env`, `deploy/data/`, a sessão do WhatsApp (`workers/checkin-whatsapp/data/`, volume `checkin-dados`) e payloads de reservas (nomes e telefones de hóspedes). Testes usam só dados fictícios. Antes de cada commit confira `git status` e o conteúdo adicionado. **O repositório no GitHub (`joaofelipe93/travus-plataforma`) é público.**
+3. **Não mexa na VM `appairbnb`.** Ela roda o notificador de check-in antigo em produção até a migração terminar (`docs/producao.md`, seção 9); quem troca o webhook no PMS e a desliga é o usuário. Nada da plataforma roda nela. **Não altere nada em `/home/joao/Documentos/airbnb`**: só copie de lá.
 4. **O worker nunca repete automaticamente a etapa de Confirmar** (ver "Proteção contra lance duplicado").
 5. **Não altere nada em `/home/joao/Documentos/newcon-automation`.** Só copie de lá.
 6. Se algo do Newcon se comportar diferente de `docs/canopus-newcon.md`, **pare e avise** antes de mudar a lógica.
 7. Sem push, repositório remoto novo ou deploy sem pedido explícito. Trabalhe por etapas: proponha o plano, espere o ok e pare no fim de cada etapa para validação. Commits pequenos e descritivos.
 8. Uma sessão de login no Newcon por vez: nunca rode dry-run da plataforma, `make worker-dry-run` e scripts de descoberta ao mesmo tempo.
+9. **WhatsApp do notificador**: nunca pareie o chip da produção fora da VM de produção (`make checkin` local mostra QR de verdade: não escaneie) e nunca rode dois notificadores com a mesma sessão. "Enviar mensagem de teste", `POST /whatsapp/test` e um webhook com o token certo **mandam mensagem ao grupo real**: só com pedido do usuário. Testes automáticos usam dublês do WhatsApp; os smokes só mandam webhook sem token.
 
 ## Comandos
 
 ```bash
 make up              # sobe traefik, postgres, migrate, api, web e worker (cria/completa deploy/.env)
+make checkin         # também sobe o notificador de check-in (conecta ao WhatsApp e mostra QR: não escaneie)
 make down            # derruba os containers (o banco fica no volume postgres-dados)
 make logs s=worker-canopus   # logs (sem s=, de todos)
 make ps              # estado dos containers
 make migrate         # aplica migrações pendentes
 make usuario args='criar --email ana@exemplo.com --nome "Ana" --perfil operador'
                      # também: listar | senha --email X | desativar --email X | ativar --email X
-make test            # api (vet + unitários + integração com Postgres), web (eslint + tsc), worker (node:test, sem Newcon)
+make test            # api e checkin-whatsapp (com Postgres de teste), web (eslint + tsc), worker Canopus (node:test, sem Newcon)
 make smoke           # checagens pelo gateway com curl (precisa de make up; não cria execução)
 make dev-web         # web com next dev (recarga automática) atrás do Traefik; make up volta ao normal
 make sqlc            # regera api/internal/db depois de mudar migrações ou consultas
@@ -55,7 +59,7 @@ make backup-baixar VM=travus@<ip>  # copia o último backup da VM para deploy/ba
 
 Endereços locais: http://app.localhost (web e, em `/api/...`, a API), http://api.localhost (API para ferramentas; só `/health` é público), http://traefik.localhost (dashboard).
 
-Não há cadastro público de usuários: só `make usuario`. A senha é pedida no terminal ou lida da entrada padrão (mínimo 12 caracteres). `deploy/.env` guarda a senha do Postgres, o `WORKER_TOKEN` e a `CHAVE_CRIPTOGRAFIA` (gerados pelo `make`; sem a chave, o token do Google no banco não decifra) e, opcionalmente, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_DRIVE_PASTA_ID`.
+Não há cadastro público de usuários: só `make usuario`. A senha é pedida no terminal ou lida da entrada padrão (mínimo 12 caracteres). `deploy/.env` guarda a senha do Postgres, o `WORKER_TOKEN`, a `CHAVE_CRIPTOGRAFIA` (sem ela, o token do Google no banco não decifra), `CHECKIN_WEBHOOK_SECRET` (o token que o PMS manda), `CHECKIN_ADMIN_TOKEN` (API → notificador) e `CHECKIN_DB_SENHA` (papel `checkin` no Postgres), todos gerados pelo `make` (e pelo `publicar.sh` na VM), e, opcionalmente, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_DRIVE_PASTA_ID` e `CHECKIN_WHATSAPP_GROUP_JID` (grupo inicial; o admin escolhe pela tela).
 
 **`LANCE_REAL_HABILITADO`** (padrão `false`, na API e no worker): só `true` liga o lance real. Desligada, a API recusa aprovar (403) e não entrega execução `real`, e o worker nem carrega `lance-real.js`. **Nunca ligue sem pedido explícito do usuário, na hora.**
 
@@ -66,15 +70,19 @@ Não há cadastro público de usuários: só `make usuario`. A senha é pedida n
  navegador ──HTTP(S)─►  app.<domínio>/api/*  → [ForwardAuth] → strip /api → API:8080│
                     │  app.<domínio>/*      → [ForwardAuth, sem sessão → /login] → web │
                     │  api.<domínio>/*      → [ForwardAuth] → API:8080 (ferramentas)  │
+ PMS (webhook) ─────►  POST api.<domínio>/webhooks/nova-reserva → checkin-whatsapp:3000│
                     └───────────────────────────────┬────────────────────────────┘
                           ┌─────────────────────────┴──────┐
                           ▼                                ▼
                     Postgres  ◄── API:8081 (/internal, token) ◄── Worker Canopus (Node)
                   (LISTEN/NOTIFY → SSE)     rede interna, sem gateway   └─► Newcon
+                       ▲  schema checkin
+                       └── checkin-whatsapp (Node) ◄── API (tela WhatsApp, CHECKIN_ADMIN_TOKEN)
+                                 └─► WhatsApp (Baileys) → grupo
 ```
 
-- **`deploy/docker-compose.yml`** (projeto `travus`). Redes: `travus_borda` (traefik, api, web) e `travus_interna` (postgres, migrate, api, worker, cli, api-teste). Só o Traefik publica porta (80). `migrate` roda `api migrate up` antes da `api`. Perfis: `cli` (usuários), `teste` (Go com Postgres, banco `travus_teste`), `canopus` (script legado `worker-legado`). `deploy/docker-compose.dev.yml` troca o web por `next dev`.
-- **Produção** (Etapa 4, roteiro em `docs/producao.md`): `deploy/docker-compose.prod.yml` vai por cima do compose local (Traefik em 80/443 com Let's Encrypt via `deploy/traefik/traefik.producao.yml`, HTTP → HTTPS, HSTS, dashboard fechado, `backup` diário, vigia com pasta de backups e certificado). Domínios por `DOMINIO_APP`/`DOMINIO_API` (padrão `app.localhost`/`api.localhost`); `CERT_RESOLVER` `le` ou `le-teste`. Na VM (`/opt/travus`): `releases/<commit>` enviadas por `git archive`, `compartilhado/.env` e `compartilhado/canopus.env` (segredos, só na VM), `backups/`, `atual` → versão publicada. `deploy/vm/preparar.sh` (root, uma vez: usuário `travus`, SSH só por chave, ufw, fail2ban, Docker, swap; para se achar a `appairbnb`) e `deploy/vm/publicar.sh` (sobe a versão; `--voltar`). Na VM, `make up`/`prod-local`/`dev-web` se recusam a rodar. `deploy/backup/backup.sh`: `pg_dump -Fc` com 7 diários, 4 semanais e 6 mensais, marcadores `ultimo-ok`/`ultimo-erro`.
+- **`deploy/docker-compose.yml`** (projeto `travus`). Redes: `travus_borda` (traefik, api, web, checkin-whatsapp) e `travus_interna` (postgres, migrate, api, worker, checkin-whatsapp, cli, api-teste, checkin-teste). Só o Traefik publica porta (80). `migrate` roda `api migrate up` antes da `api`. Perfis: `cli` (usuários), `teste` (Go e `checkin-teste` com Postgres, banco `travus_teste`), `canopus` (script legado `worker-legado`), `checkin` (notificador, só com `make checkin`; em produção fica ligado). `deploy/docker-compose.dev.yml` troca o web por `next dev`.
+- **Produção** (Etapa 4, roteiro em `docs/producao.md`): `deploy/docker-compose.prod.yml` vai por cima do compose local (Traefik em 80/443 com Let's Encrypt via `deploy/traefik/traefik.producao.yml`, HTTP → HTTPS, HSTS, dashboard fechado, `backup` diário, notificador de check-in ligado, vigia com pasta de backups, certificado e notificador). Domínios por `DOMINIO_APP`/`DOMINIO_API` (padrão `app.localhost`/`api.localhost`); `CERT_RESOLVER` `le` ou `le-teste`. Na VM (`/opt/travus`): `releases/<commit>` enviadas por `git archive`, `compartilhado/.env` e `compartilhado/canopus.env` (segredos, só na VM), `backups/`, `atual` → versão publicada. `deploy/vm/preparar.sh` (root, uma vez: usuário `travus`, SSH só por chave, ufw, fail2ban, Docker, swap; para se achar a `appairbnb`) e `deploy/vm/publicar.sh` (sobe a versão; `--voltar`). Na VM, `make up`/`prod-local`/`dev-web` se recusam a rodar. `deploy/backup/backup.sh`: `pg_dump -Fc` com 7 diários, 4 semanais e 6 mensais, marcadores `ultimo-ok`/`ultimo-erro`.
 - **Traefik** (`deploy/traefik/`, montado como pasta: bind mount de arquivo único não enxerga edições). Rotas por labels (`exposedByDefault: false`) com prioridades; middlewares em `dinamico.yml`:
   - `sessao-api` / `sessao-pagina`: ForwardAuth em `http://api:8080/auth/verificar` (só repassa `Cookie`, `trustForwardHeader: false`); a versão de página responde 302 para `/login?proximo=…` (`preserveLocationHeader`);
   - `remover-prefixo-api`, `limite-api` (20/s), `limite-login` (10/min por IP), `cabecalhos-seguranca`.
@@ -88,7 +96,8 @@ Não há cadastro público de usuários: só `make usuario`. A senha é pedida n
     - `reais.go`: `GET /execucoes/{id}/revisao` (revisão do dry-run), `POST /execucoes/reais` (**só admin**, chave ligada, dry-run concluído há menos de 2 h e ainda não aprovado, quantidade de cotas digitada, "registrar mesmo assim" por cota que já tem lance na assembleia), `POST /execucoes/reimpressoes` (comprovante de um protocolo pelo Histórico; `enviar_drive` opcional), `POST /lances/{id}/reenviar-drive`, `GET /integracoes/google-drive` (admin).
     - `interno_real.go`: `pdf`, `confirmacao-iniciada` (confere tipo, chave, cancelamento e a assembleia aprovada; o worker só clica em Confirmar depois do 204), `concluir-confirmacao` (grava o lance), `concluir-reimpressao`.
     - `drive_fila.go`: fila de envio dos PDFs ao Drive (tentativas com espera 1, 2, 4, 8 min; envio travado volta em 10 min; o lance fica registrado mesmo se o envio falhar). `internal/drive`: cliente REST (escopo `drive.file`, nome do arquivo igual ao `reportFileName` do script); `internal/cripto`: AES-256-GCM para o token do Google no banco (tabela `integracoes`).
-    - `vigia.go`: a cada 5 min confere banco, contato do worker (10 min), fila parada, cota em `erro_apos_confirmar` (24 h), Drive, backup (26 h, erro), disco (80%) e certificado (14 dias); manda e-mail só quando muda (novos, lembrete a cada 12 h, resolvidos), sem nome de cliente, e faz ping no monitor externo (`VIGIA_PING_URL`). `internal/alerta`: SMTP com STARTTLS obrigatório (ou TLS na 465). Sem `SMTP_HOST`, os alertas só vão para o log.
+    - `whatsapp.go` + `internal/checkin` (cliente): tela WhatsApp, **só admin**, com auditoria. `GET /integracoes/whatsapp` (estado, número, QR, grupo, fila; notificador fora do ar vira `indisponivel` com 200), `GET …/grupos`, `PUT …/grupo`, `POST …/teste`, `POST …/desconectar` (exige `"confirmar": true`). Repassa ao notificador pela rede interna com `CHECKIN_ADMIN_TOKEN` (`CHECKIN_URL`); o navegador nunca vê o token.
+    - `vigia.go`: a cada 5 min confere banco, contato do worker (10 min), fila parada, cota em `erro_apos_confirmar` (24 h), Drive, backup (26 h, erro), disco (80%), certificado (14 dias) e, com `VIGIA_CHECKIN=true` (produção), o notificador (sem resposta ou WhatsApp fora há 10 min, sem grupo, mensagens que desistiram, fila parada); manda e-mail só quando muda (novos, lembrete a cada 12 h, resolvidos), sem nome de cliente, e faz ping no monitor externo (`VIGIA_PING_URL`). `internal/alerta`: SMTP com STARTTLS obrigatório (ou TLS na 465). Sem `SMTP_HOST`, os alertas só vão para o log.
     - `sse.go`: `GET /execucoes/{id}/eventos` (SSE, `Last-Event-ID`, `event: fim`); `Hub` com `LISTEN execucao_eventos` (trigger no insert).
   - `internal/importacao`: `LerPlanilha` porta as regras do `workers/canopus/src/csv.js` (teste de paridade contra o csv.js original em `testdata/paridade`); `Planejar` compara com o cadastro; aplicar recalcula a prévia na transação e recusa se o cadastro mudou.
   - `internal/testedb`: testes de integração (pulados sem `TEST_DATABASE_URL`).
@@ -96,13 +105,20 @@ Não há cadastro público de usuários: só `make usuario`. A senha é pedida n
 - **Web** (`web/`, Next.js 16, App Router, TypeScript, Tailwind 4, shadcn/ui estilo base-nova (Base UI, não Radix: use `render` em vez de `asChild`), TanStack Query, `output: "standalone"`). **O Next 16 tem mudanças incompatíveis: leia `web/AGENTS.md` e o guia relevante em `web/node_modules/next/dist/docs/` antes de escrever código** (ex.: `middleware` virou `proxy`; `useSearchParams` precisa de `<Suspense>`; env de runtime com `await connection()`).
   - O navegador chama a API em `/api/...` (mesma origem). `src/lib/api.ts` manda o `X-CSRF-Token`, e em 401 recarrega para o login.
   - `(app)/layout.tsx` busca `/auth/sessao` antes de mostrar as telas; botões aparecem conforme o perfil, mas quem decide é a API.
-  - Telas: `/login`, `/execucoes` (lista), `/execucoes/nova` (escolher cotas ativas), `/execucoes/[id]` (progresso por `EventSource`, cotas, lances já existentes na assembleia, screenshots, comprovantes, log, cancelar, botão "Revisar para lance real"), `/execucoes/[id]/revisao` (revisão do dry-run: cotas, "registrar mesmo assim", confirmação digitando a quantidade; mostra o bloqueio quando a chave está desligada), `/cotas`, `/clientes`, `/clientes/[id]` (lances com PDF e situação no Drive, Reimprimir, "Buscar comprovante no Histórico"), `/importar`, `/status`.
+  - Telas (a tela `/whatsapp`, só admin, desenha o QR com `qrcode.react` e consulta a cada 2 s até conectar): `/login`, `/whatsapp`, `/execucoes` (lista), `/execucoes/nova` (escolher cotas ativas), `/execucoes/[id]` (progresso por `EventSource`, cotas, lances já existentes na assembleia, screenshots, comprovantes, log, cancelar, botão "Revisar para lance real"), `/execucoes/[id]/revisao` (revisão do dry-run: cotas, "registrar mesmo assim", confirmação digitando a quantidade; mostra o bloqueio quando a chave está desligada), `/cotas`, `/clientes`, `/clientes/[id]` (lances com PDF e situação no Drive, Reimprimir, "Buscar comprovante no Histórico"), `/importar`, `/status`.
   - `page.tsx` só pode exportar o componente da página (o build do Next recusa exports extras): componentes compartilhados vão para `src/components/` (ex.: `comprovante.tsx`).
 - **Worker Canopus** (`workers/canopus/`, Node + Playwright **1.63.0 exato**; a imagem `mcr.microsoft.com/playwright:v1.63.0-noble` precisa ter a mesma versão do `package-lock.json`).
   - `src/worker.js`: laço da fila. **Só dry-run: não há caminho para Confirmar** (um teste lê o arquivo e falha se aparecer `confirmAndWaitReport`, `downloadReportPdf` ou `btnConfirma`). Por cota: `backToFilter` (a partir da 2ª) → `searchCota` → `lerDadosCredenciamento` → `selectSegundoFixo` → `captureBeforeConfirm` → envia screenshot → `lerHistorico` (só leitura, depois do screenshot) → conclui. `NewconCotaError` → erro conhecido; outro erro → inesperado; ambos com screenshot. SIGTERM: termina a cota atual e devolve à fila (`stop_grace_period: 90s`).
   - `src/newcon.js`, `csv.js`, `logger.js`: o código validado, **sem mudanças**. `src/index.js` é o script legado (`make worker-dry-run`).
   - `src/leitura-credenciamento.js`: seletores de assembleia e do Histórico (só leitura). `src/plataforma.js`: cliente das rotas internas. `src/registro.js`: logger que manda eventos à API. `src/config-worker.js`: só variáveis de ambiente (recusa `NEWCON_URL` com a grafia `frmCorCCCnsLogin`).
   - No container, `docker-entrypoint.sh` bloqueia `--confirm`/`real`, e o Chromium precisa de `shm_size` (ou `--ipc=host`). `legado/` é só referência.
+- **Notificador de check-in** (`workers/checkin-whatsapp/`, Node 24 + TypeScript, Fastify, Baileys **6.7.24** fixo; guia próprio em `workers/checkin-whatsapp/CLAUDE.md`).
+  - Webhook → `checkin.eventos` (deduplicação pelo id da reserva + status) → responde 200 → `checkin.mensagens` → laço da fila envia ao grupo quando o WhatsApp está conectado (6 tentativas com espera).
+  - **Banco: o Postgres da plataforma, schema `checkin`** (migrações 00006 e 00007 da API; mudança de tabela é migração nova na API). Papel `checkin` só com SELECT/INSERT/UPDATE nesse schema; o login é ligado pelo `api migrate up` com `CHECKIN_DB_SENHA`.
+  - Dois tokens: `WEBHOOK_SECRET` (só o webhook, é o que o PMS conhece) e `ADMIN_TOKEN` (`/whatsapp/*`, `/events`: QR e dados de hóspedes, só a API). Única rota no gateway: `POST /webhooks/nova-reserva`.
+  - Grupo de destino em `checkin.configuracao` (escolhido na tela) ou `WHATSAPP_GROUP_JID`. Sessão do WhatsApp no volume `checkin-dados` (sem backup: perdeu, pareia de novo). Aparece no celular como "Travus Plataforma".
+  - **Um container só**: duas conexões na mesma sessão derrubam uma à outra e cada processo enviaria a fila.
+  - Testes (`checkin-teste`, `make test`): `travus_teste` depois dos testes da API, um arquivo por vez, WhatsApp com dublês.
 - **`tools/`**: `teste-ip-vm/` (Newcon aceita login do IP de uma VM?), `paridade-csv/` (esperado do teste de paridade), `smoke/etapa1.sh` (gateway, sessão, perfis, rotas de execução e recusa do lance real, sem criar execução), `smoke/producao.sh` (HTTPS de fora: redirecionamento, HSTS, barreira de sessão, dashboard e portas fechadas, validade do certificado; sem login).
 
 ## Perfis
@@ -111,7 +127,7 @@ Não há cadastro público de usuários: só `make usuario`. A senha é pedida n
 |---|---|
 | `leitura` | ver clientes, cotas, importações, execuções, revisões e comprovantes |
 | `operador` | + importar planilha, ativar/desativar cota, criar e cancelar dry-run, pedir reimpressão de comprovante, enviar comprovante ao Drive |
-| `admin` | tudo do operador + **aprovar lance real** e ver a situação do Google Drive |
+| `admin` | tudo do operador + **aprovar lance real**, ver a situação do Google Drive e **gerenciar o WhatsApp do notificador** (QR, grupo, teste, desconectar) |
 
 ## Regras da importação
 
@@ -155,6 +171,7 @@ lance real:  dry-run concluído → revisão → admin aprova (chave ligada, < 2
 - **Etapa 1 (login e cadastro)**: validada.
 - **Etapa 2 (dry-run pela interface)**: validada.
 - **Etapa 3 (lance real, implementado e testado sem confirmar)**: revisão, aprovação só por admin, trava antes do clique, protocolo, `lances`, PDF no Postgres (bytea; armazenamento de objetos depois) e no Drive, reimpressão pelo Histórico, auditoria, token do Google cifrado no banco. *Em validação.* O primeiro lance real só com pedido explícito do usuário.
+- **Etapa 5 (notificador de check-in)**: trazido do projeto airbnb para `workers/checkin-whatsapp`, SQLite trocado pelo Postgres (schema `checkin`), no compose e no gateway, tela WhatsApp para o admin (QR, grupo, teste, desconectar) e vigia. *Testado localmente sem parear o número*; falta a migração na VM (`docs/producao.md`, seção 9), que depende da Etapa 4.
 - **Etapa 4 (servidor)**: compose de produção com HTTPS, preparação da VM, deploy e volta, backup na VM com teste de restauração, vigia com alertas por e-mail e monitor externo, smoke de produção. *Parte do repositório pronta e testada localmente (`make prod-local`); falta a VM e o domínio, que o usuário cria depois.*
 
 ## Decisões em aberto (não invente a regra)
@@ -163,5 +180,7 @@ lance real:  dry-run concluído → revisão → admin aprova (chave ligada, < 2
 - Domínio (`app.`/`api.`): o usuário define e cria depois.
 
 Decididas pelo usuário na Etapa 3: "Parcelas em Atraso" → aceitar e marcar o lance; cota que já tem lance na assembleia → pular, salvo "registrar mesmo assim" por cota na revisão; só admin aprova lance real; prazo de oferta encerrado → erro conhecido; PDF do teste de reimpressão não vai ao Drive.
+
+Decididas pelo usuário na Etapa 5: o notificador sai da `appairbnb` e roda na VM da plataforma (a `appairbnb` fica até a migração ser validada); container próprio com só o webhook público; um banco só (Postgres, schema `checkin`), por causa do agente de chat que vai responder sobre todos os serviços; parear o número de novo em vez de copiar sessão e histórico; admin conecta e escolhe o grupo pela tela, sem terminal, com botão de desconectar e gerar novo QR.
 
 Decididas pelo usuário na Etapa 4: VM na DigitalOcean com 4 GB (criada pelo usuário, depois); backup do Postgres só na VM, com cópia manual (`make backup-baixar`); alertas por e-mail + monitor externo.
