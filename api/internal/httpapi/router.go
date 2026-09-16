@@ -13,6 +13,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/joaofelipe93/travus-plataforma/api/internal/checkin"
 	"github.com/joaofelipe93/travus-plataforma/api/internal/cripto"
 	"github.com/joaofelipe93/travus-plataforma/api/internal/db"
 	"github.com/joaofelipe93/travus-plataforma/api/internal/drive"
@@ -51,6 +52,8 @@ type Config struct {
 	Google ConfigGoogle
 	// Alertas por e-mail e monitor externo (vigia.go).
 	Vigia ConfigVigia
+	// Notificador de check-in (tela WhatsApp). nil: as rotas respondem "indisponível".
+	Checkin *checkin.Cliente
 }
 
 type Servidor struct {
@@ -171,6 +174,13 @@ func (s *Servidor) Rotas() http.Handler {
 	mux.Handle("POST /execucoes/reimpressoes", s.autenticado(exigirPerfil(s.criarReimpressao, editores...)))
 	mux.Handle("POST /lances/{id}/reenviar-drive", s.autenticado(exigirPerfil(s.reenviarAoDrive, editores...)))
 	mux.Handle("GET /integracoes/google-drive", s.autenticado(exigirPerfil(s.situacaoGoogleDrive, admins...)))
+
+	// WhatsApp do notificador de check-in (whatsapp.go): o QR dá acesso à conta, só admin.
+	mux.Handle("GET /integracoes/whatsapp", s.autenticado(exigirPerfil(s.situacaoWhatsapp, admins...)))
+	mux.Handle("GET /integracoes/whatsapp/grupos", s.autenticado(exigirPerfil(s.gruposWhatsapp, admins...)))
+	mux.Handle("PUT /integracoes/whatsapp/grupo", s.autenticado(exigirPerfil(s.definirGrupoWhatsapp, admins...)))
+	mux.Handle("POST /integracoes/whatsapp/teste", s.autenticado(exigirPerfil(s.testeWhatsapp, admins...)))
+	mux.Handle("POST /integracoes/whatsapp/desconectar", s.autenticado(exigirPerfil(s.desconectarWhatsapp, admins...)))
 
 	return recuperar(mux)
 }

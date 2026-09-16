@@ -40,6 +40,9 @@ x-api: &api-base
     ALERTA_DE: ${ALERTA_DE:-}
     ALERTA_PARA: ${ALERTA_PARA:-}
     VIGIA_PING_URL: ${VIGIA_PING_URL:-}
+    # Notificador de check-in (tela WhatsApp): a API chama as rotas de administração dele.
+    CHECKIN_URL: http://checkin-whatsapp:3000
+    CHECKIN_ADMIN_TOKEN: ${CHECKIN_ADMIN_TOKEN:?defina CHECKIN_ADMIN_TOKEN em deploy/.env (make up gera)}
     # Senha do papel checkin no Postgres: `api migrate up` liga o login com ela.
     CHECKIN_DB_SENHA: ${CHECKIN_DB_SENHA:?defina CHECKIN_DB_SENHA em deploy/.env (make up gera)}
     TZ: America/Sao_Paulo
