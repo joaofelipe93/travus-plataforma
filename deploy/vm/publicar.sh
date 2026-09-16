@@ -83,8 +83,17 @@ ativar() {
   backups=$(sed -n 's/^BACKUP_DIR=//p' "$COMP/.env")
   mkdir -p "${backups:-$BASE/backups}"
 
+  # Uma imagem de cada vez: a VM tem 2 GB e a versão atual continua no ar durante o build. Em
+  # paralelo, o next build, o Go e o npm ci juntos passam da memória e o build morre no meio.
+  # Serviço sem "build" (postgres, traefik) não faz nada aqui.
+  echo "== Compilando a versão $versao (uma imagem por vez)"
+  local servico
+  for servico in $("${compose[@]}" config --services); do
+    "${compose[@]}" build "$servico"
+  done
+
   echo "== Subindo a versão $versao"
-  "${compose[@]}" up -d --build --wait --remove-orphans
+  "${compose[@]}" up -d --wait --remove-orphans
 
   ln -sfn "$dir" "$BASE/atual"
   echo "$versao" >> "$HISTORICO"

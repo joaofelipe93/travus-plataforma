@@ -2,7 +2,7 @@
 
 Roteiro para colocar a Travus Plataforma numa VM e mantê-la. Decisões do usuário:
 
-- **VM**: DigitalOcean, 4 GB de RAM, Ubuntu 24.04, **dedicada** (nunca a `appairbnb`). O Newcon aceitou login a partir de IP da DigitalOcean (teste de 14/09/2026).
+- **VM**: DigitalOcean `s-2vcpu-2gb` (2 vCPU, 2 GB de RAM, 60 GB), Ubuntu 24.04, **dedicada** (nunca a `appairbnb`). Parada, a plataforma usa menos de 200 MB; os picos são o Chromium num dry-run (0,5 a 1 GB) e o build no deploy (o `publicar.sh` compila uma imagem por vez), com os 2 GB de swap do `preparar.sh` de folga. Se apertar, redimensione para `s-2vcpu-4gb` (seção 1). O Newcon aceitou login a partir de IP da DigitalOcean (teste de 14/09/2026).
 - **Domínio**: a definir (`app.<domínio>` e `api.<domínio>`).
 - **Backup do Postgres**: na própria VM, com cópia manual para fora (`make backup-baixar`).
 - **Alertas**: e-mail (vigia da API) + monitor externo.
@@ -29,7 +29,8 @@ make deploy VM=travus@<ip>  ── git archive ─► releases/<commit>/        
 
 ## 1. Criar a VM (usuário)
 
-1. Droplet de 4 GB e 2 vCPU, **Ubuntu 24.04 LTS**, autenticação **por chave SSH** (sua chave pública), nome `travus-producao`.
+1. Droplet **Basic, Regular, `s-2vcpu-2gb`** (2 vCPU, 2 GB, 60 GB), **Ubuntu 24.04 LTS**, autenticação **por chave SSH** (sua chave pública), nome `travus-producao`. Não precisa de script de inicialização (user data): as atualizações e o resto vêm do `preparar.sh` (seção 2).
+   - **Aumentar depois**: desligue a VM (sem execução em andamento), Resize → **CPU and RAM only** → `s-2vcpu-4gb` → ligue. Dá para voltar. **Não** marque o aumento de disco: esse não volta atrás.
 2. Opcional e pago: backups semanais da própria DigitalOcean. Os backups do Postgres ficam na mesma VM; se ela se perder, só sobra a última cópia baixada.
 3. Anote o IP. **Não use nem altere a VM `appairbnb`**: o `preparar.sh` para se encontrar o usuário `checkin` ou o PM2. Ela continua mandando as notificações até a seção 9, e quem a desliga é você.
 
@@ -42,7 +43,9 @@ ssh root@<ip> 'bash -s' < deploy/vm/preparar.sh
 ssh travus@<ip>        # a partir daqui, root e senha estão bloqueados no SSH
 ```
 
-O script instala Docker (repositório oficial, logs com rotação), firewall (22, 80, 443), fail2ban, atualizações automáticas de segurança, swap de 2 GB, fuso `America/Sao_Paulo`, o usuário `travus` (sudo, só chave) e as pastas em `/opt/travus`.
+O script faz `apt-get update` e `apt-get upgrade` e instala Docker (repositório oficial, logs com rotação), firewall (22, 80, 443), fail2ban, atualizações automáticas de segurança (`unattended-upgrades`, todo dia), swap de 2 GB, fuso `America/Sao_Paulo`, o usuário `travus` (sudo, só chave) e as pastas em `/opt/travus`.
+
+As atualizações automáticas **não reiniciam a VM** de propósito: um reinício no meio de um dry-run ou de um lance real derrubaria o worker. Atualização de kernel fica pendente até o reinício manual (ver Rotina).
 
 Rede até o Newcon a partir da VM (sem login):
 
@@ -155,6 +158,7 @@ Depois da migração:
 | Estado | `ssh travus@<ip> 'cd /opt/travus/atual && make ps'` |
 | Cópia do backup | `make backup-baixar VM=travus@<ip>` (semanal; vai para `deploy/backups/`, fora do git; tem dados de clientes) |
 | Testar a restauração | `ssh -t travus@<ip> 'cd /opt/travus/atual && make restaurar-teste'` (mensal) |
+| Atualizações do sistema | as de segurança entram sozinhas. Uma vez por mês: `ssh travus@<ip> 'cat /var/run/reboot-required 2>/dev/null \|\| echo nada pendente'`; se pedir reinício, confira que não há execução em andamento (tela Execuções) e `ssh travus@<ip> sudo reboot` (os containers voltam sozinhos) |
 | Backup fora de hora | `ssh -t travus@<ip> 'cd /opt/travus/atual && make backup'` |
 
 Na VM, `make up`, `make prod-local` e `make dev-web` se recusam a rodar: a stack de produção sobe só pelo `publicar.sh`.
