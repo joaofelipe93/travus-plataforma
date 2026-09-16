@@ -36,6 +36,14 @@ preparar_segredos() { # pasta da versão
     echo "CHAVE_CRIPTOGRAFIA fora da VM e rode o deploy de novo."
     exit 1
   fi
+  # Segredos que versões novas passaram a exigir: acrescenta o que faltar (nunca troca um existente).
+  local nome
+  for nome in CHECKIN_WEBHOOK_SECRET CHECKIN_DB_SENHA; do
+    if ! grep -q "^$nome=" "$COMP/.env"; then
+      (umask 077; printf '%s=%s\n' "$nome" "$(openssl rand -hex 32)" >> "$COMP/.env")
+      echo "Acrescentado $nome em $COMP/.env."
+    fi
+  done
   if grep -q '^DOMINIO_APP=app\.exemplo\.com\.br$' "$COMP/.env"; then
     falhar "preencha DOMINIO_APP e DOMINIO_API em $COMP/.env"
   fi

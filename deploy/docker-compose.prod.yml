@@ -40,6 +40,12 @@ services:
       traefik.http.routers.web-publico.tls.certresolver: ${CERT_RESOLVER:-le}
       traefik.http.routers.web.tls.certresolver: ${CERT_RESOLVER:-le}
 
+  # Notificador de check-in ligado em produção (localmente fica no perfil checkin).
+  checkin-whatsapp:
+    profiles: !reset []
+    labels:
+      traefik.http.routers.checkin-webhook.tls.certresolver: ${CERT_RESOLVER:-le}
+
   # Um backup por dia, a partir de BACKUP_HORA, em BACKUP_DIR na própria VM.
   backup:
     profiles: !reset []

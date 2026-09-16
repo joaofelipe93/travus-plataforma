@@ -127,6 +127,22 @@ esperar "reimpressão (leitura)" 403 "$(post_json "$LEITURA_COOKIE" "$LEITURA_CS
 esperar "reimpressão com protocolo inválido (operador)" 422 "$(post_json "$OPERADOR_COOKIE" "$OPERADOR_CSRF" /execucoes/reimpressoes '{"cota_id":1,"protocolo":"abc"}')"
 esperar "enviar ao Drive um lance inexistente (operador)" 404 "$(post_json "$OPERADOR_COOKIE" "$OPERADOR_CSRF" /lances/999999999/reenviar-drive '{}')"
 
+echo "== Notificador de check-in (sem mandar webhook válido: nada é gravado)"
+# /whatsapp/* devolve o QR e /events, dados de hóspedes: nunca chegam ao serviço pelo gateway.
+for caminho in /whatsapp/status /whatsapp/groups /events; do
+  esperar "GET api.localhost$caminho sem sessão" 401 "$(codigo "$API$caminho")"
+  RESPOSTA=$(curl -s -w '\n%{http_code}' -H "Cookie: $ADMIN_COOKIE" "$APP/api$caminho")
+  esperar "GET app.localhost/api$caminho (admin) não chega ao serviço" 404 "$(tail -1 <<<"$RESPOSTA")"
+done
+esperar "GET api.localhost/webhooks/nova-reserva (só POST vai ao serviço)" 401 "$(codigo "$API/webhooks/nova-reserva")"
+if [[ -n "$("${COMPOSE[@]}" ps --status running -q checkin-whatsapp 2>/dev/null)" ]]; then
+  RESPOSTA=$(curl -s -w '\n%{http_code}' -X POST -H 'Content-Type: application/json' -d '{"id":"smoke"}' "$API/webhooks/nova-reserva")
+  esperar "POST webhook sem token" 401 "$(tail -1 <<<"$RESPOSTA")"
+  if [[ "$RESPOSTA" == *'"error":"unauthorized"'* ]]; then ok "a recusa veio do notificador (token do webhook)"; else falha "recusa do webhook sem ser do notificador: $(head -1 <<<"$RESPOSTA")"; fi
+else
+  ok "notificador desligado localmente (make checkin): checagens do POST do webhook puladas"
+fi
+
 echo "== Logout"
 esperar "POST logout (leitura)" 204 "$(codigo -X POST -H "Cookie: $LEITURA_COOKIE" -H "Origin: $APP" -H "X-CSRF-Token: $LEITURA_CSRF" "$APP/api/auth/logout")"
 esperar "POST logout (operador)" 204 "$(codigo -X POST -H "Cookie: $OPERADOR_COOKIE" -H "Origin: $APP" -H "X-CSRF-Token: $OPERADOR_CSRF" "$APP/api/auth/logout")"

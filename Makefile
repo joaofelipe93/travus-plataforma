@@ -18,7 +18,7 @@ PRECISA_VM = @test -n "$(VM)" || { echo "informe a VM: make $@ VM=travus@<ip-ou-
 FORA_DA_VM = @test ! -d /opt/travus/compartilhado || { echo "esta é a VM de produção: publique com make deploy (na sua máquina), não com make $@"; exit 1; }
 
 .DEFAULT_GOAL := help
-.PHONY: help env up down logs ps migrate usuario google-token google-status test smoke dev-web sqlc paridade-csv worker-dry-run \
+.PHONY: help env up down checkin logs ps migrate usuario google-token google-status test smoke dev-web sqlc paridade-csv worker-dry-run \
 	backup restaurar-teste alerta-teste prod-local smoke-producao deploy deploy-voltar backup-baixar
 
 help: ## Lista os comandos
@@ -31,7 +31,13 @@ up: env ## Sobe traefik, postgres, migrações, api, web e worker (o worker só 
 	@echo "Pronto: http://app.localhost  |  http://api.localhost/health  |  http://traefik.localhost"
 
 down: ## Derruba os containers (o banco fica no volume)
-	$(COMPOSE) --profile canopus --profile backup down
+	$(COMPOSE) --profile canopus --profile backup --profile checkin down
+
+checkin: env ## Sobe também o notificador de check-in (conecta ao WhatsApp e mostra QR; NÃO pareie o número da produção aqui)
+	$(FORA_DA_VM)
+	$(COMPOSE) --profile checkin up -d --build --wait
+	@$(ESPERAR_GATEWAY)
+	@echo "Notificador local no ar: make logs s=checkin-whatsapp (make down derruba)"
 
 logs: ## Acompanha os logs (ex.: make logs s=worker-canopus)
 	$(COMPOSE) logs -f --tail=100 $(s)
@@ -128,9 +134,12 @@ backup-baixar: ## Copia o último backup da VM para deploy/backups: make backup-
 	scp -p "$(VM):$$ultimo" deploy/backups/ && \
 	echo "Copiado para deploy/backups/$$(basename "$$ultimo") (tem dados de clientes: guarde com cuidado)"
 
-# Garante deploy/.env com senha do Postgres, WORKER_TOKEN e CHAVE_CRIPTOGRAFIA (acrescenta o que faltar).
+# Garante deploy/.env com senha do Postgres, WORKER_TOKEN, CHAVE_CRIPTOGRAFIA e os segredos do notificador
+# de check-in (acrescenta o que faltar).
 env: deploy/.env
 	@grep -q '^WORKER_TOKEN=' deploy/.env || { umask 077; echo "WORKER_TOKEN=$$(openssl rand -hex 32)" >> deploy/.env; echo "Acrescentado WORKER_TOKEN ao deploy/.env"; }
+	@grep -q '^CHECKIN_WEBHOOK_SECRET=' deploy/.env || { umask 077; echo "CHECKIN_WEBHOOK_SECRET=$$(openssl rand -hex 32)" >> deploy/.env; echo "Acrescentado CHECKIN_WEBHOOK_SECRET ao deploy/.env"; }
+	@grep -q '^CHECKIN_DB_SENHA=' deploy/.env || { umask 077; echo "CHECKIN_DB_SENHA=$$(openssl rand -hex 32)" >> deploy/.env; echo "Acrescentada CHECKIN_DB_SENHA ao deploy/.env (aplique com make migrate ou make up)"; }
 	@grep -q '^CHAVE_CRIPTOGRAFIA=' deploy/.env || { umask 077; echo "CHAVE_CRIPTOGRAFIA=$$(openssl rand -hex 32)" >> deploy/.env; echo "Acrescentada CHAVE_CRIPTOGRAFIA ao deploy/.env (guarde com o backup do banco: sem ela, o token do Google não decifra)"; }
 
 deploy/.env:

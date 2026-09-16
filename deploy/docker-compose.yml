@@ -40,6 +40,8 @@ x-api: &api-base
     ALERTA_DE: ${ALERTA_DE:-}
     ALERTA_PARA: ${ALERTA_PARA:-}
     VIGIA_PING_URL: ${VIGIA_PING_URL:-}
+    # Senha do papel checkin no Postgres: `api migrate up` liga o login com ela.
+    CHECKIN_DB_SENHA: ${CHECKIN_DB_SENHA:?defina CHECKIN_DB_SENHA em deploy/.env (make up gera)}
     TZ: America/Sao_Paulo
   logging: *logs
   mem_limit: 256m
@@ -201,6 +203,43 @@ services:
     logging: *logs
     mem_limit: 1536m
 
+  # Notificador de check-in: webhook de reserva do PMS → checkin.mensagens → grupo do WhatsApp.
+  # Aqui fica desligado (perfil checkin: make checkin sobe; conecta ao WhatsApp e mostra QR); em
+  # produção, o docker-compose.prod.yml o liga. UM container só: duas conexões na mesma sessão do
+  # WhatsApp derrubam uma à outra, e cada processo enviaria a fila de novo.
+  checkin-whatsapp:
+    build: ../workers/checkin-whatsapp
+    image: travus/checkin-whatsapp:dev
+    profiles: [checkin]
+    restart: unless-stopped
+    environment:
+      WEBHOOK_SECRET: ${CHECKIN_WEBHOOK_SECRET:?defina CHECKIN_WEBHOOK_SECRET em deploy/.env (make up gera)}
+      # Grupo inicial; depois de parear, o admin escolhe pela tela.
+      WHATSAPP_GROUP_JID: ${CHECKIN_WHATSAPP_GROUP_JID:-}
+      DATABASE_URL: postgres://checkin:${CHECKIN_DB_SENHA:?defina CHECKIN_DB_SENHA em deploy/.env (make up gera)}@postgres:5432/${POSTGRES_DB:-travus}?sslmode=disable
+      TZ: America/Sao_Paulo
+    volumes:
+      # Sessão do WhatsApp (credenciais do número pareado). Apagar o volume = parear de novo.
+      - checkin-dados:/dados
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    # borda: Traefik (só o webhook) e saída para o WhatsApp. interna: Postgres e, na B2, a API.
+    networks: [borda, interna]
+    # Fecha o HTTP, espera o ciclo da fila e desconecta do WhatsApp antes de sair.
+    stop_grace_period: 20s
+    labels:
+      - traefik.enable=true
+      - traefik.http.services.checkin-whatsapp.loadbalancer.server.port=3000
+      # Única rota pública: o webhook (o serviço exige o token dele). /whatsapp/* (QR) e /events
+      # (dados de hóspedes) não têm rota: em api.<domínio> caem na barreira de sessão da API.
+      - traefik.http.routers.checkin-webhook.rule=Host(`${DOMINIO_API:-api.localhost}`) && Path(`/webhooks/nova-reserva`) && Method(`POST`)
+      - traefik.http.routers.checkin-webhook.priority=100
+      - traefik.http.routers.checkin-webhook.service=checkin-whatsapp
+      - traefik.http.routers.checkin-webhook.middlewares=limite-api@file,cabecalhos-seguranca@file
+    logging: *logs
+    mem_limit: 256m
+
   # Backup do Postgres (deploy/backup/backup.sh). Aqui só roda quando chamado (make backup,
   # make restaurar-teste); em produção, o docker-compose.prod.yml o deixa ligado, um por dia.
   backup:
@@ -312,5 +351,6 @@ networks:
 
 volumes:
   postgres-dados:
+  checkin-dados:
   go-modulos:
   go-build:

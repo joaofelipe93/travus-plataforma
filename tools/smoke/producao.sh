@@ -45,6 +45,15 @@ LOCAL=$(curl "${K[@]}" -s -o /dev/null -m 15 -w '%{http_code} %{redirect_url}' "
 esperar "https://$APP/cotas (redireciona)" "302 https://$APP/login?proximo=%2Fcotas" "$LOCAL"
 esperar "rota interna do worker em $API" 401 "$(codigo -X POST "https://$API/internal/tarefas/proxima")"
 
+echo "== Notificador de check-in"
+# Só o POST do webhook chega ao serviço, e sem o token ele recusa. QR e payloads, nunca.
+RESPOSTA=$(curl "${K[@]}" -s -m 15 -w '\n%{http_code}' -X POST -H 'Content-Type: application/json' -d '{"id":"smoke"}' "https://$API/webhooks/nova-reserva")
+esperar "POST https://$API/webhooks/nova-reserva sem token" 401 "$(tail -1 <<<"$RESPOSTA")"
+if [[ "$RESPOSTA" == *'"error":"unauthorized"'* ]]; then ok "a recusa veio do notificador"; else falha "webhook não chegou ao notificador: $(head -1 <<<"$RESPOSTA")"; fi
+for caminho in /whatsapp/status /whatsapp/groups /events; do
+  esperar "https://$API$caminho sem sessão" 401 "$(codigo "https://$API$caminho")"
+done
+
 echo "== Fechado para fora"
 esperar "dashboard do Traefik (Host: traefik.localhost)" 404 "$(codigo -H 'Host: traefik.localhost' "https://$APP/")"
 for porta in 8080 8081 5432 3000; do
