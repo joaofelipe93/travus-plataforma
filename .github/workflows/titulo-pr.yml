@@ -1,0 +1,31 @@
+# O merge é por squash com o título do PR como mensagem do commit na main, e o release-please
+# lê essas mensagens para calcular a versão e o CHANGELOG. Por isso o título precisa seguir o
+# padrão: tipo(escopo opcional)!: descrição, com tipo feat, fix, perf, revert, docs, ci, build,
+# refactor, test, chore ou style. "!" marca mudança incompatível.
+name: Título do PR
+
+on:
+  pull_request:
+    types: [opened, edited, synchronize, reopened]
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  titulo:
+    name: Título do PR no padrão
+    runs-on: ubuntu-24.04
+    timeout-minutes: 2
+    steps:
+      - name: Conferir
+        env:
+          TITULO: ${{ github.event.pull_request.title }}
+        run: |
+          padrao='^(feat|fix|perf|revert|docs|ci|build|refactor|test|chore|style)(\([a-z0-9-]+\))?!?: [^ ].{2,}$'
+          if printf '%s' "$TITULO" | grep -qE "$padrao"; then
+            echo "Título ok: $TITULO"
+          else
+            echo "::error::Título fora do padrão: \"$TITULO\". Use tipo(escopo)!: descrição, ex.: \"feat(reservas): histórico de mensagens\" ou \"fix: login com e-mail em maiúsculas\"."
+            exit 1
+          fi

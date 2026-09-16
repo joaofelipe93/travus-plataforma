@@ -8,5 +8,7 @@ export async function healthRoutes(app: FastifyInstance) {
     whatsapp: getStatus(),
     outbox: Object.fromEntries((await stats()).map((s) => [s.status, s.count])),
     uptime: Math.round(process.uptime()),
+    versao: process.env.VERSAO ?? 'dev',
+    commit: process.env.COMMIT ?? 'desconhecido',
   }))
 }

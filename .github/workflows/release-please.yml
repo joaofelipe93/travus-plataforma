@@ -1,0 +1,43 @@
+# Versionamento: a cada push na main, o release-please atualiza um PR "chore: versão X.Y.Z"
+# com o CHANGELOG.md e o version.txt (feat → minor, fix → patch; enquanto for 0.x, quebra
+# também é minor). O merge desse PR cria a tag vX.Y.Z e o release no GitHub.
+#
+# Usa o token RELEASE_PLEASE_TOKEN (fine-grained, só este repositório: Contents, Pull requests
+# e Issues com leitura e escrita). Com o GITHUB_TOKEN, o PR de versão não dispararia a CI
+# (e a main exige a CI verde) nem a tag dispararia o deploy.
+name: Versão
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: release-please
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  release-please:
+    name: PR de versão e release
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: googleapis/release-please-action@v4
+        id: release
+        with:
+          token: ${{ secrets.RELEASE_PLEASE_TOKEN }}
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
+      - name: Resumo
+        env:
+          CRIADA: ${{ steps.release.outputs.release_created }}
+          TAG: ${{ steps.release.outputs.tag_name }}
+        run: |
+          if [ "$CRIADA" = "true" ]; then
+            echo "Release $TAG criado." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "Nenhum release novo: o PR de versão foi criado ou atualizado, se havia mudanças." >> "$GITHUB_STEP_SUMMARY"
+          fi

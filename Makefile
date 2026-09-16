@@ -6,6 +6,10 @@ PROD := $(COMPOSE) -f deploy/docker-compose.prod.yml
 export HOST_UID := $(shell id -u)
 export HOST_GID := $(shell id -g)
 
+# Versão (version.txt, mantido pelo release-please) e commit embutidos nas imagens e no /health.
+export VERSAO := $(shell cat version.txt 2>/dev/null || echo dev)
+export COMMIT := $(shell git rev-parse --short=12 HEAD 2>/dev/null || echo desconhecido)
+
 # O Traefik leva alguns segundos para ligar as rotas depois que o container fica saudável.
 ESPERAR_GATEWAY = for i in $$(seq 30); do [ "$$(curl -s -o /dev/null -w '%{http_code}' http://app.localhost/login)" = 200 ] && exit 0; sleep 1; done; echo "aviso: app.localhost/login ainda não responde 200 (veja make logs s=traefik)"
 
@@ -123,7 +127,7 @@ deploy: ## Publica o commit atual na VM: make deploy VM=travus@<ip-ou-host> (nã
 	$(PRECISA_VM)
 	@git diff --quiet && git diff --cached --quiet || { echo "há mudanças sem commit: o deploy publica só o que está commitado"; exit 1; }
 	@versao=$$(git rev-parse --short=12 HEAD); \
-	echo "Publicando $$versao em $(VM)"; \
+	echo "Publicando v$(VERSAO) (commit $$versao) em $(VM)"; \
 	git archive --format=tar HEAD | ssh $(VM) "mkdir -p /opt/travus/releases/$$versao && tar -x -C /opt/travus/releases/$$versao" && \
 	ssh -t $(VM) "FORCAR=$(FORCAR) bash /opt/travus/releases/$$versao/deploy/vm/publicar.sh $$versao"
 

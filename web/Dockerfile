@@ -7,6 +7,11 @@ RUN npm ci --no-audit --no-fund
 FROM node:24.21.0-alpine AS build
 WORKDIR /app
 ENV NEXT_TELEMETRY_DISABLED=1
+# Versão (version.txt) e commit, passados pelo compose; o Next embute no build (NEXT_PUBLIC_*).
+ARG VERSAO=dev
+ARG COMMIT=desconhecido
+ENV NEXT_PUBLIC_VERSAO=${VERSAO} \
+    NEXT_PUBLIC_COMMIT=${COMMIT}
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 RUN npm run build

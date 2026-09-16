@@ -32,6 +32,12 @@ import (
 	"github.com/joaofelipe93/travus-plataforma/api/migrations"
 )
 
+// Preenchidos no build (-ldflags -X, a partir de version.txt e do commit): ver api/Dockerfile.
+var (
+	versao = "dev"
+	commit = "desconhecido"
+)
+
 func main() {
 	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stdout, nil)))
 
@@ -124,6 +130,8 @@ func serve() error {
 			CertificadoHost: os.Getenv("VIGIA_CERTIFICADO"),
 			Checkin:         os.Getenv("VIGIA_CHECKIN") == "true",
 		},
+		Versao:  versao,
+		Commit:  commit,
 		Checkin: checkin.NovoCliente(envOr("CHECKIN_URL", "http://checkin-whatsapp:3000"), os.Getenv("CHECKIN_ADMIN_TOKEN")),
 	}
 	if email := smtpDoAmbiente(); email.Configurado() {
@@ -144,7 +152,7 @@ func serve() error {
 		Handler:           servidor.RotasInternas(),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
-	slog.Info("configuração", "app_origin", cfg.AppOrigin, "cookie_secure", cfg.CookieSecure, "lance_real_habilitado", cfg.LanceRealHabilitado,
+	slog.Info("configuração", "versao", versao, "commit", commit, "app_origin", cfg.AppOrigin, "cookie_secure", cfg.CookieSecure, "lance_real_habilitado", cfg.LanceRealHabilitado,
 		"drive_configurado", cfg.Google.ClientID != "" && cfg.Google.PastaDrive != "",
 		"alertas_por_email", cfg.Vigia.Email != nil, "monitor_externo", cfg.Vigia.PingURL != "",
 		"vigia_backup", cfg.Vigia.BackupDir != "", "vigia_certificado", cfg.Vigia.CertificadoHost, "vigia_checkin", cfg.Vigia.Checkin,

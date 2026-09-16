@@ -85,6 +85,13 @@ func textoOuNil(s string) *string {
 	return &s
 }
 
+func valorOuPadrao(s, padrao string) string {
+	if s == "" {
+		return padrao
+	}
+	return s
+}
+
 func valorOuVazio(s *string) string {
 	if s == nil {
 		return ""
