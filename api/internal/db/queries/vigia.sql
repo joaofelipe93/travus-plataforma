@@ -17,3 +17,10 @@ SELECT (count(*) FILTER (WHERE drive_status = 'erro' AND drive_tentativas >= 5))
        (count(*) FILTER (WHERE drive_status IN ('pendente', 'erro') AND drive_tentativas < 5
                            AND atualizado_em < now() - interval '1 hour'))::int     AS atrasados
 FROM lances;
+
+-- Notificador de check-in: mensagens que desistiram (6 tentativas) nas últimas 24 h e
+-- mensagens paradas na fila (o WhatsApp conectado mas nada sai).
+-- name: VigiaCheckin :one
+SELECT (count(*) FILTER (WHERE status = 'falhou' AND criada_em > now() - interval '24 hours'))::int     AS falharam,
+       (count(*) FILTER (WHERE status = 'pendente' AND criada_em < now() - interval '30 minutes'))::int AS paradas
+FROM checkin.mensagens;

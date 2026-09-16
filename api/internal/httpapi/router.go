@@ -83,6 +83,10 @@ type Servidor struct {
 	vigiaMu             sync.Mutex
 	alertas             map[string]*alertaAtivo
 	vigiaRaizes         *x509.CertPool
+	// Notificador de check-in: desde quando está sem resposta ou com o WhatsApp fora (só a
+	// goroutine do vigia mexe).
+	checkinSemRespostaDesde time.Time
+	whatsappForaDesde       time.Time
 }
 
 func NovoServidor(cfg Config, pool *pgxpool.Pool) *Servidor {

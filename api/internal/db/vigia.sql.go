@@ -9,6 +9,26 @@ import (
 	"context"
 )
 
+const vigiaCheckin = `-- name: VigiaCheckin :one
+SELECT (count(*) FILTER (WHERE status = 'falhou' AND criada_em > now() - interval '24 hours'))::int     AS falharam,
+       (count(*) FILTER (WHERE status = 'pendente' AND criada_em < now() - interval '30 minutes'))::int AS paradas
+FROM checkin.mensagens
+`
+
+type VigiaCheckinRow struct {
+	Falharam int32
+	Paradas  int32
+}
+
+// Notificador de check-in: mensagens que desistiram (6 tentativas) nas últimas 24 h e
+// mensagens paradas na fila (o WhatsApp conectado mas nada sai).
+func (q *Queries) VigiaCheckin(ctx context.Context) (VigiaCheckinRow, error) {
+	row := q.db.QueryRow(ctx, vigiaCheckin)
+	var i VigiaCheckinRow
+	err := row.Scan(&i.Falharam, &i.Paradas)
+	return i, err
+}
+
 const vigiaCotasAposConfirmar = `-- name: VigiaCotasAposConfirmar :many
 SELECT id, execucao_id, grupo, cota, versao, erro
 FROM execucao_cotas

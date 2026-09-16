@@ -122,6 +122,7 @@ func serve() error {
 			PingURL:         os.Getenv("VIGIA_PING_URL"),
 			BackupDir:       os.Getenv("VIGIA_BACKUP_DIR"),
 			CertificadoHost: os.Getenv("VIGIA_CERTIFICADO"),
+			Checkin:         os.Getenv("VIGIA_CHECKIN") == "true",
 		},
 		Checkin: checkin.NovoCliente(envOr("CHECKIN_URL", "http://checkin-whatsapp:3000"), os.Getenv("CHECKIN_ADMIN_TOKEN")),
 	}
@@ -146,7 +147,7 @@ func serve() error {
 	slog.Info("configuração", "app_origin", cfg.AppOrigin, "cookie_secure", cfg.CookieSecure, "lance_real_habilitado", cfg.LanceRealHabilitado,
 		"drive_configurado", cfg.Google.ClientID != "" && cfg.Google.PastaDrive != "",
 		"alertas_por_email", cfg.Vigia.Email != nil, "monitor_externo", cfg.Vigia.PingURL != "",
-		"vigia_backup", cfg.Vigia.BackupDir != "", "vigia_certificado", cfg.Vigia.CertificadoHost,
+		"vigia_backup", cfg.Vigia.BackupDir != "", "vigia_certificado", cfg.Vigia.CertificadoHost, "vigia_checkin", cfg.Vigia.Checkin,
 		"notificador_checkin", cfg.Checkin != nil)
 
 	errc := make(chan error, 2)

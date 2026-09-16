@@ -23,6 +23,7 @@ services:
       APP_ORIGIN: https://${DOMINIO_APP:?defina DOMINIO_APP em deploy/.env}
       VIGIA_BACKUP_DIR: /backups
       VIGIA_CERTIFICADO: ${DOMINIO_APP}:443
+      VIGIA_CHECKIN: "true"
     volumes:
       - ${BACKUP_DIR:?defina BACKUP_DIR em deploy/.env}:/backups:ro
     labels:

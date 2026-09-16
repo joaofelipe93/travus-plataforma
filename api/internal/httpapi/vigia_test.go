@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/joaofelipe93/travus-plataforma/api/internal/alerta"
+	"github.com/joaofelipe93/travus-plataforma/api/internal/checkin"
 )
 
 type emailFalso struct {
@@ -153,5 +154,114 @@ func TestVigiaContatoDoWorker(t *testing.T) {
 	interno.ServeHTTP(httptest.NewRecorder(), r)
 	if s.ultimoContatoWorker.Load() != 0 {
 		t.Error("requisição sem token válido contou como contato do worker")
+	}
+}
+
+func TestVigiaNotificadorCheckin(t *testing.T) {
+	s := novoServidorTeste(t)
+	ctx := context.Background()
+	s.exec(t, "TRUNCATE checkin.mensagens, checkin.eventos, checkin.configuracao RESTART IDENTITY")
+	falso := &notificadorFalso{conectado: false}
+	srv := httptest.NewServer(falso)
+	defer srv.Close()
+	s.cfg.Checkin = checkin.NovoCliente(srv.URL, tokenCheckinTeste)
+	s.cfg.Vigia.Checkin = true
+	s.inicio = time.Now().Add(-time.Hour)
+	s.ultimoContatoWorker.Store(time.Now().UnixNano())
+
+	relogio := time.Now()
+	s.agora = func() time.Time { return relogio }
+	checkinAchados := func() map[string]achado {
+		t.Helper()
+		achados, ok := s.verificarSaude(ctx)
+		if !ok {
+			t.Fatal("banco indisponível")
+		}
+		m := map[string]achado{}
+		for _, a := range achados {
+			if strings.HasPrefix(a.Chave, "checkin-") {
+				m[a.Chave] = a
+			}
+		}
+		return m
+	}
+	avancar := func(d time.Duration) { relogio = relogio.Add(d) }
+
+	// WhatsApp esperando o QR: tolera 10 min (reinício, pareamento em andamento).
+	if a := checkinAchados(); len(a) != 0 {
+		t.Fatalf("alerta antes da tolerância: %+v", a)
+	}
+	avancar(11 * time.Minute)
+	a := checkinAchados()
+	if w, ok := a["checkin-whatsapp"]; !ok || !strings.Contains(w.Titulo, "QR") || !strings.Contains(w.Detalhe, "app.teste/whatsapp") {
+		t.Fatalf("esperado alerta do QR: %+v", a)
+	}
+
+	// Conectou, sem grupo escolhido.
+	falso.mu.Lock()
+	falso.conectado = true
+	falso.mu.Unlock()
+	a = checkinAchados()
+	if _, ok := a["checkin-whatsapp"]; ok {
+		t.Fatal("alerta de desconexão continuou depois de conectar")
+	}
+	if _, ok := a["checkin-sem-grupo"]; !ok {
+		t.Fatalf("esperado alerta de grupo não escolhido: %+v", a)
+	}
+
+	// Grupo escolhido; mensagens que desistiram e paradas na fila com o WhatsApp conectado.
+	falso.mu.Lock()
+	falso.grupo = "1234-5678@g.us"
+	falso.mu.Unlock()
+	s.exec(t, `INSERT INTO checkin.eventos (chave_dedup, origem, payload) VALUES ('teste:1', 'teste', '{"guest_name":"Hóspede Fictício"}')`)
+	s.exec(t, `INSERT INTO checkin.mensagens (evento_id, destino_jid, texto, status, tentativas) VALUES (1, '1234-5678@g.us', 'Hóspede Fictício', 'falhou', 6)`)
+	s.exec(t, `INSERT INTO checkin.mensagens (evento_id, destino_jid, texto, criada_em) VALUES (1, '1234-5678@g.us', 'Hóspede Fictício', now() - interval '1 hour')`)
+	a = checkinAchados()
+	if _, ok := a["checkin-sem-grupo"]; ok {
+		t.Fatal("alerta de grupo continuou depois de escolher")
+	}
+	if f, ok := a["checkin-falhas"]; !ok || !strings.HasPrefix(f.Titulo, "1 mensagem") {
+		t.Fatalf("esperado alerta de mensagens que falharam: %+v", a)
+	}
+	if _, ok := a["checkin-fila"]; !ok {
+		t.Fatalf("esperado alerta de fila parada: %+v", a)
+	}
+	for _, x := range a {
+		if strings.Contains(x.Titulo+x.Detalhe, "Fictício") || strings.Contains(x.Titulo+x.Detalhe, "Reservas Chalés") {
+			t.Fatalf("alerta com nome de hóspede ou de grupo: %+v", x)
+		}
+	}
+
+	// Desconectado com fila parada: só o alerta de desconexão (depois da tolerância), não o da fila.
+	falso.mu.Lock()
+	falso.conectado = false
+	falso.mu.Unlock()
+	avancar(time.Minute)
+	if _, ok := checkinAchados()["checkin-fila"]; ok {
+		t.Fatal("fila parada com o WhatsApp desconectado não é alerta próprio")
+	}
+
+	// Notificador fora do ar: tolera 10 min.
+	srv.Close()
+	avancar(time.Minute)
+	if _, ok := checkinAchados()["checkin-servico"]; ok {
+		t.Fatal("alerta de serviço antes da tolerância")
+	}
+	avancar(11 * time.Minute)
+	a = checkinAchados()
+	if _, ok := a["checkin-servico"]; !ok {
+		t.Fatalf("esperado alerta do notificador sem resposta: %+v", a)
+	}
+	if _, ok := a["checkin-whatsapp"]; ok {
+		t.Fatal("sem resposta do serviço, o estado do WhatsApp é desconhecido: não alerta desconexão")
+	}
+	if strings.Contains(a["checkin-servico"].Detalhe, tokenCheckinTeste) {
+		t.Fatal("token no alerta")
+	}
+
+	// Desligado (ambiente local): nenhuma checagem.
+	s.cfg.Vigia.Checkin = false
+	if a := checkinAchados(); len(a) != 0 {
+		t.Fatalf("checagem do notificador com VIGIA_CHECKIN desligado: %+v", a)
 	}
 }

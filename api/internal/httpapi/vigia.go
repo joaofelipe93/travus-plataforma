@@ -33,13 +33,18 @@ type ConfigVigia struct {
 	Intervalo       time.Duration
 	// Fração do disco (0 a 1) acima da qual há alerta. Padrão 0,8.
 	LimiteDisco float64
+	// Confere o notificador de check-in (WhatsApp). Só em produção (VIGIA_CHECKIN=true): no
+	// ambiente local o serviço fica desligado.
+	Checkin bool
 }
 
 const (
 	semContatoWorker  = 10 * time.Minute
 	backupAtrasado    = 26 * time.Hour
 	certificadoMinimo = 14 * 24 * time.Hour
-	lembreteAlerta    = 12 * time.Hour
+	// Tolerância para reinício do serviço (deploy) e quedas curtas do WhatsApp.
+	checkinForaTolerancia = 10 * time.Minute
+	lembreteAlerta        = 12 * time.Hour
 )
 
 type achado struct {
@@ -106,6 +111,7 @@ func (s *Servidor) verificarSaude(ctx context.Context) ([]achado, bool) {
 	if bancoOk {
 		out = append(out, s.verificarBanco(ctxBanco)...)
 	}
+	out = append(out, s.verificarCheckin(ctx, agora, bancoOk)...)
 	out = append(out, s.verificarBackup(agora)...)
 	if a := s.verificarCertificado(ctx, agora); a != nil {
 		out = append(out, *a)
@@ -165,6 +171,85 @@ func (s *Servidor) verificarBanco(ctx context.Context) []achado {
 				Detalhe: "Confira o token, o client OAuth e a pasta com make google-status.",
 			})
 		}
+	}
+	return out
+}
+
+// verificarCheckin: notificador sem resposta ou WhatsApp desconectado por mais de 10 min,
+// nenhum grupo escolhido, mensagens que desistiram e fila parada. Sem nome de hóspede nem de
+// grupo no alerta.
+func (s *Servidor) verificarCheckin(ctx context.Context, agora time.Time, bancoOk bool) []achado {
+	if !s.cfg.Vigia.Checkin {
+		return nil
+	}
+	var out []achado
+	tela := s.cfg.AppOrigin + "/whatsapp"
+
+	ctxStatus, cancel := context.WithTimeout(ctx, 15*time.Second)
+	st, err := s.cfg.Checkin.Status(ctxStatus)
+	cancel()
+	if err != nil {
+		s.whatsappForaDesde = time.Time{}
+		if s.checkinSemRespostaDesde.IsZero() {
+			s.checkinSemRespostaDesde = agora
+		}
+		if d := agora.Sub(s.checkinSemRespostaDesde); d > checkinForaTolerancia {
+			out = append(out, achado{
+				Chave:   "checkin-servico",
+				Titulo:  "Notificador de check-in (WhatsApp) sem resposta há " + textoTempo(d),
+				Detalhe: "Os webhooks de reserva não estão sendo recebidos nem enviados ao grupo (make logs s=checkin-whatsapp).\n" + err.Error(),
+			})
+		}
+	} else {
+		s.checkinSemRespostaDesde = time.Time{}
+		if st.Status == "open" {
+			s.whatsappForaDesde = time.Time{}
+			if st.Grupo == nil {
+				out = append(out, achado{
+					Chave:   "checkin-sem-grupo",
+					Titulo:  "WhatsApp conectado, mas nenhum grupo escolhido para as notificações",
+					Detalhe: "As reservas são gravadas e nenhuma mensagem sai. Escolha o grupo em " + tela,
+				})
+			}
+		} else {
+			if s.whatsappForaDesde.IsZero() {
+				s.whatsappForaDesde = agora
+			}
+			if d := agora.Sub(s.whatsappForaDesde); d > checkinForaTolerancia {
+				titulo := "WhatsApp desconectado há " + textoTempo(d) + ": as notificações de reserva estão paradas"
+				detalhe := "As mensagens esperam na fila. Veja a conexão em " + tela
+				if st.Status == "qr" {
+					titulo = "WhatsApp esperando a leitura do QR há " + textoTempo(d) + ": as notificações de reserva estão paradas"
+					detalhe = "A sessão foi encerrada (no celular ou pela tela). Um admin precisa escanear o QR em " + tela
+				}
+				out = append(out, achado{Chave: "checkin-whatsapp", Titulo: titulo, Detalhe: detalhe})
+			}
+		}
+	}
+
+	if !bancoOk {
+		return out
+	}
+	ctxBanco, cancelBanco := context.WithTimeout(ctx, 15*time.Second)
+	defer cancelBanco()
+	c, err := s.q.VigiaCheckin(ctxBanco)
+	if err != nil {
+		slog.Error("vigia: consulta do notificador de check-in", "erro", err)
+		return out
+	}
+	if c.Falharam > 0 {
+		out = append(out, achado{
+			Chave:   "checkin-falhas",
+			Titulo:  fmt.Sprintf("%d mensagem(ns) de reserva não chegaram ao grupo do WhatsApp (últimas 24 h)", c.Falharam),
+			Detalhe: "Foram 6 tentativas e o envio desistiu: confira as reservas no PMS e os logs (make logs s=checkin-whatsapp).",
+		})
+	}
+	if c.Paradas > 0 && st != nil && st.Status == "open" {
+		out = append(out, achado{
+			Chave:   "checkin-fila",
+			Titulo:  fmt.Sprintf("%d mensagem(ns) de reserva paradas na fila há mais de 30 min com o WhatsApp conectado", c.Paradas),
+			Detalhe: "O envio está falhando ou travou (make logs s=checkin-whatsapp).",
+		})
 	}
 	return out
 }
