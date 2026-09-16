@@ -1,13 +1,14 @@
 # syntax=docker/dockerfile:1
-# Notificador de check-in: webhook de reserva → fila (SQLite) → grupo do WhatsApp (Baileys).
+# Notificador de check-in: webhook de reserva → fila (Postgres, schema checkin) → grupo do
+# WhatsApp (Baileys).
 # Um processo só: não escale (duas conexões na mesma sessão do Baileys derrubam uma à outra e
 # cada processo tem o próprio laço da fila, o que duplicaria as mensagens no grupo).
 
-# Dependências: no `npm ci` o better-sqlite3 compila o módulo nativo (node-gyp: python3, make,
-# g++) e o libsignal do baileys vem do GitHub (git). Nada disso vai para a imagem final.
+# Dependências (com as de desenvolvimento: o make test roda nesta fase). O libsignal do baileys
+# vem do GitHub (git). O git não vai para a imagem final.
 FROM node:24.21.0-bookworm-slim AS deps
 RUN apt-get update \
- && apt-get install -y --no-install-recommends python3 make g++ git ca-certificates \
+ && apt-get install -y --no-install-recommends git ca-certificates \
  && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 COPY package.json package-lock.json ./
@@ -24,13 +25,12 @@ ENV NODE_ENV=production \
     HOST=0.0.0.0 \
     PORT=3000 \
     LOG_FORMAT=json \
-    AUTH_DIR=/dados/auth_info \
-    DB_PATH=/dados/app.db
+    AUTH_DIR=/dados/auth_info
 COPY --from=build /app/package.json ./
 COPY --from=build /app/node_modules ./node_modules
 COPY --from=build /app/dist ./dist
 
-# /dados (volume): sessão do WhatsApp (credenciais do número pareado) e o banco. Nunca na imagem.
+# /dados (volume): sessão do WhatsApp (credenciais do número pareado). Nunca na imagem.
 RUN mkdir -p /dados && chown node:node /dados
 USER node
 VOLUME ["/dados"]

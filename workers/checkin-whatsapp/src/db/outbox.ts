@@ -1,107 +1,110 @@
-import { db } from './index.js'
+import { pool } from './index.js'
 
 export const MAX_ATTEMPTS = 6
 
+export type OutboxStatus = 'pendente' | 'enviada' | 'falhou'
+
 export type OutboxRow = {
   id: number
-  event_id: number
-  target_jid: string
-  body: string
-  status: 'pending' | 'sent' | 'failed'
-  attempts: number
-  next_attempt_at: string
-  last_error: string | null
-  sent_at: string | null
-  created_at: string
+  evento_id: number
+  destino_jid: string
+  texto: string
+  status: OutboxStatus
+  tentativas: number
+  proxima_tentativa_em: Date
+  ultimo_erro: string | null
+  enviada_em: Date | null
+  criada_em: Date
 }
 
-const enqueueStmt = db.prepare(`
-  INSERT INTO outbox (event_id, target_jid, body, next_attempt_at, created_at)
-  VALUES (?, ?, ?, ?, ?)
-`)
-
-const claimPendingStmt = db.prepare(`
-  SELECT * FROM outbox
-  WHERE status = 'pending' AND next_attempt_at <= ?
-  ORDER BY id ASC
-  LIMIT ?
-`)
-
-const markSentStmt = db.prepare(`
-  UPDATE outbox
-  SET status = 'sent', attempts = attempts + 1, sent_at = ?, last_error = NULL
-  WHERE id = ?
-`)
-
-const markRetryStmt = db.prepare(`
-  UPDATE outbox
-  SET attempts = attempts + 1, next_attempt_at = ?, last_error = ?
-  WHERE id = ?
-`)
-
-const markFailedStmt = db.prepare(`
-  UPDATE outbox
-  SET status = 'failed', attempts = attempts + 1, last_error = ?
-  WHERE id = ?
-`)
-
-export function enqueue(input: {
+export async function enqueue(input: {
   eventId: number
   targetJid: string
   body: string
-}): number {
-  const now = new Date().toISOString()
-  const result = enqueueStmt.run(
-    input.eventId,
-    input.targetJid,
-    input.body,
-    now, // elegível imediatamente
-    now,
+}): Promise<number> {
+  // proxima_tentativa_em = now(): elegível imediatamente.
+  const { rows } = await pool.query<{ id: number }>(
+    `INSERT INTO checkin.mensagens (evento_id, destino_jid, texto)
+     VALUES ($1, $2, $3)
+     RETURNING id`,
+    [input.eventId, input.targetJid, input.body],
   )
-  return Number(result.lastInsertRowid)
+  return rows[0]!.id
 }
-
-const hasForEventStmt = db.prepare(`SELECT 1 FROM outbox WHERE event_id = ? LIMIT 1`)
 
 /** True se o evento já gerou alguma mensagem (enviada, pendente ou falha). */
-export function hasMessageForEvent(eventId: number): boolean {
-  return hasForEventStmt.get(eventId) !== undefined
+export async function hasMessageForEvent(eventId: number): Promise<boolean> {
+  const { rowCount } = await pool.query(
+    `SELECT 1 FROM checkin.mensagens WHERE evento_id = $1 LIMIT 1`,
+    [eventId],
+  )
+  return (rowCount ?? 0) > 0
 }
 
-export function claimPending(limit = 10): OutboxRow[] {
-  return claimPendingStmt.all(new Date().toISOString(), limit) as OutboxRow[]
+/**
+ * Pendentes na hora de envio, em ordem. Sem trava: existe um processo só (uma sessão do
+ * Baileys), e o laço não sobrepõe ciclos.
+ */
+export async function claimPending(limit = 10): Promise<OutboxRow[]> {
+  const { rows } = await pool.query<OutboxRow>(
+    `SELECT * FROM checkin.mensagens
+     WHERE status = 'pendente' AND proxima_tentativa_em <= now()
+     ORDER BY id ASC
+     LIMIT $1`,
+    [limit],
+  )
+  return rows
 }
 
-export function markSent(id: number) {
-  markSentStmt.run(new Date().toISOString(), id)
+export async function markSent(id: number): Promise<void> {
+  await pool.query(
+    `UPDATE checkin.mensagens
+     SET status = 'enviada', tentativas = tentativas + 1, enviada_em = now(), ultimo_erro = NULL
+     WHERE id = $1`,
+    [id],
+  )
 }
 
 /**
  * Registra a falha. Enquanto houver tentativas sobrando, reagenda com backoff
- * exponencial (5s, 15s, 45s, 135s...); esgotadas, marca como `failed`.
+ * exponencial (5s, 15s, 45s, 135s...); esgotadas, marca como `falhou`.
  */
-export function markFailure(row: OutboxRow, error: string) {
-  const attempts = row.attempts + 1
+export async function markFailure(row: OutboxRow, error: string) {
+  const attempts = row.tentativas + 1
   if (attempts >= MAX_ATTEMPTS) {
-    markFailedStmt.run(error, row.id)
+    await pool.query(
+      `UPDATE checkin.mensagens
+       SET status = 'falhou', tentativas = tentativas + 1, ultimo_erro = $2
+       WHERE id = $1`,
+      [row.id, error],
+    )
     return { retrying: false as const, attempts }
   }
 
-  const delayMs = 5_000 * 3 ** row.attempts
-  const nextAttemptAt = new Date(Date.now() + delayMs).toISOString()
-  markRetryStmt.run(nextAttemptAt, error, row.id)
-  return { retrying: true as const, attempts, nextAttemptAt }
+  const delayMs = 5_000 * 3 ** row.tentativas
+  const { rows } = await pool.query<{ proxima_tentativa_em: Date }>(
+    `UPDATE checkin.mensagens
+     SET tentativas = tentativas + 1,
+         proxima_tentativa_em = now() + make_interval(secs => $2::double precision / 1000),
+         ultimo_erro = $3
+     WHERE id = $1
+     RETURNING proxima_tentativa_em`,
+    [row.id, delayMs, error],
+  )
+  return { retrying: true as const, attempts, nextAttemptAt: rows[0]?.proxima_tentativa_em }
 }
-
-const countPendingStmt = db.prepare(`SELECT COUNT(*) as n FROM outbox WHERE status = 'pending'`)
 
 /** Quantas mensagens ainda esperam envio — usado só para log de diagnóstico. */
-export function countPending(): number {
-  return (countPendingStmt.get() as { n: number }).n
+export async function countPending(): Promise<number> {
+  const { rows } = await pool.query<{ n: number }>(
+    `SELECT count(*) AS n FROM checkin.mensagens WHERE status = 'pendente'`,
+  )
+  return rows[0]?.n ?? 0
 }
 
-export function stats() {
-  return db
-    .prepare(`SELECT status, COUNT(*) as count FROM outbox GROUP BY status`)
-    .all() as { status: string; count: number }[]
+export async function stats(): Promise<{ status: OutboxStatus; count: number }[]> {
+  const { rows } = await pool.query<{ status: OutboxStatus; count: number }>(
+    `SELECT status, count(*) AS count FROM checkin.mensagens GROUP BY status ORDER BY status`,
+  )
+  return rows
 }

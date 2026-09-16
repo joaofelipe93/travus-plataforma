@@ -53,12 +53,12 @@ export async function whatsappRoutes(app: FastifyInstance) {
   app.get('/events', async (req) => {
     const limit = Number((req.query as { limit?: string })?.limit ?? 20)
     return {
-      events: listRecentEvents(Number.isFinite(limit) ? Math.min(limit, 100) : 20).map((e) => ({
+      events: (await listRecentEvents(Number.isFinite(limit) ? Math.min(limit, 100) : 20)).map((e) => ({
         id: e.id,
-        source: e.source,
-        dedupeKey: e.dedupe_key,
-        receivedAt: e.received_at,
-        payload: JSON.parse(e.raw_payload) as unknown,
+        source: e.origem,
+        dedupeKey: e.chave_dedup,
+        receivedAt: e.recebido_em,
+        payload: e.payload,
       })),
     }
   })

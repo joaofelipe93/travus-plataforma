@@ -59,7 +59,7 @@ func preparar(ctx context.Context, dsn string) error {
 		return err
 	}
 	defer db.Close()
-	if _, err := db.ExecContext(ctx, "DROP SCHEMA IF EXISTS public CASCADE; CREATE SCHEMA public"); err != nil {
+	if _, err := db.ExecContext(ctx, "DROP SCHEMA IF EXISTS checkin CASCADE; DROP SCHEMA IF EXISTS public CASCADE; CREATE SCHEMA public"); err != nil {
 		return fmt.Errorf("recriando esquema: %w", err)
 	}
 	provider, err := goose.NewProvider(goose.DialectPostgres, db, migrations.FS)

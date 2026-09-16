@@ -62,12 +62,12 @@ backup: env ## Backup do Postgres agora, em deploy/backups (tem dados de cliente
 restaurar-teste: env ## Restaura o último backup num banco temporário e compara com o banco em uso
 	$(COMPOSE) --profile backup run --rm backup testar-restauracao
 
-test: env ## Testes: api (unitários e integração com Postgres), web (lint e tipos), workers (node:test, sem Newcon e sem WhatsApp), scripts (sintaxe)
+test: env ## Testes: api e checkin-whatsapp (com Postgres), web (lint e tipos), worker Canopus (node:test, sem Newcon), scripts (sintaxe)
 	$(COMPOSE) up -d --wait postgres
 	$(COMPOSE) --profile teste run --rm api-teste
 	cd web && npm run lint && npx next typegen && npx tsc --noEmit
 	cd workers/canopus && for f in src/*.js; do node --check "$$f" || exit 1; done && npm test
-	cd workers/checkin-whatsapp && npm ci --no-audit --no-fund && npm run typecheck && npm run typecheck:tests && npm test
+	$(COMPOSE) --profile teste run --rm --build checkin-teste
 	sh -n workers/canopus/docker-entrypoint.sh
 	sh -n deploy/backup/backup.sh
 	for f in deploy/vm/*.sh tools/smoke/*.sh; do bash -n "$$f" || exit 1; done

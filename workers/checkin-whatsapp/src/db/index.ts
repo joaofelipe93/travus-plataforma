@@ -1,42 +1,29 @@
-import Database from 'better-sqlite3'
-import { mkdirSync } from 'node:fs'
-import { dirname } from 'node:path'
+import pg from 'pg'
 import { env } from '../config/env.js'
+import { logger } from '../logger.js'
 
-mkdirSync(dirname(env.DB_PATH), { recursive: true })
+// Ids (bigint) e count(*) chegam como texto no pg; aqui viram number. Os ids desta fila
+// nunca passam de Number.MAX_SAFE_INTEGER.
+pg.types.setTypeParser(pg.types.builtins.INT8, (valor) => Number(valor))
 
-export const db = new Database(env.DB_PATH)
+/**
+ * Postgres da plataforma, schema `checkin` (migração 00006 da API). O papel `checkin` só
+ * enxerga esse schema; as consultas usam sempre o nome qualificado (`checkin.eventos`).
+ */
+export const pool = new pg.Pool({
+  connectionString: env.DATABASE_URL,
+  max: 5,
+  application_name: 'checkin-whatsapp',
+  // Sem isto, o processo dos testes não termina com conexões ociosas no pool.
+  allowExitOnIdle: true,
+})
 
-// WAL evita que a leitura do worker bloqueie a escrita do webhook.
-db.pragma('journal_mode = WAL')
-db.pragma('foreign_keys = ON')
+// Conexão ociosa derrubada (Postgres reiniciando): sem este handler o erro derrubaria o
+// processo. A próxima consulta abre outra conexão.
+pool.on('error', (err) => {
+  logger.warn({ err, mod: 'db' }, 'conexão com o Postgres perdida')
+})
 
-db.exec(`
-  CREATE TABLE IF NOT EXISTS events (
-    id           INTEGER PRIMARY KEY AUTOINCREMENT,
-    dedupe_key   TEXT UNIQUE,
-    source       TEXT NOT NULL,
-    raw_payload  TEXT NOT NULL,
-    received_at  TEXT NOT NULL
-  );
-
-  CREATE TABLE IF NOT EXISTS outbox (
-    id              INTEGER PRIMARY KEY AUTOINCREMENT,
-    event_id        INTEGER NOT NULL REFERENCES events(id),
-    target_jid      TEXT NOT NULL,
-    body            TEXT NOT NULL,
-    status          TEXT NOT NULL DEFAULT 'pending',
-    attempts        INTEGER NOT NULL DEFAULT 0,
-    next_attempt_at TEXT NOT NULL,
-    last_error      TEXT,
-    sent_at         TEXT,
-    created_at      TEXT NOT NULL
-  );
-
-  CREATE INDEX IF NOT EXISTS idx_outbox_pending
-    ON outbox(status, next_attempt_at);
-`)
-
-export function closeDb() {
-  db.close()
+export async function closeDb(): Promise<void> {
+  await pool.end()
 }

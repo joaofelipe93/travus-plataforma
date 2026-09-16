@@ -256,6 +256,28 @@ services:
         condition: service_healthy
     networks: [interna]
 
+  # Testes do notificador de check-in (make test) no mesmo banco de teste, depois dos da API
+  # (que aplicam as migrações). Imagem: a fase deps do Dockerfile; o código entra só para leitura.
+  checkin-teste:
+    build:
+      context: ../workers/checkin-whatsapp
+      target: deps
+    image: travus/checkin-whatsapp-teste:dev
+    profiles: [teste]
+    working_dir: /app
+    command: ["sh", "-c", "npm run typecheck && npm run typecheck:tests && npm test"]
+    environment:
+      TEST_DATABASE_URL: postgres://${POSTGRES_USER:-travus}:${POSTGRES_PASSWORD:?defina POSTGRES_PASSWORD em deploy/.env}@postgres:5432/travus_teste?sslmode=disable
+    volumes:
+      - ../workers/checkin-whatsapp/src:/app/src:ro
+      - ../workers/checkin-whatsapp/tests:/app/tests:ro
+      - ../workers/checkin-whatsapp/tsconfig.json:/app/tsconfig.json:ro
+      - ../workers/checkin-whatsapp/tsconfig.test.json:/app/tsconfig.test.json:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks: [interna]
+
   # Script legado (Etapa 0) em dry-run, lendo a planilha: make worker-dry-run.
   # O entrypoint bloqueia --confirm.
   worker-legado:

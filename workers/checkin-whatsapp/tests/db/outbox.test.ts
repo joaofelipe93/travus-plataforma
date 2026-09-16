@@ -7,41 +7,42 @@ import {
   markSent,
   markFailure,
   hasMessageForEvent,
+  countPending,
   stats,
   MAX_ATTEMPTS,
 } from '../../src/db/outbox.js'
 
 const JID = '1234567890-1234567890@g.us'
 
-function enfileira(eventId = seedEvent(), body = 'mensagem'): number {
-  return enqueue({ eventId, targetJid: JID, body })
+async function enfileira(eventId?: number, body = 'mensagem'): Promise<number> {
+  return enqueue({ eventId: eventId ?? (await seedEvent()), targetJid: JID, body })
 }
 
-/** Segundos entre `next_attempt_at` e agora. */
-function atrasoEmSegundos(id: number): number {
-  return (Date.parse(getOutboxRow(id).next_attempt_at) - Date.now()) / 1000
+/** Segundos entre `proxima_tentativa_em` (relógio do Postgres) e agora. */
+async function atrasoEmSegundos(id: number): Promise<number> {
+  return ((await getOutboxRow(id)).proxima_tentativa_em.getTime() - Date.now()) / 1000
 }
 
 describe('enqueue', () => {
   beforeEach(resetDb)
 
-  test('grava a mensagem pendente e elegível imediatamente', () => {
-    const id = enfileira()
-    const row = getOutboxRow(id)
+  test('grava a mensagem pendente e elegível imediatamente', async () => {
+    const id = await enfileira()
+    const row = await getOutboxRow(id)
 
-    assert.equal(row.status, 'pending')
-    assert.equal(row.attempts, 0)
-    assert.equal(row.target_jid, JID)
-    assert.equal(row.last_error, null)
-    assert.equal(row.sent_at, null)
-    assert.ok(Date.parse(row.next_attempt_at) <= Date.now() + 1000)
-    assert.deepEqual(claimPending(), [row])
+    assert.equal(row.status, 'pendente')
+    assert.equal(row.tentativas, 0)
+    assert.equal(row.destino_jid, JID)
+    assert.equal(row.ultimo_erro, null)
+    assert.equal(row.enviada_em, null)
+    assert.ok(row.proxima_tentativa_em.getTime() <= Date.now() + 1000)
+    assert.deepEqual(await claimPending(), [row])
   })
 
-  test('exige um evento existente (FK)', () => {
-    assert.throws(
+  test('exige um evento existente (FK)', async () => {
+    await assert.rejects(
       () => enqueue({ eventId: 999_999, targetJid: JID, body: 'x' }),
-      /FOREIGN KEY/i,
+      /foreign key/i,
     )
   })
 })
@@ -49,65 +50,65 @@ describe('enqueue', () => {
 describe('hasMessageForEvent', () => {
   beforeEach(resetDb)
 
-  test('false antes de enfileirar, true depois', () => {
-    const eventId = seedEvent()
-    assert.equal(hasMessageForEvent(eventId), false)
-    enfileira(eventId)
-    assert.equal(hasMessageForEvent(eventId), true)
+  test('false antes de enfileirar, true depois', async () => {
+    const eventId = await seedEvent()
+    assert.equal(await hasMessageForEvent(eventId), false)
+    await enfileira(eventId)
+    assert.equal(await hasMessageForEvent(eventId), true)
   })
 
-  test('continua true depois de enviada ou falhada', () => {
-    const eventId = seedEvent()
-    const id = enfileira(eventId)
-    markSent(id)
-    assert.equal(hasMessageForEvent(eventId), true)
+  test('continua true depois de enviada ou falhada', async () => {
+    const eventId = await seedEvent()
+    const id = await enfileira(eventId)
+    await markSent(id)
+    assert.equal(await hasMessageForEvent(eventId), true)
   })
 
-  test('não confunde eventos diferentes', () => {
-    const comMensagem = seedEvent()
-    const semMensagem = seedEvent()
-    enfileira(comMensagem)
+  test('não confunde eventos diferentes', async () => {
+    const comMensagem = await seedEvent()
+    const semMensagem = await seedEvent()
+    await enfileira(comMensagem)
 
-    assert.equal(hasMessageForEvent(comMensagem), true)
-    assert.equal(hasMessageForEvent(semMensagem), false)
+    assert.equal(await hasMessageForEvent(comMensagem), true)
+    assert.equal(await hasMessageForEvent(semMensagem), false)
   })
 })
 
 describe('claimPending', () => {
   beforeEach(resetDb)
 
-  test('devolve em ordem de id (FIFO)', () => {
-    const ids = [enfileira(), enfileira(), enfileira()]
+  test('devolve em ordem de id (FIFO)', async () => {
+    const ids = [await enfileira(), await enfileira(), await enfileira()]
     assert.deepEqual(
-      claimPending().map((r) => r.id),
+      (await claimPending()).map((r) => r.id),
       ids,
     )
   })
 
-  test('respeita o limite do lote', () => {
-    for (let i = 0; i < 5; i++) enfileira()
-    assert.equal(claimPending(2).length, 2)
-    assert.equal(claimPending().length, 5)
+  test('respeita o limite do lote', async () => {
+    for (let i = 0; i < 5; i++) await enfileira()
+    assert.equal((await claimPending(2)).length, 2)
+    assert.equal((await claimPending()).length, 5)
   })
 
-  test('ignora mensagens agendadas para o futuro', () => {
-    const agora = enfileira()
-    const depois = enfileira()
-    setNextAttempt(depois, new Date(Date.now() + 60_000))
+  test('ignora mensagens agendadas para o futuro', async () => {
+    const agora = await enfileira()
+    const depois = await enfileira()
+    await setNextAttempt(depois, new Date(Date.now() + 60_000))
 
     assert.deepEqual(
-      claimPending().map((r) => r.id),
+      (await claimPending()).map((r) => r.id),
       [agora],
     )
   })
 
-  test('ignora mensagens já enviadas ou definitivamente falhadas', () => {
-    const enviada = enfileira()
-    const pendente = enfileira()
-    markSent(enviada)
+  test('ignora mensagens já enviadas ou definitivamente falhadas', async () => {
+    const enviada = await enfileira()
+    const pendente = await enfileira()
+    await markSent(enviada)
 
     assert.deepEqual(
-      claimPending().map((r) => r.id),
+      (await claimPending()).map((r) => r.id),
       [pendente],
     )
   })
@@ -116,103 +117,106 @@ describe('claimPending', () => {
 describe('markSent', () => {
   beforeEach(resetDb)
 
-  test('marca como enviada, conta a tentativa e limpa o erro', () => {
-    const id = enfileira()
-    markFailure(getOutboxRow(id), 'falha temporária')
-    setNextAttempt(id, new Date(Date.now() - 1000))
+  test('marca como enviada, conta a tentativa e limpa o erro', async () => {
+    const id = await enfileira()
+    await markFailure(await getOutboxRow(id), 'falha temporária')
+    await setNextAttempt(id, new Date(Date.now() - 1000))
 
-    markSent(id)
-    const row = getOutboxRow(id)
+    await markSent(id)
+    const row = await getOutboxRow(id)
 
-    assert.equal(row.status, 'sent')
-    assert.equal(row.attempts, 2)
-    assert.equal(row.last_error, null)
-    assert.ok(row.sent_at && !Number.isNaN(Date.parse(row.sent_at)))
-    assert.deepEqual(claimPending(), [])
+    assert.equal(row.status, 'enviada')
+    assert.equal(row.tentativas, 2)
+    assert.equal(row.ultimo_erro, null)
+    assert.ok(row.enviada_em instanceof Date)
+    assert.deepEqual(await claimPending(), [])
   })
 })
 
 describe('markFailure', () => {
   beforeEach(resetDb)
 
-  test('primeira falha reagenda em ~5s e guarda o erro', () => {
-    const id = enfileira()
-    const outcome = markFailure(getOutboxRow(id), 'socket caiu')
+  test('primeira falha reagenda em ~5s e guarda o erro', async () => {
+    const id = await enfileira()
+    const outcome = await markFailure(await getOutboxRow(id), 'socket caiu')
 
     assert.equal(outcome.retrying, true)
     assert.equal(outcome.attempts, 1)
 
-    const row = getOutboxRow(id)
-    assert.equal(row.status, 'pending')
-    assert.equal(row.attempts, 1)
-    assert.equal(row.last_error, 'socket caiu')
-    assert.ok(atrasoEmSegundos(id) > 3 && atrasoEmSegundos(id) <= 5, 'backoff inicial ~5s')
+    const row = await getOutboxRow(id)
+    assert.equal(row.status, 'pendente')
+    assert.equal(row.tentativas, 1)
+    assert.equal(row.ultimo_erro, 'socket caiu')
+    const atraso = await atrasoEmSegundos(id)
+    assert.ok(atraso > 3 && atraso <= 5.5, `backoff inicial ~5s, veio ${atraso}`)
   })
 
-  test('backoff triplica a cada tentativa: 5s, 15s, 45s, 135s, 405s', () => {
-    const id = enfileira()
+  test('backoff triplica a cada tentativa: 5s, 15s, 45s, 135s, 405s', async () => {
+    const id = await enfileira()
     const esperados = [5, 15, 45, 135, 405]
 
     for (const [i, segundos] of esperados.entries()) {
-      const outcome = markFailure(getOutboxRow(id), `erro ${i}`)
+      const outcome = await markFailure(await getOutboxRow(id), `erro ${i}`)
       assert.equal(outcome.retrying, true, `tentativa ${i + 1} deveria reagendar`)
 
-      const atraso = atrasoEmSegundos(id)
+      const atraso = await atrasoEmSegundos(id)
       assert.ok(
-        atraso > segundos - 2 && atraso <= segundos,
+        atraso > segundos - 2 && atraso <= segundos + 0.5,
         `tentativa ${i + 1}: esperado ~${segundos}s, veio ${atraso.toFixed(1)}s`,
       )
     }
   })
 
-  test('esgotadas as tentativas, marca como failed e sai da fila', () => {
-    const id = enfileira()
+  test('esgotadas as tentativas, marca como falhou e sai da fila', async () => {
+    const id = await enfileira()
 
     for (let i = 0; i < MAX_ATTEMPTS - 1; i++) {
-      const outcome = markFailure(getOutboxRow(id), `erro ${i}`)
+      const outcome = await markFailure(await getOutboxRow(id), `erro ${i}`)
       assert.equal(outcome.retrying, true)
     }
 
-    const ultima = markFailure(getOutboxRow(id), 'erro final')
+    const ultima = await markFailure(await getOutboxRow(id), 'erro final')
     assert.equal(ultima.retrying, false)
     assert.equal(ultima.attempts, MAX_ATTEMPTS)
 
-    const row = getOutboxRow(id)
-    assert.equal(row.status, 'failed')
-    assert.equal(row.attempts, MAX_ATTEMPTS)
-    assert.equal(row.last_error, 'erro final')
+    const row = await getOutboxRow(id)
+    assert.equal(row.status, 'falhou')
+    assert.equal(row.tentativas, MAX_ATTEMPTS)
+    assert.equal(row.ultimo_erro, 'erro final')
 
-    setNextAttempt(id, new Date(Date.now() - 1000))
-    assert.deepEqual(claimPending(), [], 'mensagem falhada não volta para a fila')
+    await setNextAttempt(id, new Date(Date.now() - 1000))
+    assert.deepEqual(await claimPending(), [], 'mensagem falhada não volta para a fila')
   })
 
-  test('não altera next_attempt_at ao falhar definitivamente', () => {
-    const id = enfileira()
-    for (let i = 0; i < MAX_ATTEMPTS - 1; i++) markFailure(getOutboxRow(id), 'e')
+  test('não altera proxima_tentativa_em ao falhar definitivamente', async () => {
+    const id = await enfileira()
+    for (let i = 0; i < MAX_ATTEMPTS - 1; i++) await markFailure(await getOutboxRow(id), 'e')
 
-    const antes = getOutboxRow(id).next_attempt_at
-    markFailure(getOutboxRow(id), 'final')
-    assert.equal(getOutboxRow(id).next_attempt_at, antes)
+    const antes = (await getOutboxRow(id)).proxima_tentativa_em
+    await markFailure(await getOutboxRow(id), 'final')
+    assert.deepEqual((await getOutboxRow(id)).proxima_tentativa_em, antes)
   })
 })
 
-describe('stats', () => {
+describe('stats e countPending', () => {
   beforeEach(resetDb)
 
-  test('agrupa por status', () => {
-    const pendente = enfileira()
-    const enviada = enfileira()
-    const falhada = enfileira()
+  test('agrupa por status', async () => {
+    const pendente = await enfileira()
+    const enviada = await enfileira()
+    const falhada = await enfileira()
 
-    markSent(enviada)
-    for (let i = 0; i < MAX_ATTEMPTS; i++) markFailure(getOutboxRow(falhada), 'e')
+    await markSent(enviada)
+    for (let i = 0; i < MAX_ATTEMPTS; i++) await markFailure(await getOutboxRow(falhada), 'e')
 
-    const porStatus = Object.fromEntries(stats().map((s) => [s.status, s.count]))
-    assert.deepEqual(porStatus, { pending: 1, sent: 1, failed: 1 })
-    assert.equal(getOutboxRow(pendente).status, 'pending')
+    const porStatus = Object.fromEntries((await stats()).map((s) => [s.status, s.count]))
+    assert.deepEqual(porStatus, { pendente: 1, enviada: 1, falhou: 1 })
+    assert.equal((await getOutboxRow(pendente)).status, 'pendente')
+    assert.equal(await countPending(), 1)
   })
 
-  test('outbox vazio devolve lista vazia', () => {
-    assert.deepEqual(stats(), [])
+  test('fila vazia devolve lista vazia', async () => {
+    assert.deepEqual(await stats(), [])
+    assert.equal(await countPending(), 0)
   })
 })

@@ -201,6 +201,13 @@ func migrate(args []string) error {
 		if len(results) == 0 {
 			slog.Info("migrações: banco já está atualizado")
 		}
+		// Login do serviço checkin-whatsapp no Postgres (sem a variável, o papel fica sem login).
+		if senha := os.Getenv("CHECKIN_DB_SENHA"); senha != "" {
+			if err := migrations.DefinirSenhaCheckin(ctx, db, senha); err != nil {
+				return err
+			}
+			slog.Info("migrações: login do papel checkin definido")
+		}
 		return nil
 	case "down":
 		result, err := provider.Down(ctx)

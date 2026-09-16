@@ -29,7 +29,9 @@ const schema = z.object({
     .optional(),
 
   AUTH_DIR: z.string().default('./data/auth_info'),
-  DB_PATH: z.string().default('./data/app.db'),
+
+  // Postgres da plataforma, com o papel `checkin` (só enxerga o schema checkin).
+  DATABASE_URL: z.string().regex(/^postgres(ql)?:\/\//, 'DATABASE_URL deve ser uma URL postgres://'),
 })
 
 function load() {

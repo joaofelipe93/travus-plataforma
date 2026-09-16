@@ -48,7 +48,6 @@ async function main() {
       logFormat: env.LOG_FORMAT,
       port: env.PORT,
       host: env.HOST,
-      dbPath: env.DB_PATH,
       authDir: env.AUTH_DIR,
       groupJid: env.WHATSAPP_GROUP_JID ?? null,
     },
@@ -67,7 +66,7 @@ async function main() {
 
   // Fila que sobrou do processo anterior: sem isto um restart esconde que
   // existem mensagens paradas esperando conexão.
-  const pendentes = Object.fromEntries(stats().map((s) => [s.status, s.count]))
+  const pendentes = Object.fromEntries((await stats()).map((s) => [s.status, s.count]))
   logger.info({ port: env.PORT, outbox: pendentes }, 'servidor pronto')
 
   if (!env.WHATSAPP_GROUP_JID) {
@@ -89,10 +88,11 @@ async function main() {
     logger.info({ signal, whatsapp: getStatus() }, 'encerrando')
 
     try {
-      stopOutboxWorker()
+      // Espera o ciclo em andamento: fechar o banco no meio dele perderia o registro do envio.
+      await stopOutboxWorker()
       await app.close()
       await disconnect()
-      closeDb()
+      await closeDb()
       logger.info({ signal, ms: Date.now() - startedAt }, 'encerrado com sucesso')
       sairApos(0)
     } catch (err) {

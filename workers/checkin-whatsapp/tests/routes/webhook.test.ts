@@ -1,5 +1,5 @@
 import { TEST_SECRET, TEST_GROUP_JID } from '../helpers/setup.js'
-import { resetDb, db, getOutboxRow } from '../helpers/db.js'
+import { resetDb, getOutboxRow, contaMensagens } from '../helpers/db.js'
 import { buildWebhookApp } from '../helpers/app.js'
 import { test, describe, before, beforeEach, after } from 'node:test'
 import assert from 'node:assert/strict'
@@ -21,8 +21,8 @@ function post(payload: unknown, headers: Record<string, string> = {}) {
   })
 }
 
-function dedupeKeys(): string[] {
-  return listRecentEvents(100).map((e) => e.dedupe_key)
+async function dedupeKeys(): Promise<string[]> {
+  return (await listRecentEvents(100)).map((e) => e.chave_dedup)
 }
 
 before(async () => {
@@ -33,8 +33,8 @@ after(async () => {
 })
 
 describe('POST /webhooks/nova-reserva — autenticação', () => {
-  beforeEach(() => {
-    resetDb()
+  beforeEach(async () => {
+    await resetDb()
     env.WHATSAPP_GROUP_JID = TEST_GROUP_JID
   })
 
@@ -42,7 +42,7 @@ describe('POST /webhooks/nova-reserva — autenticação', () => {
     const res = await app.inject({ method: 'POST', url: URL, payload: { id: 'RES-1' } })
 
     assert.equal(res.statusCode, 401)
-    assert.deepEqual(listRecentEvents(), [])
+    assert.deepEqual((await listRecentEvents()), [])
   })
 
   test('401 com token errado', async () => {
@@ -62,8 +62,8 @@ describe('POST /webhooks/nova-reserva — autenticação', () => {
 })
 
 describe('POST /webhooks/nova-reserva — enfileiramento', () => {
-  beforeEach(() => {
-    resetDb()
+  beforeEach(async () => {
+    await resetDb()
     env.WHATSAPP_GROUP_JID = TEST_GROUP_JID
   })
 
@@ -83,30 +83,30 @@ describe('POST /webhooks/nova-reserva — enfileiramento', () => {
     assert.ok(body.eventId > 0)
     assert.ok(body.outboxId > 0)
 
-    const row = getOutboxRow(body.outboxId)
-    assert.equal(row.event_id, body.eventId)
-    assert.equal(row.target_jid, TEST_GROUP_JID)
-    assert.equal(row.status, 'pending')
-    assert.match(row.body, /👤 João Silva/)
-    assert.match(row.body, /📅 27\/08\/2026 → 30\/08\/2026/)
+    const row = await getOutboxRow(body.outboxId)
+    assert.equal(row.evento_id, body.eventId)
+    assert.equal(row.destino_jid, TEST_GROUP_JID)
+    assert.equal(row.status, 'pendente')
+    assert.match(row.texto, /👤 João Silva/)
+    assert.match(row.texto, /📅 27\/08\/2026 → 30\/08\/2026/)
   })
 
-  test('grava o payload cru exatamente como veio', async () => {
+  test('grava o payload como veio', async () => {
     const payload = { id: 'RES-2', extra: { lista: [1, 2, 3] } }
     await post(payload)
 
-    const [evento] = listRecentEvents()
+    const [evento] = (await listRecentEvents())
     assert.ok(evento)
-    assert.deepEqual(JSON.parse(evento.raw_payload) as unknown, payload)
-    assert.equal(evento.source, 'nova-reserva')
+    assert.deepEqual(evento.payload, payload)
+    assert.equal(evento.origem, 'nova-reserva')
   })
 
   test('aceita payload sem nenhum campo conhecido', async () => {
     const res = await post({ formato: 'desconhecido' })
 
     assert.equal(res.json().status, 'queued')
-    const row = getOutboxRow((res.json() as { outboxId: number }).outboxId)
-    assert.match(row.body, /Formato não reconhecido/)
+    const row = await getOutboxRow((res.json() as { outboxId: number }).outboxId)
+    assert.match(row.texto, /Formato não reconhecido/)
   })
 
   test('aceita corpo vazio sem virar 500', async () => {
@@ -118,19 +118,19 @@ describe('POST /webhooks/nova-reserva — enfileiramento', () => {
 
     assert.equal(res.statusCode, 200)
     assert.equal(res.json().status, 'queued')
-    assert.deepEqual(dedupeKeys(), ['nova-reserva:sha256:' + sha256('{}')])
+    assert.deepEqual((await dedupeKeys()), ['nova-reserva:sha256:' + sha256('{}')])
   })
 })
 
 describe('POST /webhooks/nova-reserva — chave de deduplicação', () => {
-  beforeEach(() => {
-    resetDb()
+  beforeEach(async () => {
+    await resetDb()
     env.WHATSAPP_GROUP_JID = TEST_GROUP_JID
   })
 
   test('usa o primeiro campo de id disponível, na ordem definida', async () => {
     await post({ id: 'do-id', reservation_id: 'do-reservation' })
-    assert.deepEqual(dedupeKeys(), ['nova-reserva:do-id'])
+    assert.deepEqual((await dedupeKeys()), ['nova-reserva:do-id'])
   })
 
   test('cai para os campos alternativos quando não há `id`', async () => {
@@ -145,27 +145,27 @@ describe('POST /webhooks/nova-reserva — chave de deduplicação', () => {
     ]
 
     for (const [payload, esperado] of casos) {
-      resetDb()
+      await resetDb()
       await post(payload)
-      assert.deepEqual(dedupeKeys(), [esperado], JSON.stringify(payload))
+      assert.deepEqual((await dedupeKeys()), [esperado], JSON.stringify(payload))
     }
   })
 
   test('aceita id numérico e faz trim de id textual', async () => {
     await post({ id: 42 })
     await post({ id: '  RES-3  ' })
-    assert.deepEqual(dedupeKeys().sort(), ['nova-reserva:42', 'nova-reserva:RES-3'].sort())
+    assert.deepEqual((await dedupeKeys()).sort(), ['nova-reserva:42', 'nova-reserva:RES-3'].sort())
   })
 
   test('sem campo de id, usa o sha256 do payload', async () => {
     const payload = { guest_name: 'Ana', check_in: '2026-01-01' }
     await post(payload)
-    assert.deepEqual(dedupeKeys(), ['nova-reserva:sha256:' + sha256(JSON.stringify(payload))])
+    assert.deepEqual((await dedupeKeys()), ['nova-reserva:sha256:' + sha256(JSON.stringify(payload))])
   })
 
   test('id vazio não vira chave — cai no hash', async () => {
     await post({ id: '   ' })
-    const [chave] = dedupeKeys()
+    const [chave] = (await dedupeKeys())
     assert.match(chave ?? '', /^nova-reserva:sha256:/)
   })
 
@@ -182,14 +182,14 @@ describe('POST /webhooks/nova-reserva — chave de deduplicação', () => {
     const cancelamento = await post({ ...base, status: 'cancelled', cancellation_reason: 'Desistiu' })
     assert.equal(cancelamento.json().status, 'queued', 'o cancelamento precisa gerar mensagem própria')
 
-    assert.deepEqual(dedupeKeys().sort(), [
+    assert.deepEqual((await dedupeKeys()).sort(), [
       `nova-reserva:${uuid}`,
       `nova-reserva:${uuid}:cancelled`,
     ].sort())
 
     // E cada um gerou a sua mensagem, com o título certo.
-    const msgReserva = getOutboxRow((reserva.json() as { outboxId: number }).outboxId).body
-    const msgCancel = getOutboxRow((cancelamento.json() as { outboxId: number }).outboxId).body
+    const msgReserva = (await getOutboxRow((reserva.json() as { outboxId: number }).outboxId)).texto
+    const msgCancel = (await getOutboxRow((cancelamento.json() as { outboxId: number }).outboxId)).texto
     assert.match(msgReserva, /✅ \*Nova Reserva Realizada\*/)
     assert.match(msgCancel, /❌ \*Cancelamento de Reserva\*/)
   })
@@ -208,7 +208,7 @@ describe('POST /webhooks/nova-reserva — chave de deduplicação', () => {
     // Sufixo só para status que não é confirmação: um `.env` em produção já tem
     // eventos gravados com a chave sem sufixo, e mudá-la duplicaria mensagens.
     await post({ booking_uuid: 'BU-9', status: 'confirmed' })
-    assert.deepEqual(dedupeKeys(), ['nova-reserva:BU-9'])
+    assert.deepEqual((await dedupeKeys()), ['nova-reserva:BU-9'])
   })
 
   test('reprocessamento no provedor não escapa da deduplicação', async () => {
@@ -234,15 +234,15 @@ describe('POST /webhooks/nova-reserva — chave de deduplicação', () => {
     const segunda = await post({ ...reserva, _workflow_execution_id: 969 })
     assert.equal(segunda.json().status, 'duplicate')
 
-    assert.deepEqual(dedupeKeys(), [
+    assert.deepEqual((await dedupeKeys()), [
       'nova-reserva:0a0b0c0d-0000-4000-8000-000000000001',
     ])
   })
 })
 
 describe('POST /webhooks/nova-reserva — idempotência', () => {
-  beforeEach(() => {
-    resetDb()
+  beforeEach(async () => {
+    await resetDb()
     env.WHATSAPP_GROUP_JID = TEST_GROUP_JID
   })
 
@@ -253,7 +253,7 @@ describe('POST /webhooks/nova-reserva — idempotência', () => {
     assert.equal(primeira.json().status, 'queued')
     assert.equal(segunda.json().status, 'duplicate')
     assert.equal(segunda.json().eventId, primeira.json().eventId)
-    assert.equal(contaOutbox(), 1)
+    assert.equal((await contaMensagens()), 1)
   })
 
   test('mesmo id com corpo diferente ainda é duplicado', async () => {
@@ -261,7 +261,7 @@ describe('POST /webhooks/nova-reserva — idempotência', () => {
     const segunda = await post({ id: 'RES-1', guest_name: 'Outro Nome' })
 
     assert.equal(segunda.json().status, 'duplicate')
-    assert.equal(contaOutbox(), 1)
+    assert.equal((await contaMensagens()), 1)
   })
 
   test('payloads idênticos sem id são deduplicados pelo hash', async () => {
@@ -269,7 +269,7 @@ describe('POST /webhooks/nova-reserva — idempotência', () => {
     const segunda = await post({ guest_name: 'Ana' })
 
     assert.equal(segunda.json().status, 'duplicate')
-    assert.equal(contaOutbox(), 1)
+    assert.equal((await contaMensagens()), 1)
   })
 
   test('payloads diferentes sem id geram mensagens separadas', async () => {
@@ -277,7 +277,7 @@ describe('POST /webhooks/nova-reserva — idempotência', () => {
     const segunda = await post({ guest_name: 'Bruno' })
 
     assert.equal(segunda.json().status, 'queued')
-    assert.equal(contaOutbox(), 2)
+    assert.equal((await contaMensagens()), 2)
   })
 
   test('ids diferentes geram mensagens separadas', async () => {
@@ -285,13 +285,13 @@ describe('POST /webhooks/nova-reserva — idempotência', () => {
     const segunda = await post({ id: 'RES-2' })
 
     assert.equal(segunda.json().status, 'queued')
-    assert.equal(contaOutbox(), 2)
+    assert.equal((await contaMensagens()), 2)
   })
 })
 
 describe('POST /webhooks/nova-reserva — sem grupo configurado', () => {
-  beforeEach(() => {
-    resetDb()
+  beforeEach(async () => {
+    await resetDb()
     delete env.WHATSAPP_GROUP_JID
   })
 
@@ -303,8 +303,8 @@ describe('POST /webhooks/nova-reserva — sem grupo configurado', () => {
     assert.equal(body.status, 'stored_no_target')
     assert.ok(body.eventId > 0)
     assert.match(body.hint, /WHATSAPP_GROUP_JID/)
-    assert.equal(contaOutbox(), 0)
-    assert.equal(listRecentEvents().length, 1)
+    assert.equal((await contaMensagens()), 0)
+    assert.equal((await listRecentEvents()).length, 1)
   })
 
   test('reenvio depois de configurar o grupo recupera o evento preso', async () => {
@@ -320,19 +320,16 @@ describe('POST /webhooks/nova-reserva — sem grupo configurado', () => {
 
     assert.equal(depois.json().status, 'queued')
     assert.equal(depois.json().eventId, antes.json().eventId, 'reaproveita o evento já gravado')
-    assert.equal(contaOutbox(), 1)
-    assert.equal(listRecentEvents().length, 1, 'não duplica o evento')
+    assert.equal((await contaMensagens()), 1)
+    assert.equal((await listRecentEvents()).length, 1, 'não duplica o evento')
 
     // E a partir daí volta a deduplicar normalmente.
     const terceira = await post(payload)
     assert.equal(terceira.json().status, 'duplicate')
-    assert.equal(contaOutbox(), 1)
+    assert.equal((await contaMensagens()), 1)
   })
 })
 
-function contaOutbox(): number {
-  return (db.prepare('SELECT COUNT(*) as n FROM outbox').get() as { n: number }).n
-}
 
 function sha256(text: string): string {
   return createHash('sha256').update(text).digest('hex')

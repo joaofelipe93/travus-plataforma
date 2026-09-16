@@ -68,12 +68,12 @@ export async function webhookRoutes(app: FastifyInstance) {
 
       // Responder rápido é o ponto: o provedor não deve esperar o WhatsApp.
       const dedupeKey = resolveDedupeKey(payload, rawJson)
-      const event = insertEvent({ dedupeKey, source: SOURCE, rawPayload: rawJson })
+      const event = await insertEvent({ dedupeKey, source: SOURCE, rawPayload: rawJson })
 
       // Um evento já visto só é ignorado se de fato virou mensagem. Eventos
       // gravados antes do grupo existir (`stored_no_target`) ficariam presos
       // como duplicados para sempre — aqui eles são recuperados no reenvio.
-      if (event.isDuplicate && hasMessageForEvent(event.id)) {
+      if (event.isDuplicate && (await hasMessageForEvent(event.id))) {
         req.log.info({ dedupeKey, eventId: event.id }, 'evento duplicado, ignorado')
         return reply.code(200).send({ status: 'duplicate', eventId: event.id })
       }
@@ -90,7 +90,7 @@ export async function webhookRoutes(app: FastifyInstance) {
 
       const evt = normalizeCheckin(payload)
       const body = formatCheckinMessage(evt)
-      const outboxId = enqueue({
+      const outboxId = await enqueue({
         eventId: event.id,
         targetJid: env.WHATSAPP_GROUP_JID,
         body,

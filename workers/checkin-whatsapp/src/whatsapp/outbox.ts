@@ -13,7 +13,15 @@ const BATCH_SIZE = 10
 const OFFLINE_WARN_TICKS = 12
 
 let timer: NodeJS.Timeout | undefined
-let running = false
+/**
+ * Mensagens que saíram no WhatsApp mas cujo registro no banco falhou (Postgres caiu entre o
+ * envio e o UPDATE). Continuam `pendente` no banco; sem esta lista, o próximo ciclo as
+ * mandaria de novo ao grupo. Cada ciclo tenta registrar estas antes de enviar qualquer outra.
+ */
+const enviadasSemRegistro = new Set<number>()
+
+/** Ciclo em andamento: impede sobreposição e deixa o encerramento (e os testes) esperarem. */
+let cicloAtual: Promise<void> | undefined
 let offlineTicks = 0
 let offlineSince: number | undefined
 
@@ -21,12 +29,12 @@ let offlineSince: number | undefined
  * Loga a fila parada de tempos em tempos. Sem isto, uma desconexão longa é
  * silenciosa: o worker apenas pula o ciclo e nada aparece em `pm2 logs`.
  */
-function reportarDesconexao() {
+async function reportarDesconexao() {
   offlineSince ??= Date.now()
   offlineTicks += 1
   if (offlineTicks % OFFLINE_WARN_TICKS !== 0) return
 
-  const pending = countPending()
+  const pending = await countPending()
   if (pending === 0) return
 
   log.warn(
@@ -35,9 +43,9 @@ function reportarDesconexao() {
   )
 }
 
-function reportarReconexao() {
+async function reportarReconexao() {
   if (offlineSince === undefined) return
-  const pending = countPending()
+  const pending = await countPending()
   if (pending > 0 || offlineTicks >= OFFLINE_WARN_TICKS) {
     log.info({ pending, offlineMs: Date.now() - offlineSince }, 'conexão de volta — retomando fila')
   }
@@ -46,41 +54,53 @@ function reportarReconexao() {
 }
 
 async function tick() {
-  // Reentrância: um envio lento não pode sobrepor o próximo tick.
-  if (running) return
-  // Sem conexão não adianta tentar — o item continua pending e não gasta tentativa.
-  if (!isConnected()) {
-    reportarDesconexao()
-    return
-  }
-  reportarReconexao()
-
-  running = true
   try {
-    const pending = claimPending(BATCH_SIZE)
+    // Sem conexão não adianta tentar — o item continua pendente e não gasta tentativa.
+    if (!isConnected()) {
+      await reportarDesconexao()
+      return
+    }
+    await reportarReconexao()
+
+    for (const id of enviadasSemRegistro) {
+      await markSent(id) // falhando de novo, o catch externo encerra o ciclo sem enviar nada
+      enviadasSemRegistro.delete(id)
+      log.info({ outboxId: id }, 'envio registrado depois da falha no banco')
+    }
+
+    const pending = await claimPending(BATCH_SIZE)
     let enviadas = 0
 
     for (const row of pending) {
       try {
-        const messageId = await sendText(row.target_jid, row.body)
-        markSent(row.id)
+        const messageId = await sendText(row.destino_jid, row.texto)
+        try {
+          await markSent(row.id)
+        } catch (err) {
+          enviadasSemRegistro.add(row.id)
+          log.error(
+            { err, outboxId: row.id, eventId: row.evento_id },
+            'mensagem enviada, mas o registro no banco falhou — não será reenviada',
+          )
+          return
+        }
         enviadas += 1
         log.info(
-          { outboxId: row.id, eventId: row.event_id, messageId, jid: row.target_jid },
+          { outboxId: row.id, eventId: row.evento_id, messageId, jid: row.destino_jid },
           'mensagem enviada',
         )
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err)
-        const outcome = markFailure(row, message)
+        const outcome = await markFailure(row, message)
         if (outcome.retrying) {
           log.warn(
-            { outboxId: row.id, eventId: row.event_id, attempts: outcome.attempts, max: MAX_ATTEMPTS, nextAttemptAt: outcome.nextAttemptAt, err: message },
+            { outboxId: row.id, eventId: row.evento_id, attempts: outcome.attempts, max: MAX_ATTEMPTS, nextAttemptAt: outcome.nextAttemptAt, err: message },
             'falha no envio, reagendado',
           )
         } else {
           // Fim da linha: ninguém mais tenta esta mensagem. Precisa de olho humano.
           log.error(
-            { outboxId: row.id, eventId: row.event_id, attempts: outcome.attempts, max: MAX_ATTEMPTS, err: message },
+            { outboxId: row.id, eventId: row.evento_id, attempts: outcome.attempts, max: MAX_ATTEMPTS, err: message },
             'falha definitiva no envio — mensagem NÃO será entregue',
           )
         }
@@ -97,24 +117,39 @@ async function tick() {
 
     // Lote cheio = provavelmente há mais esperando; ajuda a explicar atraso.
     if (pending.length === BATCH_SIZE) {
-      log.info({ enviadas, pending: countPending() }, 'lote cheio — ainda há fila')
+      log.info({ enviadas, pending: await countPending() }, 'lote cheio — ainda há fila')
     }
   } catch (err) {
+    // Inclui o Postgres fora do ar: a mensagem continua pendente e o próximo ciclo tenta de novo.
     log.error({ err }, 'erro no ciclo do outbox')
-  } finally {
-    running = false
   }
 }
 
 export function startOutboxWorker() {
   if (timer) return
-  timer = setInterval(() => void tick(), TICK_MS)
+  timer = setInterval(() => {
+    // Reentrância: um envio lento não pode sobrepor o próximo tick.
+    if (cicloAtual) return
+    cicloAtual = tick().finally(() => {
+      cicloAtual = undefined
+    })
+  }, TICK_MS)
   log.info({ intervalMs: TICK_MS, batchSize: BATCH_SIZE, maxAttempts: MAX_ATTEMPTS }, 'worker do outbox iniciado')
 }
 
-export function stopOutboxWorker() {
+/** Espera o ciclo em andamento, se houver (encerramento e testes). */
+export function aguardarCiclo(): Promise<void> {
+  return cicloAtual ?? Promise.resolve()
+}
+
+export async function stopOutboxWorker(): Promise<void> {
   if (!timer) return
   clearInterval(timer)
   timer = undefined
-  log.info({ pending: countPending() }, 'worker do outbox parado')
+  await aguardarCiclo()
+  try {
+    log.info({ pending: await countPending() }, 'worker do outbox parado')
+  } catch (err) {
+    log.warn({ err }, 'worker do outbox parado (sem contar a fila: banco indisponível)')
+  }
 }

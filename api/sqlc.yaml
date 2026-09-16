@@ -18,6 +18,7 @@ sql:
           importaco: Importacao
           integraco: Integracao
           sesso: Sessao
+          checkin_mensagen: CheckinMensagem
         overrides:
           - db_type: citext
             go_type: string

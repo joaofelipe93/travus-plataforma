@@ -1,47 +1,45 @@
-import { db } from './index.js'
+import { pool } from './index.js'
 
 export type EventRow = {
   id: number
-  dedupe_key: string
-  source: string
-  raw_payload: string
-  received_at: string
+  chave_dedup: string
+  origem: string
+  payload: unknown
+  recebido_em: Date
 }
-
-const insertStmt = db.prepare(`
-  INSERT OR IGNORE INTO events (dedupe_key, source, raw_payload, received_at)
-  VALUES (@dedupe_key, @source, @raw_payload, @received_at)
-`)
-
-const findByKeyStmt = db.prepare(`SELECT * FROM events WHERE dedupe_key = ?`)
 
 /**
  * Insere o evento. Se `dedupeKey` já existir, nada é inserido e
  * `isDuplicate` volta true — o webhook então não reenfileira a mensagem.
  */
-export function insertEvent(input: {
+export async function insertEvent(input: {
   dedupeKey: string
   source: string
   rawPayload: string
-}): { id: number; isDuplicate: boolean } {
-  const result = insertStmt.run({
-    dedupe_key: input.dedupeKey,
-    source: input.source,
-    raw_payload: input.rawPayload,
-    received_at: new Date().toISOString(),
-  })
-
-  if (result.changes === 1) {
-    return { id: Number(result.lastInsertRowid), isDuplicate: false }
+}): Promise<{ id: number; isDuplicate: boolean }> {
+  const inserido = await pool.query<{ id: number }>(
+    `INSERT INTO checkin.eventos (chave_dedup, origem, payload)
+     VALUES ($1, $2, $3::jsonb)
+     ON CONFLICT (chave_dedup) DO NOTHING
+     RETURNING id`,
+    [input.dedupeKey, input.source, input.rawPayload],
+  )
+  if (inserido.rows[0]) {
+    return { id: inserido.rows[0].id, isDuplicate: false }
   }
 
-  const existing = findByKeyStmt.get(input.dedupeKey) as EventRow | undefined
-  return { id: existing?.id ?? -1, isDuplicate: true }
+  const existente = await pool.query<{ id: number }>(
+    `SELECT id FROM checkin.eventos WHERE chave_dedup = $1`,
+    [input.dedupeKey],
+  )
+  return { id: existente.rows[0]?.id ?? -1, isDuplicate: true }
 }
 
 /** Últimos payloads recebidos — base para mapear os campos reais depois. */
-export function listRecentEvents(limit = 20): EventRow[] {
-  return db
-    .prepare(`SELECT * FROM events ORDER BY id DESC LIMIT ?`)
-    .all(limit) as EventRow[]
+export async function listRecentEvents(limit = 20): Promise<EventRow[]> {
+  const { rows } = await pool.query<EventRow>(
+    `SELECT * FROM checkin.eventos ORDER BY id DESC LIMIT $1`,
+    [limit],
+  )
+  return rows
 }

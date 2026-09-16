@@ -86,6 +86,27 @@ type Auditoria struct {
 	CriadoEm   time.Time
 }
 
+type CheckinEvento struct {
+	ID         int64
+	ChaveDedup string
+	Origem     string
+	Payload    []byte
+	RecebidoEm time.Time
+}
+
+type CheckinMensagem struct {
+	ID                 int64
+	EventoID           int64
+	DestinoJid         string
+	Texto              string
+	Status             string
+	Tentativas         int32
+	ProximaTentativaEm time.Time
+	UltimoErro         *string
+	EnviadaEm          *time.Time
+	CriadaEm           time.Time
+}
+
 type Cliente struct {
 	ID              int64
 	Nome            string

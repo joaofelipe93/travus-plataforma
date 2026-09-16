@@ -6,8 +6,10 @@ O projeto é escrito em português — comentários, logs, mensagens de commit e
 
 ## Na plataforma
 
-- Container `checkin-whatsapp` (`Dockerfile`: Node 24; o `npm ci` compila o better-sqlite3). `HOST=0.0.0.0` dentro do container: a porta não é publicada, só o Traefik e a rede do compose a alcançam.
-- Dados em `/dados` (volume): `auth_info/` (**credenciais do número pareado**) e `app.db`. Nunca na imagem nem no git.
+- Container `checkin-whatsapp` (`Dockerfile`: Node 24). `HOST=0.0.0.0` dentro do container: a porta não é publicada, só o Traefik e a rede do compose a alcançam.
+- **Banco: o Postgres da plataforma, schema `checkin`** (`checkin.eventos`, `checkin.mensagens`), criado pela migração `api/migrations/00006_checkin_whatsapp.sql`. Mudança de tabela é migração nova na API (goose), nunca DDL no serviço. O serviço conecta com o papel `checkin` (`DATABASE_URL`), que só tem SELECT/INSERT/UPDATE nesse schema e não enxerga o resto da plataforma; o login é ligado pelo `api migrate up` com `CHECKIN_DB_SENHA`. As consultas usam sempre o nome qualificado (`checkin.mensagens`).
+- Sessão do WhatsApp em `/dados` (volume): `auth_info/` (**credenciais do número pareado**). Fica fora do banco de propósito: não é dado de consulta. Nunca na imagem nem no git.
+- **Envio que sai mas não é registrado** (Postgres caiu entre o `sendText` e o UPDATE): o id fica em memória (`enviadasSemRegistro`) e é registrado antes de qualquer outro envio. Não troque isso por "tenta de novo no próximo ciclo": a mensagem sairia duas vezes no grupo.
 - **Um processo só.** Duas conexões na mesma sessão do Baileys derrubam uma à outra, e cada processo tem o próprio laço da fila (mensagem duplicada no grupo). Não rode este serviço localmente com a sessão da produção.
 - Os testes (`npm test`, também no `make test` da raiz) usam só dados fictícios: o repositório é público.
 
@@ -25,7 +27,7 @@ npm start               # roda dist/ (produção)
 
 Antes de considerar qualquer mudança pronta: `npm run typecheck` **e** `npm test`. Não há linter.
 
-Os testes usam o runner nativo do Node — sem framework. Cada arquivo roda em processo próprio, com SQLite temporário criado por `tests/helpers/setup.ts`, que **precisa ser o primeiro import**: `config/env.ts` valida o ambiente (e faz `process.exit(1)` se faltar variável) e `db/index.ts` abre o banco já no momento do import. O teste do worker troca `whatsapp/client.ts` e `whatsapp/sender.ts` por dublês via `mock.module` — daí a flag `--experimental-test-module-mocks` no script. Nenhum teste abre socket nem fala com o WhatsApp.
+Os testes usam o runner nativo do Node — sem framework. Cada arquivo roda em processo próprio, **um de cada vez** (`--test-concurrency=1`: dividem as tabelas do Postgres de teste, `travus_teste`, com as migrações aplicadas pelos testes da API). Rode pelo `make test` da raiz (container `checkin-teste`); fora dele, sem `TEST_DATABASE_URL`, só os testes que não tocam no banco passam. `tests/helpers/setup.ts` **precisa ser o primeiro import**: `config/env.ts` valida o ambiente (e faz `process.exit(1)` se faltar variável) e `db/index.ts` cria o pool já no momento do import. O laço da fila expõe `aguardarCiclo()` para os testes (e o encerramento) esperarem o ciclo em andamento. O teste do worker troca `whatsapp/client.ts` e `whatsapp/sender.ts` por dublês via `mock.module` — daí a flag `--experimental-test-module-mocks` no script. Nenhum teste abre socket nem fala com o WhatsApp.
 
 **A suíte só roda no Node 24.** No 22 o `mock.module` não expõe os named exports do dublê para quem importa estaticamente, e `src/whatsapp/outbox.ts` importa `getStatus`/`isConnected` de `./client.js` assim — o arquivo do worker nem carrega. Isso é limitação do dublê, não da aplicação: no 22 o typecheck e o build passam e quase todos os testes rodam, e por isso `engines` continua em `>=22`. Se for preciso rodar a suíte no 22, o caminho é trocar `mock.module` por injeção de dependência em `startOutboxWorker` — não mexer no especificador do mock, que já foi testado e não resolve.
 
@@ -43,7 +45,7 @@ Endpoints exigem `x-webhook-token: <WEBHOOK_SECRET>` (ou `Authorization: Bearer`
 ## Arquitetura
 
 ```
-webhook → grava em `events` → responde 200 → enfileira em `outbox` → worker → Baileys → grupo
+webhook → grava em `checkin.eventos` → responde 200 → enfileira em `checkin.mensagens` → laço da fila → Baileys → grupo
 ```
 
 O ponto central é que **a resposta HTTP e o envio do WhatsApp são desacoplados**. O socket do Baileys pode estar reconectando quando o webhook chega, e o provedor não pode esperar por isso. O handler em `src/routes/webhook.ts` nunca chama o WhatsApp; ele só enfileira. Quem entrega é o worker de `src/whatsapp/outbox.ts`, num `setInterval` que **pula o ciclo inteiro quando `isConnected()` é falso** — assim uma desconexão não consome tentativas de retry.
@@ -81,7 +83,7 @@ Consequência para quem for mexer: ao adicionar um novo tipo de evento que reapr
 - **A Cloud API oficial da Meta não envia para grupos**, só para conversas individuais. Por isso o Baileys (WhatsApp Web) está embutido. Não sugira trocar por Cloud API/Twilio enquanto o destino for um grupo.
 - **`baileys` está fixado em `6.7.24`** (dist-tag `legacy`). A `7.0.0-rc*` tem quedas silenciosas de conexão relatadas. Não atualize sem verificar se saiu uma estável.
 - **Só o webhook é público.** Não publique a porta do container nem crie rota no gateway para `/whatsapp/*` ou `/events`: `GET /whatsapp/status` devolve a string do QR — quem a capturar pareia o próprio dispositivo na conta — e `GET /events` devolve os payloads completos das reservas. O `WEBHOOK_SECRET` viaja em header, então só por HTTPS.
-- **`/dados` (ou `data/`, rodando fora do container) contém as credenciais da sessão do WhatsApp** (`auth_info/`) além do banco. Nunca versionar, nunca colar conteúdo em logs ou PRs.
+- **`/dados` (ou `data/`, rodando fora do container) contém as credenciais da sessão do WhatsApp** (`auth_info/`). Nunca versionar, nunca colar conteúdo em logs ou PRs. `checkin.eventos` guarda os payloads completos (nome, telefone e e-mail de hóspedes).
 - O número pareado é um chip dedicado. Baileys é não-oficial e o número pode ser bloqueado pela Meta.
 
 ### Detalhes do Baileys que já causaram problema

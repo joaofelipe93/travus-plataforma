@@ -6,7 +6,7 @@ export async function healthRoutes(app: FastifyInstance) {
   app.get('/health', async () => ({
     status: 'ok',
     whatsapp: getStatus(),
-    outbox: Object.fromEntries(stats().map((s) => [s.status, s.count])),
+    outbox: Object.fromEntries((await stats()).map((s) => [s.status, s.count])),
     uptime: Math.round(process.uptime()),
   }))
 }
