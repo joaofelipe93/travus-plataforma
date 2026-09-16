@@ -43,6 +43,8 @@ ssh root@<ip> 'bash -s' < deploy/vm/preparar.sh
 ssh travus@<ip>        # a partir daqui, root e senha estão bloqueados no SSH
 ```
 
+Para repetir o script depois (ele não estraga o que já foi feito): `ssh travus@<ip> 'sudo bash -s' < deploy/vm/preparar.sh`. Se ao fim houver `/var/run/reboot-required` (o `upgrade` costuma trazer kernel novo), reinicie agora, com a VM ainda vazia: `ssh travus@<ip> sudo systemctl reboot`.
+
 O script faz `apt-get update` e `apt-get upgrade` e instala Docker (repositório oficial, logs com rotação), firewall (22, 80, 443), fail2ban, atualizações automáticas de segurança (`unattended-upgrades`, todo dia), swap de 2 GB, fuso `America/Sao_Paulo`, o usuário `travus` (sudo, só chave) e as pastas em `/opt/travus`.
 
 As atualizações automáticas **não reiniciam a VM** de propósito: um reinício no meio de um dry-run ou de um lance real derrubaria o worker. Atualização de kernel fica pendente até o reinício manual (ver Rotina).

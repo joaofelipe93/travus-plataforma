@@ -4,6 +4,9 @@
 #
 #   ssh root@<ip-da-vm> 'bash -s' < deploy/vm/preparar.sh
 #
+# Depois da primeira vez o root não entra mais pelo SSH; para repetir:
+#   ssh travus@<ip-da-vm> 'sudo bash -s' < deploy/vm/preparar.sh
+#
 # Faz: usuário travus (SSH só por chave, sudo), root e senha bloqueados no SSH, firewall (22,
 # 80, 443), fail2ban, atualizações automáticas de segurança, Docker oficial com rotação de
 # logs, swap de 2 GB, fuso America/Sao_Paulo e as pastas em /opt/travus.
@@ -77,8 +80,11 @@ PasswordAuthentication no
 KbdInteractiveAuthentication no
 PermitRootLogin no
 EOF
+# Ubuntu 24.04: o SSH é ativado por socket e /run/sshd só existe com o serviço de pé; sem a
+# pasta, o `sshd -t` falha e o script parava aqui.
+install -d -m 755 /run/sshd
 sshd -t
-systemctl reload ssh
+systemctl reload-or-restart ssh
 
 passo "Firewall (22, 80, 443)"
 ufw default deny incoming > /dev/null
