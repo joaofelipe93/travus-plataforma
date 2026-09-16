@@ -98,6 +98,21 @@ make deploy VM=travus@<ip>
 make smoke-producao APP=app.<domínio> API=api.<domínio>                       # certificado de verdade
 ```
 
+**O Traefik não troca sozinho o certificado de teste pelo de verdade**: enquanto tiver um certificado válido para o domínio (o de teste, em `acme-teste.json`), ele não pede outro, e o `acme.json` fica vazio. Depois de publicar com `CERT_RESOLVER=le`, apague os de teste e reinicie o Traefik (alguns segundos fora do ar):
+
+```bash
+ssh travus@<ip> 'docker exec travus-traefik-1 rm -f /letsencrypt/acme-teste.json && cd /opt/travus/atual && docker compose -f deploy/docker-compose.yml -f deploy/docker-compose.prod.yml restart traefik'
+```
+
+Confira o emissor (sem `STAGING`) e só então rode o smoke: `echo | openssl s_client -connect <ip>:443 -servername app.<domínio> 2>/dev/null | openssl x509 -noout -issuer`.
+
+Se o DNS da sua rede ainda guarda um IP antigo (troca recente de registro), o smoke falha por ir ao lugar errado. Rode-o de um container com os domínios fixados no IP da VM:
+
+```bash
+docker run --rm --add-host app.<domínio>:<ip> --add-host api.<domínio>:<ip> -v "$PWD/tools/smoke:/smoke:ro" debian:bookworm-slim \
+  bash -c 'apt-get update -qq >/dev/null && apt-get install -y -qq curl openssl ca-certificates >/dev/null && bash /smoke/producao.sh app.<domínio> api.<domínio>'
+```
+
 ## 6. Usuários, planilha, Drive e alertas
 
 Comandos na VM rodam dentro da versão atual:
