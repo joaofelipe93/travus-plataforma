@@ -22,7 +22,8 @@ O segundo serviço é o **notificador de check-in** (`workers/checkin-whatsapp`)
 4. **O worker nunca repete automaticamente a etapa de Confirmar** (ver "Proteção contra lance duplicado").
 5. **Não altere nada em `/home/joao/Documentos/newcon-automation`.** Só copie de lá.
 6. Se algo do Newcon se comportar diferente de `docs/canopus-newcon.md`, **pare e avise** antes de mudar a lógica.
-7. Sem push, repositório remoto novo ou deploy sem pedido explícito. Trabalhe por etapas: proponha o plano, espere o ok e pare no fim de cada etapa para validação. Commits pequenos e descritivos.
+7. Sem push, repositório remoto novo ou deploy sem pedido explícito. Trabalhe por etapas: proponha o plano, espere o ok e pare no fim de cada etapa para validação. Commits pequenos e descritivos, no padrão `feat:`/`fix:`/`docs:`/`ci:`… (o versionamento vai ler).
+10. **A `main` é protegida: só entra por PR com a CI verde** (vários agentes trabalham ao mesmo tempo). Nunca faça push direto na `main` nem tente contornar a proteção. Trabalhe num branch próprio (`tipo/assunto`, ex.: `feat/reservas-historico`), rode `make test` e `make verificar` antes de abrir o PR e mantenha o branch atualizado com a `main` (a proteção exige). Ver "CI" abaixo.
 8. Uma sessão de login no Newcon por vez: nunca rode dry-run da plataforma, `make worker-dry-run` e scripts de descoberta ao mesmo tempo.
 9. **WhatsApp do notificador**: nunca pareie o chip da produção fora da VM de produção (`make checkin` local mostra QR de verdade: não escaneie) e nunca rode dois notificadores com a mesma sessão. "Enviar mensagem de teste", `POST /whatsapp/test` e um webhook com o token certo **mandam mensagem ao grupo real**: só com pedido do usuário. Testes automáticos usam dublês do WhatsApp; os smokes só mandam webhook sem token.
 
@@ -38,6 +39,7 @@ make migrate         # aplica migrações pendentes
 make usuario args='criar --email ana@exemplo.com --nome "Ana" --perfil operador'
                      # também: listar | senha --email X | desativar --email X | ativar --email X
 make test            # api e checkin-whatsapp (com Postgres de teste), web (eslint + tsc), worker Canopus (node:test, sem Newcon)
+make verificar       # checagens de segurança da CI: arquivos proibidos, migrações seguras, gitleaks
 make smoke           # checagens pelo gateway com curl (precisa de make up; não cria execução)
 make dev-web         # web com next dev (recarga automática) atrás do Traefik; make up volta ao normal
 make sqlc            # regera api/internal/db depois de mudar migrações ou consultas
@@ -62,6 +64,23 @@ Endereços locais: http://app.localhost (web e, em `/api/...`, a API), http://ap
 Não há cadastro público de usuários: só `make usuario`. A senha é pedida no terminal ou lida da entrada padrão (mínimo 12 caracteres). `deploy/.env` guarda a senha do Postgres, o `WORKER_TOKEN`, a `CHAVE_CRIPTOGRAFIA` (sem ela, o token do Google no banco não decifra), `CHECKIN_WEBHOOK_SECRET` (o token que o PMS manda), `CHECKIN_ADMIN_TOKEN` (API → notificador) e `CHECKIN_DB_SENHA` (papel `checkin` no Postgres), todos gerados pelo `make` (e pelo `publicar.sh` na VM), e, opcionalmente, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_DRIVE_PASTA_ID` e `CHECKIN_WHATSAPP_GROUP_JID` (grupo inicial; o admin escolhe pela tela).
 
 **`LANCE_REAL_HABILITADO`** (padrão `false`, na API e no worker): só `true` liga o lance real. Desligada, a API recusa aprovar (403) e não entrega execução `real`, e o worker nem carrega `lance-real.js`. **Nunca ligue sem pedido explícito do usuário, na hora.**
+
+## CI (GitHub Actions)
+
+`.github/workflows/ci.yml` roda em todo PR para a `main` e em todo push nela; a proteção da `main` exige todos os jobs verdes, branch atualizado e histórico linear, sem exceção para admin:
+
+| Job | O que garante |
+|---|---|
+| API (Go) | `go vet`, testes com Postgres (migrações, permissões do papel `checkin`) e `api/internal/db` igual ao que o `sqlc` gera |
+| Notificador de check-in | migrações no banco de teste, baileys em 6.7.24, typecheck e testes |
+| Web (Next.js) | lint, tipos e `next build` |
+| Worker Canopus | sintaxe e testes (inclui a garantia de que não há caminho para Confirmar) |
+| Scripts e compose | sintaxe dos scripts, compose local e de produção válidos |
+| Segurança | nenhum arquivo proibido versionado (`tools/ci/arquivos-proibidos.sh`) e gitleaks no histórico inteiro (falsos positivos revisados em `.gitleaksignore`; segredo de verdade se troca, não se ignora) |
+| Migrações seguras para rollback | `tools/ci/checar-migracoes.sh`: migração existente não se edita; número novo maior que o da `main` e sem repetição (dois PRs com a mesma versão: renumere); o Up não destrói nem renomeia, salvo `-- ci: destrutiva-aprovada: <motivo>` |
+| Integração | `make up` com credenciais fictícias do Newcon, build da imagem do notificador e `make smoke` (sem execução, sem WhatsApp) |
+
+Localmente: `make test` (testes) e `make verificar` (segurança e migrações).
 
 ## Arquitetura
 

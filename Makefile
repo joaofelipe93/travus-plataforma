@@ -18,7 +18,7 @@ PRECISA_VM = @test -n "$(VM)" || { echo "informe a VM: make $@ VM=travus@<ip-ou-
 FORA_DA_VM = @test ! -d /opt/travus/compartilhado || { echo "esta é a VM de produção: publique com make deploy (na sua máquina), não com make $@"; exit 1; }
 
 .DEFAULT_GOAL := help
-.PHONY: help env up down checkin logs ps migrate usuario google-token google-status test smoke dev-web sqlc paridade-csv worker-dry-run \
+.PHONY: help env up down checkin verificar logs ps migrate usuario google-token google-status test smoke dev-web sqlc paridade-csv worker-dry-run \
 	backup restaurar-teste alerta-teste prod-local smoke-producao deploy deploy-voltar backup-baixar
 
 help: ## Lista os comandos
@@ -78,6 +78,11 @@ test: env ## Testes: api e checkin-whatsapp (com Postgres), web (lint e tipos), 
 	sh -n deploy/backup/backup.sh
 	for f in deploy/vm/*.sh tools/smoke/*.sh; do bash -n "$$f" || exit 1; done
 	DOMINIO_APP=app.exemplo.com.br DOMINIO_API=api.exemplo.com.br BACKUP_DIR=/tmp $(PROD) config --quiet
+
+verificar: ## Checagens da CI de segurança: arquivos proibidos, migrações seguras (contra origin/main) e segredos (gitleaks)
+	bash tools/ci/arquivos-proibidos.sh
+	git fetch --quiet origin main && bash tools/ci/checar-migracoes.sh origin/main
+	docker run --rm -v "$(CURDIR):/repo:ro" ghcr.io/gitleaks/gitleaks:v8.28.0 git /repo --no-banner --redact --gitleaks-ignore-path /repo/.gitleaksignore
 
 smoke: ## Checagens pelo gateway com curl (precisa de make up)
 	bash tools/smoke/etapa1.sh

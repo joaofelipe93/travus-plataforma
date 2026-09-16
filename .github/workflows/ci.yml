@@ -1,0 +1,229 @@
+# CI da Travus Plataforma: roda em todo PR para a main e em todo push na main. A main é
+# protegida: só entra por PR com todos estes jobs verdes e o branch atualizado com a main.
+# Nenhum job fala com o Newcon nem com o WhatsApp: sem execução, sem pareamento, sem webhook
+# com token (regras 1 e 9 do CLAUDE.md).
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# Um push novo no mesmo PR cancela a rodada anterior (na main, cada push roda até o fim).
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+env:
+  GO_VERSION: "1.26.8"
+  NODE_VERSION: "24.21.0"
+  POSTGRES_IMAGE: postgres:18.6-alpine
+
+jobs:
+  api:
+    name: API (Go)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:18.6-alpine
+        env:
+          POSTGRES_USER: travus
+          POSTGRES_PASSWORD: senha-de-teste-da-ci
+          POSTGRES_DB: travus
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U travus" --health-interval 5s --health-timeout 3s --health-retries 20
+    defaults:
+      run:
+        working-directory: api
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache-dependency-path: api/go.sum
+      - name: go vet
+        run: go vet ./...
+      - name: Testes (unitários e integração com Postgres, banco travus_teste)
+        env:
+          TEST_DATABASE_URL: postgres://travus:senha-de-teste-da-ci@localhost:5432/travus_teste?sslmode=disable
+          CGO_ENABLED: "0"
+        run: go test -p 1 -count=1 ./...
+      - name: Código do sqlc atualizado com as migrações e consultas
+        run: |
+          docker run --rm --user "$(id -u):$(id -g)" -v "$PWD":/src -w /src sqlc/sqlc:1.31.1 generate
+          git diff --exit-code -- internal/db || { echo "::error::api/internal/db desatualizado: rode make sqlc e commite"; exit 1; }
+
+  checkin:
+    name: Notificador de check-in (TypeScript)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:18.6-alpine
+        env:
+          POSTGRES_USER: travus
+          POSTGRES_PASSWORD: senha-de-teste-da-ci
+          POSTGRES_DB: travus_teste
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U travus" --health-interval 5s --health-timeout 3s --health-retries 20
+    env:
+      TEST_DATABASE_URL: postgres://travus:senha-de-teste-da-ci@localhost:5432/travus_teste?sslmode=disable
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache-dependency-path: api/go.sum
+      - name: Migrações no banco de teste (schema e papel checkin)
+        working-directory: api
+        env:
+          DATABASE_URL: ${{ env.TEST_DATABASE_URL }}
+        run: go run ./cmd/api migrate up
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: workers/checkin-whatsapp/package-lock.json
+      - name: Dependências
+        working-directory: workers/checkin-whatsapp
+        run: npm ci --no-audit --no-fund
+      - name: baileys fixo em 6.7.24
+        working-directory: workers/checkin-whatsapp
+        run: |
+          versao=$(node -p "require('./package-lock.json').packages['node_modules/baileys'].version")
+          [ "$versao" = "6.7.24" ] || { echo "::error::baileys em $versao; a 7.x tem quedas silenciosas de conexão"; exit 1; }
+      - name: Typecheck e testes
+        working-directory: workers/checkin-whatsapp
+        run: npm run typecheck && npm run typecheck:tests && npm test
+
+  web:
+    name: Web (Next.js)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: npm ci --no-audit --no-fund
+      - name: Lint
+        run: npm run lint
+      - name: Tipos
+        run: npx next typegen && npx tsc --noEmit
+      - name: Build de produção
+        run: npm run build
+
+  canopus:
+    name: Worker Canopus
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: workers/canopus
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: workers/canopus/package-lock.json
+      - run: npm ci --no-audit --no-fund
+      - name: Sintaxe
+        run: for f in src/*.js; do node --check "$f" || exit 1; done
+      - name: Testes (sem Newcon; inclui o que garante que não há caminho para Confirmar)
+        run: npm test
+
+  scripts:
+    name: Scripts e compose
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Sintaxe dos scripts
+        run: |
+          sh -n workers/canopus/docker-entrypoint.sh
+          sh -n deploy/backup/backup.sh
+          for f in deploy/vm/*.sh tools/smoke/*.sh tools/ci/*.sh; do bash -n "$f" || exit 1; done
+      - name: Compose local e de produção válidos
+        env:
+          POSTGRES_PASSWORD: x
+          WORKER_TOKEN: x
+          CHAVE_CRIPTOGRAFIA: x
+          CHECKIN_WEBHOOK_SECRET: x
+          CHECKIN_ADMIN_TOKEN: x
+          CHECKIN_DB_SENHA: x
+        run: |
+          docker compose -f deploy/docker-compose.yml config --quiet
+          DOMINIO_APP=app.exemplo.com.br DOMINIO_API=api.exemplo.com.br BACKUP_DIR=/tmp \
+            docker compose -f deploy/docker-compose.yml -f deploy/docker-compose.prod.yml config --quiet
+
+  seguranca:
+    name: Segurança (segredos e arquivos proibidos)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Arquivos proibidos (segredos, planilha, PDFs, dumps, sessão do WhatsApp)
+        run: bash tools/ci/arquivos-proibidos.sh
+      - name: Segredos no histórico inteiro (gitleaks)
+        run: |
+          docker run --rm -v "$PWD:/repo:ro" ghcr.io/gitleaks/gitleaks:v8.28.0 \
+            git /repo --no-banner --redact --gitleaks-ignore-path /repo/.gitleaksignore
+
+  migracoes:
+    name: Migrações seguras para rollback
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Conferir contra a base
+        env:
+          BASE: ${{ github.event_name == 'pull_request' && format('origin/{0}', github.base_ref) || github.event.before }}
+        run: |
+          if [ -z "$BASE" ] || [ "$BASE" = "0000000000000000000000000000000000000000" ] || ! git cat-file -e "$BASE^{commit}" 2>/dev/null; then
+            BASE=HEAD~1
+          fi
+          bash tools/ci/checar-migracoes.sh "$BASE"
+
+  integracao:
+    name: Integração (stack completa + smoke)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    needs: [api, checkin, web, canopus, scripts]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Credenciais fictícias do worker (o smoke nunca cria execução)
+        run: |
+          umask 077
+          printf '%s\n' \
+            'NEWCON_URL=https://newcon.invalid/WWW/frmCorCcCnsLogin.aspx' \
+            'NEWCON_USER=ci-ficticio' 'NEWCON_PASS=ci-ficticio' > workers/canopus/.env
+      - name: Subir a stack (make up)
+        run: make up
+      - name: "Imagem do notificador compila (não sobe, conectaria ao WhatsApp)"
+        run: docker compose -f deploy/docker-compose.yml --profile checkin build checkin-whatsapp
+      - name: Smoke pelo gateway
+        run: make smoke
+      - name: Logs dos containers
+        if: failure()
+        run: docker compose -f deploy/docker-compose.yml logs --tail=200
+      - name: Derrubar
+        if: always()
+        run: make down

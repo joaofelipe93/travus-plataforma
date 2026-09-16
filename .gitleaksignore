@@ -1,0 +1,5 @@
+# Falsos positivos do gitleaks, revisados à mão: valor de exemplo no .env.example, $(id -u) no Makefile
+# e uma palavra num comentário. Formato: commit:arquivo:regra:linha. Segredo de verdade não se ignora: se troca.
+b84809b649f7f5908c3efe1418be693a268324d4:workers/checkin-whatsapp/.env.example:generic-api-key:30
+850c47f05043ea0cf36a19ee155cbd2b89db3a85:Makefile:curl-auth-user:45
+0fbb89e8e699c19949f05200396d5d15f35e6248:workers/canopus/src/auth.js:generic-api-key:5
