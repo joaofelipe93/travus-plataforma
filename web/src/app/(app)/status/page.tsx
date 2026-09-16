@@ -8,6 +8,8 @@ type Health = {
   via_gateway: boolean;
   host?: string;
   horario: string;
+  versao?: string;
+  commit?: string;
 };
 
 type Consulta =
@@ -33,6 +35,10 @@ async function consultarHealth(): Promise<Consulta> {
     const causa = e instanceof Error && e.cause instanceof Error ? ` (${e.cause.message})` : "";
     return { ok: false, url, erro: `${e instanceof Error ? e.message : String(e)}${causa}` };
   }
+}
+
+function rotuloVersao(versao: string | undefined) {
+  return versao && versao !== "dev" ? `v${versao}` : "dev";
 }
 
 function Linha({ rotulo, children }: { rotulo: string; children: React.ReactNode }) {
@@ -70,6 +76,9 @@ export default async function PaginaStatus() {
         </div>
 
         <dl className="divide-y">
+          <Linha rotulo="Versão do app">
+            {rotuloVersao(process.env.NEXT_PUBLIC_VERSAO)} (commit {(process.env.NEXT_PUBLIC_COMMIT ?? "desconhecido").slice(0, 7)})
+          </Linha>
           <Linha rotulo="Endereço consultado">
             <code className="font-mono">{consulta.url}</code>
           </Linha>
@@ -83,6 +92,9 @@ export default async function PaginaStatus() {
               </Linha>
               <Linha rotulo="Banco (Postgres)">{consulta.corpo.banco}</Linha>
               <Linha rotulo="Horário da API">{consulta.corpo.horario}</Linha>
+              <Linha rotulo="Versão da API">
+                {rotuloVersao(consulta.corpo.versao)} (commit {(consulta.corpo.commit ?? "desconhecido").slice(0, 7)})
+              </Linha>
             </>
           ) : (
             <Linha rotulo="Erro">{consulta.erro}</Linha>

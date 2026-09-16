@@ -54,6 +54,9 @@ type Config struct {
 	Vigia ConfigVigia
 	// Notificador de check-in (tela WhatsApp). nil: as rotas respondem "indisponível".
 	Checkin *checkin.Cliente
+	// Versão publicada (version.txt) e commit, mostrados no /health.
+	Versao string
+	Commit string
 }
 
 type Servidor struct {
@@ -196,6 +199,8 @@ type healthResponse struct {
 	ViaGateway bool   `json:"via_gateway"`
 	Host       string `json:"host,omitempty"`
 	Horario    string `json:"horario"`
+	Versao     string `json:"versao"`
+	Commit     string `json:"commit"`
 }
 
 // health responde se a API está de pé e se alcança o Postgres. "via_gateway" indica se a
@@ -208,6 +213,8 @@ func (s *Servidor) health(w http.ResponseWriter, r *http.Request) {
 		ViaGateway: r.Header.Get("X-Forwarded-Host") != "",
 		Host:       r.Header.Get("X-Forwarded-Host"),
 		Horario:    s.agora().UTC().Format(time.RFC3339),
+		Versao:     valorOuPadrao(s.cfg.Versao, "dev"),
+		Commit:     valorOuPadrao(s.cfg.Commit, "desconhecido"),
 	}
 	code := http.StatusOK
 

@@ -82,6 +82,16 @@ Não há cadastro público de usuários: só `make usuario`. A senha é pedida n
 
 Localmente: `make test` (testes) e `make verificar` (segurança e migrações).
 
+Também é obrigatório o **"Título do PR no padrão"** (`.github/workflows/titulo-pr.yml`): o merge é por squash e o título do PR vira a mensagem do commit na `main`, que o versionamento lê. Formato `tipo(escopo)!: descrição`, com `feat`, `fix`, `perf`, `revert`, `docs`, `ci`, `build`, `refactor`, `test`, `chore` ou `style`; `!` marca mudança incompatível.
+
+## Versões
+
+- **Versão semântica** em `version.txt`, mantida pelo **release-please** (`.github/workflows/release-please.yml`, `release-please-config.json`, `.release-please-manifest.json`). Não edite `version.txt` nem `CHANGELOG.md` à mão.
+- A cada push na `main`, o release-please abre ou atualiza o PR **"chore: versão X.Y.Z"** com o `CHANGELOG.md`: `feat` sobe o minor, `fix` e `perf` sobem o patch; enquanto for `0.x`, mudança incompatível (`!`) também sobe só o minor. Só `feat`, `fix`, `perf` e `revert` aparecem no changelog.
+- **O merge do PR de versão cria a tag `vX.Y.Z` e o release no GitHub.** Ele passa pela CI como qualquer PR. A decisão de lançar uma versão é do usuário.
+- O workflow usa o secret `RELEASE_PLEASE_TOKEN` (token fine-grained só deste repositório com Contents, Pull requests e Issues em leitura e escrita): com o `GITHUB_TOKEN`, o PR de versão não dispararia a CI. O token tem validade: renovar antes de vencer.
+- A versão e o commit entram nas imagens pelo build (`VERSAO`/`COMMIT`, exportados pelo `Makefile` e pelo `publicar.sh` a partir de `version.txt` e do git) e aparecem no `/health` da API e do notificador, no log de início do worker, em `/status` e no menu do usuário no trilho. Sem eles, `dev`.
+
 ## Arquitetura
 
 ```
@@ -101,7 +111,7 @@ Localmente: `make test` (testes) e `make verificar` (segurança e migrações).
 ```
 
 - **`deploy/docker-compose.yml`** (projeto `travus`). Redes: `travus_borda` (traefik, api, web, checkin-whatsapp) e `travus_interna` (postgres, migrate, api, worker, checkin-whatsapp, cli, api-teste, checkin-teste). Só o Traefik publica porta (80). `migrate` roda `api migrate up` antes da `api`. Perfis: `cli` (usuários), `teste` (Go e `checkin-teste` com Postgres, banco `travus_teste`), `canopus` (script legado `worker-legado`), `checkin` (notificador, só com `make checkin`; em produção fica ligado). `deploy/docker-compose.dev.yml` troca o web por `next dev`.
-- **Produção** (Etapa 4, roteiro em `docs/producao.md`): `deploy/docker-compose.prod.yml` vai por cima do compose local (Traefik em 80/443 com Let's Encrypt via `deploy/traefik/traefik.producao.yml`, HTTP → HTTPS, HSTS, dashboard fechado, `backup` diário, notificador de check-in ligado, vigia com pasta de backups, certificado e notificador). Domínios por `DOMINIO_APP`/`DOMINIO_API` (padrão `app.localhost`/`api.localhost`); `CERT_RESOLVER` `le` ou `le-teste`. Na VM (`/opt/travus`): `releases/<commit>` enviadas por `git archive`, `compartilhado/.env` e `compartilhado/canopus.env` (segredos, só na VM), `backups/`, `atual` → versão publicada. `deploy/vm/preparar.sh` (root, uma vez: usuário `travus`, SSH só por chave, ufw, fail2ban, Docker, swap; para se achar a `appairbnb`) e `deploy/vm/publicar.sh` (compila uma imagem por vez, por causa dos 2 GB da VM, e sobe a versão; `--voltar`). Na VM, `make up`/`prod-local`/`dev-web` se recusam a rodar. `deploy/backup/backup.sh`: `pg_dump -Fc` com 7 diários, 4 semanais e 6 mensais, marcadores `ultimo-ok`/`ultimo-erro`.
+- **Produção** (Etapa 4, roteiro em `docs/producao.md`; a versão publicada aparece no `/health`): `deploy/docker-compose.prod.yml` vai por cima do compose local (Traefik em 80/443 com Let's Encrypt via `deploy/traefik/traefik.producao.yml`, HTTP → HTTPS, HSTS, dashboard fechado, `backup` diário, notificador de check-in ligado, vigia com pasta de backups, certificado e notificador). Domínios por `DOMINIO_APP`/`DOMINIO_API` (padrão `app.localhost`/`api.localhost`); `CERT_RESOLVER` `le` ou `le-teste`. Na VM (`/opt/travus`): `releases/<commit>` enviadas por `git archive`, `compartilhado/.env` e `compartilhado/canopus.env` (segredos, só na VM), `backups/`, `atual` → versão publicada. `deploy/vm/preparar.sh` (root, uma vez: usuário `travus`, SSH só por chave, ufw, fail2ban, Docker, swap; para se achar a `appairbnb`) e `deploy/vm/publicar.sh` (compila uma imagem por vez, por causa dos 2 GB da VM, e sobe a versão; `--voltar`). Na VM, `make up`/`prod-local`/`dev-web` se recusam a rodar. `deploy/backup/backup.sh`: `pg_dump -Fc` com 7 diários, 4 semanais e 6 mensais, marcadores `ultimo-ok`/`ultimo-erro`.
 - **Traefik** (`deploy/traefik/`, montado como pasta: bind mount de arquivo único não enxerga edições). Rotas por labels (`exposedByDefault: false`) com prioridades; middlewares em `dinamico.yml`:
   - `sessao-api` / `sessao-pagina`: ForwardAuth em `http://api:8080/auth/verificar` (só repassa `Cookie`, `trustForwardHeader: false`); a versão de página responde 302 para `/login?proximo=…` (`preserveLocationHeader`);
   - `remover-prefixo-api`, `limite-api` (20/s), `limite-login` (10/min por IP), `cabecalhos-seguranca`.

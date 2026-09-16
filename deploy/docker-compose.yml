@@ -19,8 +19,16 @@ x-logs: &logs
     max-size: "10m"
     max-file: "5"
 
+# Versão (version.txt, mantido pelo release-please) e commit embutidos nas imagens. O Makefile e
+# o publicar.sh exportam VERSAO e COMMIT; sem eles, "dev".
+x-versao: &versao
+  VERSAO: ${VERSAO:-dev}
+  COMMIT: ${COMMIT:-desconhecido}
+
 x-api: &api-base
-  build: ../api
+  build:
+    context: ../api
+    args: *versao
   image: travus/api:dev
   environment:
     DATABASE_URL: postgres://${POSTGRES_USER:-travus}:${POSTGRES_PASSWORD:?defina POSTGRES_PASSWORD em deploy/.env}@postgres:5432/${POSTGRES_DB:-travus}?sslmode=disable
@@ -145,7 +153,9 @@ services:
       - traefik.http.routers.api.middlewares=sessao-api@file,limite-api@file,cabecalhos-seguranca@file
 
   web:
-    build: ../web
+    build:
+      context: ../web
+      args: *versao
     image: travus/web:dev
     restart: unless-stopped
     environment:
@@ -181,7 +191,9 @@ services:
   # LANCE_REAL_HABILITADO=true, lance real). Fora do Traefik; só na rede interna (precisa
   # de saída para o Newcon).
   worker-canopus:
-    build: ../workers/canopus
+    build:
+      context: ../workers/canopus
+      args: *versao
     image: travus/worker-canopus:dev
     restart: unless-stopped
     command: ["node", "src/worker.js"]
@@ -211,7 +223,9 @@ services:
   # produção, o docker-compose.prod.yml o liga. UM container só: duas conexões na mesma sessão do
   # WhatsApp derrubam uma à outra, e cada processo enviaria a fila de novo.
   checkin-whatsapp:
-    build: ../workers/checkin-whatsapp
+    build:
+      context: ../workers/checkin-whatsapp
+      args: *versao
     image: travus/checkin-whatsapp:dev
     profiles: [checkin]
     restart: unless-stopped
@@ -325,7 +339,9 @@ services:
   # Script legado (Etapa 0) em dry-run, lendo a planilha: make worker-dry-run.
   # O entrypoint bloqueia --confirm.
   worker-legado:
-    build: ../workers/canopus
+    build:
+      context: ../workers/canopus
+      args: *versao
     image: travus/worker-canopus:dev
     profiles: [canopus]
     command: ["node", "src/index.js", "--dry-run", "--limit", "1"]

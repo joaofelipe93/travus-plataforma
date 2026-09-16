@@ -5,6 +5,10 @@ FROM mcr.microsoft.com/playwright:v1.63.0-noble
 
 WORKDIR /app
 ENV NODE_ENV=production
+# Versão (version.txt) e commit, passados pelo compose; aparecem no log de início.
+ARG VERSAO=dev
+ARG COMMIT=desconhecido
+ENV VERSAO=${VERSAO} COMMIT=${COMMIT}
 
 COPY package.json package-lock.json ./
 RUN npm ci --omit=dev --no-audit --no-fund

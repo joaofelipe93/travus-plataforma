@@ -69,7 +69,7 @@ class Worker {
     const { nome, intervaloFilaMs } = this.config.worker;
     const tipos = tiposSuportados(this.config);
     if (this.config.lanceRealHabilitado) this.saida.log('! ATENÇÃO: LANCE_REAL_HABILITADO=true: este worker registra lances reais aprovados');
-    this.saida.log(`· worker ${nome} esperando execuções (${tipos.join(', ')})`);
+    this.saida.log(`· worker ${nome} esperando execuções (${tipos.join(', ')}), versão ${process.env.VERSAO || 'dev'} (${process.env.COMMIT || 'desconhecido'})`);
     let falhasSeguidas = 0;
     while (!this.parando) {
       let tarefa;

@@ -62,7 +62,10 @@ ativar() {
 
   HOST_UID=$(id -u)
   HOST_GID=$(id -g)
-  export HOST_UID HOST_GID
+  # Versão (version.txt da release, mantido pelo release-please) e commit nas imagens e no /health.
+  VERSAO=$(cat version.txt 2> /dev/null || echo dev)
+  COMMIT=$versao
+  export HOST_UID HOST_GID VERSAO COMMIT
   local compose=(docker compose -f deploy/docker-compose.yml -f deploy/docker-compose.prod.yml)
 
   # Não publica no meio de uma execução (o worker seria reiniciado entre cotas de um lance real).
@@ -86,7 +89,7 @@ ativar() {
   # Uma imagem de cada vez: a VM tem 2 GB e a versão atual continua no ar durante o build. Em
   # paralelo, o next build, o Go e o npm ci juntos passam da memória e o build morre no meio.
   # Serviço sem "build" (postgres, traefik) não faz nada aqui.
-  echo "== Compilando a versão $versao (uma imagem por vez)"
+  echo "== Compilando a versão v$VERSAO, commit $versao (uma imagem por vez)"
   local servico
   for servico in $("${compose[@]}" config --services); do
     "${compose[@]}" build "$servico"
@@ -107,7 +110,7 @@ ativar() {
   docker image prune -f > /dev/null
 
   "${compose[@]}" ps --format 'table {{.Service}}\t{{.Status}}'
-  echo "Versão $versao publicada."
+  echo "Versão v$VERSAO (commit $versao) publicada."
 }
 
 case "${1:-}" in

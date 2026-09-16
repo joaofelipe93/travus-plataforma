@@ -21,7 +21,12 @@ RUN npm run build && npm prune --omit=dev --no-audit --no-fund
 
 FROM node:24.21.0-bookworm-slim
 WORKDIR /app
-ENV NODE_ENV=production \
+# Versão (version.txt) e commit, passados pelo compose; aparecem no /health.
+ARG VERSAO=dev
+ARG COMMIT=desconhecido
+ENV VERSAO=${VERSAO} \
+    COMMIT=${COMMIT} \
+    NODE_ENV=production \
     HOST=0.0.0.0 \
     PORT=3000 \
     LOG_FORMAT=json \

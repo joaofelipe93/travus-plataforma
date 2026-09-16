@@ -4,7 +4,10 @@ WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
-RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/api ./cmd/api
+# Versão (version.txt, mantido pelo release-please) e commit, passados pelo compose.
+ARG VERSAO=dev
+ARG COMMIT=desconhecido
+RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w -X main.versao=${VERSAO} -X main.commit=${COMMIT}" -o /out/api ./cmd/api
 
 # Imagem final sem shell: só o binário (migrações embutidas).
 FROM gcr.io/distroless/static-debian12:nonroot

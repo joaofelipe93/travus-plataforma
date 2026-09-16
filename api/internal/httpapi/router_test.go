@@ -30,18 +30,18 @@ func TestHealth(t *testing.T) {
 			name:          "banco ok, pelo gateway",
 			forwardedHost: "api.localhost",
 			wantCode:      http.StatusOK,
-			want:          healthResponse{Status: "ok", Servico: "api", Banco: "ok", ViaGateway: true, Host: "api.localhost"},
+			want:          healthResponse{Status: "ok", Servico: "api", Banco: "ok", ViaGateway: true, Host: "api.localhost", Versao: "dev", Commit: "desconhecido"},
 		},
 		{
 			name:     "banco ok, direto no container",
 			wantCode: http.StatusOK,
-			want:     healthResponse{Status: "ok", Servico: "api", Banco: "ok"},
+			want:     healthResponse{Status: "ok", Servico: "api", Banco: "ok", Versao: "dev", Commit: "desconhecido"},
 		},
 		{
 			name:     "banco fora",
 			pingErr:  errors.New("connection refused"),
 			wantCode: http.StatusServiceUnavailable,
-			want:     healthResponse{Status: "degradado", Servico: "api", Banco: "indisponivel"},
+			want:     healthResponse{Status: "degradado", Servico: "api", Banco: "indisponivel", Versao: "dev", Commit: "desconhecido"},
 		},
 	}
 
@@ -73,6 +73,20 @@ func TestHealth(t *testing.T) {
 				t.Errorf("Content-Type = %q", got)
 			}
 		})
+	}
+}
+
+func TestHealthMostraVersao(t *testing.T) {
+	s := servidorSemBanco(nil)
+	s.cfg.Versao, s.cfg.Commit = "0.3.1", "81c394c0a1b2"
+	rec := httptest.NewRecorder()
+	s.Rotas().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/health", nil))
+	var got healthResponse
+	if err := json.NewDecoder(rec.Body).Decode(&got); err != nil {
+		t.Fatal(err)
+	}
+	if got.Versao != "0.3.1" || got.Commit != "81c394c0a1b2" {
+		t.Errorf("versão = %q, commit = %q", got.Versao, got.Commit)
 	}
 }
 

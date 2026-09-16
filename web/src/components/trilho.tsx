@@ -20,6 +20,10 @@ import { nomePerfil } from "@/lib/sessao";
 import type { Usuario } from "@/lib/tipos";
 import { cn } from "@/lib/utils";
 
+// Embutidos no build (web/Dockerfile, a partir de version.txt e do commit).
+const versaoDoApp = process.env.NEXT_PUBLIC_VERSAO ? `v${process.env.NEXT_PUBLIC_VERSAO}` : "dev";
+const commitDoApp = (process.env.NEXT_PUBLIC_COMMIT ?? "desconhecido").slice(0, 7);
+
 // Trilho à esquerda: um serviço por linha. O serviço aberto é o único ponto em ouro da tela
 // (a barra à esquerda do nome); o resto do trilho fica quieto.
 export function Trilho({ usuario }: { usuario: Usuario }) {
@@ -83,6 +87,9 @@ export function Trilho({ usuario }: { usuario: Usuario }) {
           <DropdownMenuContent side="top" align="start" className="w-52">
             <DropdownMenuGroup>
               <DropdownMenuLabel className="truncate">{usuario.email}</DropdownMenuLabel>
+              <DropdownMenuLabel className="tabular-nums">
+                Versão {versaoDoApp} <span className="text-muted-foreground">({commitDoApp})</span>
+              </DropdownMenuLabel>
             </DropdownMenuGroup>
             <DropdownMenuSeparator />
             <DropdownMenuItem onClick={() => sair.mutate()} disabled={sair.isPending}>
