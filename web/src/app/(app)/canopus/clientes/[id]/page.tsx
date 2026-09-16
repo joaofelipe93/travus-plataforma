@@ -36,7 +36,7 @@ export default function PaginaCliente() {
 
   return (
     <div className="flex flex-col gap-6">
-      <Link href="/clientes" className="text-sm text-muted-foreground hover:text-foreground">
+      <Link href="/canopus/clientes" className="text-sm text-muted-foreground hover:text-foreground">
         ← Clientes
       </Link>
 
@@ -110,7 +110,7 @@ function HistoricoLances({ lances, carregando, editavel }: { lances?: LanceClien
               <TableCell className="tabular-nums">{tagCota(l)}</TableCell>
               <TableCell className="tabular-nums">
                 {l.execucao_id ? (
-                  <Link className="hover:underline" href={`/execucoes/${l.execucao_id}`}>
+                  <Link className="hover:underline" href={`/canopus/execucoes/${l.execucao_id}`}>
                     {l.protocolo}
                   </Link>
                 ) : (
@@ -151,7 +151,7 @@ function useReimpressao() {
     // Sem enviar_drive, o PDF fica só na plataforma (dá para enviar ao Drive depois, no comprovante).
     mutationFn: (corpo: { cota_id: number; protocolo: string; enviar_drive?: boolean }) =>
       api<{ id: number }>("/execucoes/reimpressoes", { metodo: "POST", json: corpo }),
-    onSuccess: ({ id }) => router.push(`/execucoes/${id}`),
+    onSuccess: ({ id }) => router.push(`/canopus/execucoes/${id}`),
   });
 }
 

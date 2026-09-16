@@ -41,8 +41,8 @@ if [[ "$HSTS" == *max-age=31536000* ]]; then ok "HSTS em https://$APP/login"; el
 echo "== Sem sessão, barrado no gateway"
 esperar "https://$APP/api/cotas" 401 "$(codigo "https://$APP/api/cotas")"
 esperar "https://$API/cotas" 401 "$(codigo "https://$API/cotas")"
-LOCAL=$(curl "${K[@]}" -s -o /dev/null -m 15 -w '%{http_code} %{redirect_url}' "https://$APP/cotas")
-esperar "https://$APP/cotas (redireciona)" "302 https://$APP/login?proximo=%2Fcotas" "$LOCAL"
+LOCAL=$(curl "${K[@]}" -s -o /dev/null -m 15 -w '%{http_code} %{redirect_url}' "https://$APP/canopus/cotas")
+esperar "https://$APP/canopus/cotas (redireciona)" "302 https://$APP/login?proximo=%2Fcanopus%2Fcotas" "$LOCAL"
 esperar "rota interna do worker em $API" 401 "$(codigo -X POST "https://$API/internal/tarefas/proxima")"
 
 echo "== Notificador de check-in"

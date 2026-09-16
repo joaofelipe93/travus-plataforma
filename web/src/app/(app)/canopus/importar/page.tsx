@@ -87,7 +87,6 @@ export default function PaginaImportar() {
   if (!podeEditar(perfil)) {
     return (
       <div className="flex flex-col gap-4">
-        <h1 className="text-xl font-semibold tracking-tight">Importar planilha</h1>
         <Alert>
           <AlertDescription>
             Seu perfil ({perfil ? nomePerfil[perfil] : "—"}) permite só consultar. Peça a um operador ou administrador para importar a planilha.
@@ -100,7 +99,6 @@ export default function PaginaImportar() {
   return (
     <div className="flex flex-col gap-6">
       <div>
-        <h1 className="text-xl font-semibold tracking-tight">Importar planilha</h1>
         <p className="text-sm text-muted-foreground">
           Envie a planilha de clientes em CSV. Nada é gravado antes de você revisar a prévia e aplicar.
         </p>
@@ -111,7 +109,7 @@ export default function PaginaImportar() {
           <AlertTitle>Importação de {aplicada.arquivo} aplicada</AlertTitle>
           <AlertDescription>
             {resumirTotais(aplicada.totais)}.{" "}
-            <Link href="/cotas" className="underline">
+            <Link href="/canopus/cotas" className="underline">
               Ver cotas
             </Link>
           </AlertDescription>

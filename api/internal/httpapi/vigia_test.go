@@ -193,7 +193,7 @@ func TestVigiaNotificadorCheckin(t *testing.T) {
 	}
 	avancar(11 * time.Minute)
 	a := checkinAchados()
-	if w, ok := a["checkin-whatsapp"]; !ok || !strings.Contains(w.Titulo, "QR") || !strings.Contains(w.Detalhe, "app.teste/whatsapp") {
+	if w, ok := a["checkin-whatsapp"]; !ok || !strings.Contains(w.Titulo, "QR") || !strings.Contains(w.Detalhe, "app.teste/reservas/whatsapp") {
 		t.Fatalf("esperado alerta do QR: %+v", a)
 	}
 

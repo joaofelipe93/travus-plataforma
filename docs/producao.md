@@ -122,7 +122,7 @@ ssh -t travus@<ip> 'cd /opt/travus/atual && make usuario args="criar --email ana
 ssh -t travus@<ip> 'cd /opt/travus/atual && make alerta-teste'
 ```
 
-- **Planilha**: importe pela tela (`/importar`). A produção começa com o banco vazio.
+- **Planilha**: importe pela tela (Canopus → Importar planilha, `/canopus/importar`). A produção começa com o banco vazio.
 - **Google Drive** (opcional): preencha `GOOGLE_*` no `.env`, publique e importe o token:
   ```bash
   scp workers/canopus/token.json travus@<ip>:/opt/travus/atual/workers/canopus/token.json
@@ -146,7 +146,7 @@ O notificador (`workers/checkin-whatsapp`) sobe junto com a plataforma, desde o 
 
 Só com o ok do usuário, com a plataforma já no ar pela seção 5 e um usuário admin criado.
 
-1. **Parear** (admin, pela tela): `https://app.<domínio>/whatsapp` → aparece o QR. No celular do **chip dedicado** (o mesmo da `appairbnb`): WhatsApp → Configurações → Dispositivos conectados → Conectar dispositivo → escaneie. A tela mostra "conectado como +55 …". O aparelho novo aparece no celular como **Travus Plataforma**; o da `appairbnb` continua lá como **Check-in Notifier** (cada um tem a própria sessão, os dois funcionam ao mesmo tempo).
+1. **Parear** (admin, pela tela): `https://app.<domínio>/reservas/whatsapp` (Reservas → WhatsApp) → aparece o QR. No celular do **chip dedicado** (o mesmo da `appairbnb`): WhatsApp → Configurações → Dispositivos conectados → Conectar dispositivo → escaneie. A tela mostra "conectado como +55 …". O aparelho novo aparece no celular como **Travus Plataforma**; o da `appairbnb` continua lá como **Check-in Notifier** (cada um tem a própria sessão, os dois funcionam ao mesmo tempo).
 2. **Grupo**: "Escolher grupo" → o mesmo grupo que recebe as notificações hoje → "Usar este grupo". Se ele não aparece na lista, o número não participa do grupo.
 3. **Teste**: "Enviar mensagem de teste" (todos do grupo recebem; avise antes).
 4. **Token do webhook** (novo, diferente do da `appairbnb`):
@@ -171,7 +171,7 @@ Depois da migração:
 | Publicar | commit → `make deploy VM=travus@<ip>` (recusa com execução em andamento) |
 | Voltar uma versão | `make deploy-voltar VM=travus@<ip>`. **Migrações não são desfeitas**: se a versão nova mudou o banco, voltar pode não funcionar |
 | Logs | `ssh -t travus@<ip> 'cd /opt/travus/atual && make logs s=api'` (api, worker-canopus, checkin-whatsapp, traefik, backup…) |
-| WhatsApp do notificador | tela `https://app.<domínio>/whatsapp` (só admin): conexão, QR, grupo, teste, fila |
+| WhatsApp do notificador | tela `https://app.<domínio>/reservas/whatsapp` (só admin): conexão, QR, grupo, teste, fila |
 | Estado | `ssh travus@<ip> 'cd /opt/travus/atual && make ps'` |
 | Cópia do backup | `make backup-baixar VM=travus@<ip>` (semanal; vai para `deploy/backups/`, fora do git; tem dados de clientes) |
 | Testar a restauração | `ssh -t travus@<ip> 'cd /opt/travus/atual && make restaurar-teste'` (mensal) |

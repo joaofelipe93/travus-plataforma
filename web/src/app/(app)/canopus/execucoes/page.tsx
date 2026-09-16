@@ -26,11 +26,10 @@ export default function PaginaExecucoes() {
     <div className="flex flex-col gap-4">
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
-          <h1 className="text-xl font-semibold tracking-tight">Execuções</h1>
           <p className="text-sm text-muted-foreground">Dry-runs no Newcon: vão até a tela de credenciamento e não confirmam lance.</p>
         </div>
         {podeEditar(sessao.data?.usuario.perfil) && (
-          <Link href="/execucoes/nova" className={buttonVariants()}>
+          <Link href="/canopus/execucoes/nova" className={buttonVariants()}>
             Novo dry-run
           </Link>
         )}
@@ -72,7 +71,7 @@ export default function PaginaExecucoes() {
               {lista.map((e) => (
                 <TableRow key={e.id}>
                   <TableCell className="tabular-nums">
-                    <Link className="font-medium hover:underline" href={`/execucoes/${e.id}`}>
+                    <Link className="font-medium hover:underline" href={`/canopus/execucoes/${e.id}`}>
                       {e.id}
                     </Link>
                   </TableCell>

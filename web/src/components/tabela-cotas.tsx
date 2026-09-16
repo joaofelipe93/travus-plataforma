@@ -84,7 +84,7 @@ export function TabelaCotas({ cotas, carregando, editavel, mostrarCliente = true
               <TableRow key={c.id} className={c.ativa ? undefined : "text-muted-foreground"}>
                 {mostrarCliente && (
                   <TableCell className="font-medium">
-                    <Link className="hover:underline" href={`/clientes/${c.cliente_id}`}>
+                    <Link className="hover:underline" href={`/canopus/clientes/${c.cliente_id}`}>
                       {c.cliente_nome}
                     </Link>
                   </TableCell>

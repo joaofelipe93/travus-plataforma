@@ -22,7 +22,7 @@ export function Providers({ children }: { children: React.ReactNode }) {
     <QueryClientProvider client={cliente}>
       {children}
       {/* Embaixo: no alto ficaria por cima do menu do usuário. */}
-      <Toaster richColors position="bottom-right" />
+      <Toaster richColors theme="dark" position="bottom-right" />
     </QueryClientProvider>
   );
 }

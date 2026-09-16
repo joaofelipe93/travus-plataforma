@@ -34,6 +34,12 @@ const rotuloEstado: Record<EstadoWhatsapp, string> = {
   indisponivel: "notificador fora do ar",
 };
 
+// Mensagens da API vêm em minúscula e sem ponto final: aqui viram frase.
+function frase(texto: string) {
+  const t = texto.trim();
+  return t.charAt(0).toUpperCase() + t.slice(1) + (/[.!?]$/.test(t) ? "" : ".");
+}
+
 // "5511900000000" → "+55 11 90000-0000" (outros formatos só ganham o +).
 function formatarNumero(numero: string) {
   const br = /^55(\d{2})(\d{4,5})(\d{4})$/.exec(numero);
@@ -79,13 +85,6 @@ function Whatsapp() {
 
   return (
     <div className="flex max-w-3xl flex-col gap-6">
-      <div>
-        <h1 className="text-xl font-semibold tracking-tight">WhatsApp</h1>
-        <p className="text-sm text-muted-foreground">
-          Notificações de reservas e cancelamentos no grupo, enviadas pelo notificador de check-in.
-        </p>
-      </div>
-
       {situacao.isError ? (
         <Alert variant="destructive">
           <AlertDescription>{situacao.error.message}</AlertDescription>
@@ -131,8 +130,8 @@ function Conexao({ dados }: { dados: SituacaoWhatsapp }) {
       {estado === "indisponivel" && (
         <Alert variant="destructive">
           <AlertDescription>
-            {dados.motivo ?? "O notificador de check-in não respondeu."} Os webhooks continuam sendo recebidos e as mensagens
-            esperam na fila quando o serviço voltar.
+            {frase(dados.motivo ?? "O notificador de check-in não respondeu.")} Enquanto ele não responder, reservas novas podem
+            não ser avisadas no grupo.
           </AlertDescription>
         </Alert>
       )}

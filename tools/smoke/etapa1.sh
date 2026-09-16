@@ -65,8 +65,8 @@ echo "== Sem sessão, barrado no gateway"
 esperar "GET app.localhost/api/cotas" 401 "$(codigo "$APP/api/cotas")"
 esperar "GET api.localhost/cotas" 401 "$(codigo "$API/cotas")"
 esperar "GET app.localhost/api/auth/sessao" 401 "$(codigo "$APP/api/auth/sessao")"
-LOCAL=$(curl -s -o /dev/null -w '%{http_code} %{redirect_url}' "$APP/cotas")
-esperar "GET app.localhost/cotas (redireciona)" "302 $APP/login?proximo=%2Fcotas" "$LOCAL"
+LOCAL=$(curl -s -o /dev/null -w '%{http_code} %{redirect_url}' "$APP/canopus/cotas")
+esperar "GET app.localhost/canopus/cotas (redireciona)" "302 $APP/login?proximo=%2Fcanopus%2Fcotas" "$LOCAL"
 esperar "Cabeçalho vindo do cliente não fura a barreira" 401 "$(codigo -H 'X-Usuario-Perfil: admin' "$APP/api/cotas")"
 
 echo "== Login"
@@ -82,7 +82,7 @@ OPERADOR_COOKIE=$COOKIE OPERADOR_CSRF=$CSRF
 
 esperar "GET app.localhost/api/auth/sessao (operador)" 200 "$(codigo -H "Cookie: $OPERADOR_COOKIE" "$APP/api/auth/sessao")"
 esperar "GET app.localhost/api/cotas (operador)" 200 "$(codigo -H "Cookie: $OPERADOR_COOKIE" "$APP/api/cotas")"
-esperar "GET app.localhost/cotas (página, operador)" 200 "$(codigo -H "Cookie: $OPERADOR_COOKIE" "$APP/cotas")"
+esperar "GET app.localhost/canopus/cotas (página, operador)" 200 "$(codigo -H "Cookie: $OPERADOR_COOKIE" "$APP/canopus/cotas")"
 
 echo "== CSRF e perfis"
 esperar "POST importação sem token CSRF" 403 "$(codigo -H "Cookie: $OPERADOR_COOKIE" -H "Origin: $APP" -F "arquivo=@$PLANILHA" "$APP/api/importacoes")"

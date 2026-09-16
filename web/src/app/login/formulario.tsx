@@ -13,7 +13,7 @@ import type { Sessao } from "@/lib/tipos";
 // Só caminhos locais: evita usar o login para mandar alguém para outro site.
 function destinoSeguro(proximo: string | null) {
   if (!proximo || !proximo.startsWith("/") || proximo.startsWith("//") || proximo.startsWith("/\\") || proximo.startsWith("/login")) {
-    return "/cotas";
+    return "/canopus/execucoes";
   }
   return proximo;
 }
@@ -56,7 +56,7 @@ export function FormularioLogin() {
           <AlertDescription>{entrar.error.message}</AlertDescription>
         </Alert>
       )}
-      <Button type="submit" disabled={entrar.isPending || entrar.isSuccess}>
+      <Button type="submit" size="lg" className="mt-2" disabled={entrar.isPending || entrar.isSuccess}>
         {entrar.isPending || entrar.isSuccess ? "Entrando…" : "Entrar"}
       </Button>
     </form>

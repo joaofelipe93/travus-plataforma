@@ -7,10 +7,15 @@
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  /* Fontes do sistema: o build não depende de baixar fontes do Google. */
-  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  /* Fontes da marca, empacotadas (@fontsource via next/font/local): o build não baixa nada do
+     Google. Inter no texto; Poppins só no nome do serviço e nos títulos. */
+  --font-sans: var(--fonte-inter), ui-sans-serif, system-ui, sans-serif;
   --font-mono: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
-  --font-heading: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font-heading: var(--fonte-poppins), var(--fonte-inter), ui-sans-serif, system-ui, sans-serif;
+  --color-ouro: var(--ouro);
+  --color-ouro-forte: var(--ouro-forte);
+  --color-sucesso: var(--sucesso);
+  --color-aviso: var(--aviso);
   --color-sidebar-ring: var(--sidebar-ring);
   --color-sidebar-border: var(--sidebar-border);
   --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
@@ -54,72 +59,53 @@ body {
 }
 
 :root {
-  --background: oklch(1 0 0);
-  --foreground: oklch(0.145 0 0);
-  --card: oklch(1 0 0);
-  --card-foreground: oklch(0.145 0 0);
-  --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.145 0 0);
-  --primary: oklch(0.205 0 0);
-  --primary-foreground: oklch(0.985 0 0);
-  --secondary: oklch(0.97 0 0);
-  --secondary-foreground: oklch(0.205 0 0);
-  --muted: oklch(0.97 0 0);
-  --muted-foreground: oklch(0.556 0 0);
-  --accent: oklch(0.97 0 0);
-  --accent-foreground: oklch(0.205 0 0);
-  --destructive: oklch(0.577 0.245 27.325);
-  --border: oklch(0.922 0 0);
-  --input: oklch(0.922 0 0);
-  --ring: oklch(0.708 0 0);
-  --chart-1: oklch(0.87 0 0);
-  --chart-2: oklch(0.556 0 0);
-  --chart-3: oklch(0.439 0 0);
-  --chart-4: oklch(0.371 0 0);
-  --chart-5: oklch(0.269 0 0);
-  --radius: 0.625rem;
-  --sidebar: oklch(0.985 0 0);
-  --sidebar-foreground: oklch(0.145 0 0);
-  --sidebar-primary: oklch(0.205 0 0);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.97 0 0);
-  --sidebar-accent-foreground: oklch(0.205 0 0);
-  --sidebar-border: oklch(0.922 0 0);
-  --sidebar-ring: oklch(0.708 0 0);
-}
+  /* Tema único, escuro, com as cores da marca Travus Capital (travuscapital.com.br): azul-noite
+     e o ouro do logo. O ouro é reservado: marca, serviço ativo, botão principal e foco. */
+  --noite: #11121d;
+  --painel: #1a1b2b;
+  --painel-alto: #222437;
+  --linha: #2b2d42;
+  --texto: #e6e7ee;
+  --texto-apagado: #9496ab;
+  --ouro: #d6b23e;
+  --ouro-forte: #e8c547;
+  --sucesso: #5fbf8a;
+  --aviso: #e0a03a;
+  --erro: #e5675a;
 
-.dark {
-  --background: oklch(0.145 0 0);
-  --foreground: oklch(0.985 0 0);
-  --card: oklch(0.205 0 0);
-  --card-foreground: oklch(0.985 0 0);
-  --popover: oklch(0.205 0 0);
-  --popover-foreground: oklch(0.985 0 0);
-  --primary: oklch(0.922 0 0);
-  --primary-foreground: oklch(0.205 0 0);
-  --secondary: oklch(0.269 0 0);
-  --secondary-foreground: oklch(0.985 0 0);
-  --muted: oklch(0.269 0 0);
-  --muted-foreground: oklch(0.708 0 0);
-  --accent: oklch(0.269 0 0);
-  --accent-foreground: oklch(0.985 0 0);
-  --destructive: oklch(0.704 0.191 22.216);
-  --border: oklch(1 0 0 / 10%);
-  --input: oklch(1 0 0 / 15%);
-  --ring: oklch(0.556 0 0);
-  --chart-1: oklch(0.87 0 0);
-  --chart-2: oklch(0.556 0 0);
-  --chart-3: oklch(0.439 0 0);
-  --chart-4: oklch(0.371 0 0);
-  --chart-5: oklch(0.269 0 0);
-  --sidebar: oklch(0.205 0 0);
-  --sidebar-foreground: oklch(0.985 0 0);
-  --sidebar-primary: oklch(0.488 0.243 264.376);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.269 0 0);
-  --sidebar-accent-foreground: oklch(0.985 0 0);
-  --sidebar-border: oklch(1 0 0 / 10%);
-  --sidebar-ring: oklch(0.556 0 0);
+  --background: var(--noite);
+  --foreground: var(--texto);
+  --card: var(--painel);
+  --card-foreground: var(--texto);
+  --popover: var(--painel-alto);
+  --popover-foreground: var(--texto);
+  --primary: var(--ouro);
+  --primary-foreground: var(--noite);
+  --secondary: var(--painel-alto);
+  --secondary-foreground: var(--texto);
+  --muted: var(--painel);
+  --muted-foreground: var(--texto-apagado);
+  --accent: var(--painel-alto);
+  --accent-foreground: var(--texto);
+  --destructive: var(--erro);
+  --border: var(--linha);
+  --input: #34364f;
+  --ring: var(--ouro);
+  --chart-1: #d6b23e;
+  --chart-2: #6f9fd8;
+  --chart-3: #5fbf8a;
+  --chart-4: #b48be0;
+  --chart-5: #e0a03a;
+  --radius: 0.5rem;
+  --sidebar: #161725;
+  --sidebar-foreground: var(--texto);
+  --sidebar-primary: var(--ouro);
+  --sidebar-primary-foreground: var(--noite);
+  --sidebar-accent: var(--painel-alto);
+  --sidebar-accent-foreground: var(--texto);
+  --sidebar-border: var(--linha);
+  --sidebar-ring: var(--ouro);
+  color-scheme: dark;
 }
 
 @layer base {
@@ -128,6 +114,21 @@ body {
   }
   body {
     @apply bg-background text-foreground;
+    font-feature-settings: "cv11", "ss01";
+  }
+  /* Números de cotas, protocolos e contagens alinham em colunas. */
+  td, .tabular-nums {
+    font-variant-numeric: tabular-nums;
+  }
+  h1, h2, h3 {
+    font-family: var(--font-heading);
+    letter-spacing: -0.01em;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+      animation-duration: 0.01ms !important;
+      transition-duration: 0.01ms !important;
+    }
   }
   html {
     @apply font-sans;

@@ -1,7 +1,7 @@
 "use client";
 
 import { Button } from "@/components/ui/button";
-import { Cabecalho } from "@/components/cabecalho";
+import { Trilho } from "@/components/trilho";
 import { ErroApi } from "@/lib/api";
 import { useSessao } from "@/lib/sessao";
 
@@ -27,10 +27,11 @@ export default function LayoutApp({ children }: { children: React.ReactNode }) {
     );
   }
 
+  // Trilho de serviços à esquerda; cada serviço desenha o próprio cabeçalho e abas no layout dele.
   return (
-    <>
-      <Cabecalho usuario={sessao.data.usuario} />
-      <main className="mx-auto w-full max-w-6xl flex-1 px-4 py-6">{children}</main>
-    </>
+    <div className="flex min-h-svh flex-1">
+      <Trilho usuario={sessao.data.usuario} />
+      {children}
+    </div>
   );
 }

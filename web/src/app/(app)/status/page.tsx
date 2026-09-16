@@ -51,7 +51,7 @@ export default async function PaginaStatus() {
   const tudoOk = consulta.ok && consulta.httpStatus === 200 && consulta.corpo.via_gateway;
 
   return (
-    <div className="flex max-w-2xl flex-col gap-6">
+    <main className="flex max-w-2xl flex-1 flex-col gap-6 px-8 py-8">
       <div>
         <h1 className="text-xl font-semibold tracking-tight">Status da plataforma</h1>
         <p className="text-sm text-muted-foreground">Consulta feita agora, pelo servidor do app, passando pelo gateway.</p>
@@ -89,6 +89,6 @@ export default async function PaginaStatus() {
           )}
         </dl>
       </section>
-    </div>
+    </main>
   );
 }

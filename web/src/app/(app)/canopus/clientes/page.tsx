@@ -25,7 +25,6 @@ export default function PaginaClientes() {
   return (
     <div className="flex flex-col gap-4">
       <div>
-        <h1 className="text-xl font-semibold tracking-tight">Clientes</h1>
         <p className="text-sm text-muted-foreground">{clientes.isSuccess ? `${lista.length} cliente(s)` : " "}</p>
       </div>
 
@@ -65,7 +64,7 @@ export default function PaginaClientes() {
               {lista.map((c) => (
                 <TableRow key={c.id}>
                   <TableCell className="font-medium">
-                    <Link className="hover:underline" href={`/clientes/${c.id}`}>
+                    <Link className="hover:underline" href={`/canopus/clientes/${c.id}`}>
                       {c.nome}
                     </Link>
                   </TableCell>

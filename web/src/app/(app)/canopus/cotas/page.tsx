@@ -47,7 +47,6 @@ export default function PaginaCotas() {
   return (
     <div className="flex flex-col gap-4">
       <div>
-        <h1 className="text-xl font-semibold tracking-tight">Cotas</h1>
         <p className="text-sm text-muted-foreground">
           {lista ? `${lista.length} cota(s)${filtrando ? " com os filtros aplicados" : ""}, ${lista.filter((c) => c.ativa).length} ativa(s)` : " "}
         </p>
