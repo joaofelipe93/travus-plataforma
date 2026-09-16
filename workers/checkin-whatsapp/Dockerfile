@@ -1,0 +1,42 @@
+# syntax=docker/dockerfile:1
+# Notificador de check-in: webhook de reserva → fila (SQLite) → grupo do WhatsApp (Baileys).
+# Um processo só: não escale (duas conexões na mesma sessão do Baileys derrubam uma à outra e
+# cada processo tem o próprio laço da fila, o que duplicaria as mensagens no grupo).
+
+# Dependências: no `npm ci` o better-sqlite3 compila o módulo nativo (node-gyp: python3, make,
+# g++) e o libsignal do baileys vem do GitHub (git). Nada disso vai para a imagem final.
+FROM node:24.21.0-bookworm-slim AS deps
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends python3 make g++ git ca-certificates \
+ && rm -rf /var/lib/apt/lists/*
+WORKDIR /app
+COPY package.json package-lock.json ./
+RUN npm ci --no-audit --no-fund
+
+FROM deps AS build
+COPY tsconfig.json ./
+COPY src ./src
+RUN npm run build && npm prune --omit=dev --no-audit --no-fund
+
+FROM node:24.21.0-bookworm-slim
+WORKDIR /app
+ENV NODE_ENV=production \
+    HOST=0.0.0.0 \
+    PORT=3000 \
+    LOG_FORMAT=json \
+    AUTH_DIR=/dados/auth_info \
+    DB_PATH=/dados/app.db
+COPY --from=build /app/package.json ./
+COPY --from=build /app/node_modules ./node_modules
+COPY --from=build /app/dist ./dist
+
+# /dados (volume): sessão do WhatsApp (credenciais do número pareado) e o banco. Nunca na imagem.
+RUN mkdir -p /dados && chown node:node /dados
+USER node
+VOLUME ["/dados"]
+EXPOSE 3000
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
+  CMD ["node", "-e", "fetch('http://127.0.0.1:3000/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+
+CMD ["node", "dist/index.js"]

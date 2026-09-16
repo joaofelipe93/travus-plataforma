@@ -27,6 +27,9 @@ tools/teste-ip-vm/pacotes-instalados-pelo-teste.txt
 # Dados locais do docker compose (volumes montados, saídas do worker)
 deploy/data/
 
+# Notificador de check-in fora do container: sessão do WhatsApp (credenciais) e banco
+workers/checkin-whatsapp/data/
+
 # Backups do Postgres (make backup, make backup-baixar): dados de clientes
 deploy/backups/
 *.dump
