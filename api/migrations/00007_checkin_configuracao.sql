@@ -12,3 +12,4 @@ GRANT SELECT, INSERT, UPDATE ON checkin.configuracao TO checkin;
 
 -- +goose Down
 DROP TABLE checkin.configuracao;
+-- teste da CI: editar migração existente deve reprovar
