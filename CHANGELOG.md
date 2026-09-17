@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.0](https://github.com/joaofelipe93/travus-plataforma/compare/v0.3.0...v0.4.0) (2026-09-17)
+
+
+### Novidades
+
+* **web:** tela Meu perfil com dados de contato e acessos pessoais ([#13](https://github.com/joaofelipe93/travus-plataforma/issues/13)) ([4c9bea9](https://github.com/joaofelipe93/travus-plataforma/commit/4c9bea9a198be20ed6edd66790193c9d01fd9e26))
+
 ## [0.3.0](https://github.com/joaofelipe93/travus-plataforma/compare/v0.2.1...v0.3.0) (2026-09-17)
 
 
