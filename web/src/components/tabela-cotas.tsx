@@ -19,6 +19,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Switch } from "@/components/ui/switch";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { api } from "@/lib/api";
+import { desfazer, pausarConsultasDeCota, trocarCotaNoCache } from "@/lib/cache-cadastro";
 import { nomeModalidade, tagCota } from "@/lib/sessao";
 import type { Cota } from "@/lib/tipos";
 
@@ -30,22 +31,37 @@ type Props = {
   mensagemVazia: string;
   /** Botões do CRM (editar, excluir) numa coluna à direita, quando a tela oferece. */
   acoes?: (cota: Cota) => React.ReactNode;
+  /** Com aoOrdenar, os cabeçalhos viram botões de ordenação. */
+  ordem?: Ordem;
+  aoOrdenar?: (campo: CampoOrdem) => void;
 };
 
-export function TabelaCotas({ cotas, carregando, editavel, mostrarCliente = true, mensagemVazia, acoes }: Props) {
+export type CampoOrdem = "cliente_nome" | "grupo" | "cota" | "tipo_consorcio" | "modalidade_padrao" | "ativa";
+export type Ordem = { campo: CampoOrdem; crescente: boolean };
+
+export function TabelaCotas({ cotas, carregando, editavel, mostrarCliente = true, mensagemVazia, acoes, ordem, aoOrdenar }: Props) {
   const queryClient = useQueryClient();
   const [alvo, setAlvo] = useState<Cota | null>(null);
 
   const alterar = useMutation({
     mutationFn: (c: Cota) => api<{ id: number; ativa: boolean }>(`/cotas/${c.id}`, { metodo: "PATCH", json: { ativa: !c.ativa } }),
-    onSuccess: (r, c) => {
-      toast.success(`Cota ${tagCota(c)} ${r.ativa ? "ativada" : "desativada"}`);
+    // A linha muda na hora; se a API recusar, volta ao que era.
+    onMutate: async (c) => {
       setAlvo(null);
+      const anterior = await pausarConsultasDeCota(queryClient);
+      trocarCotaNoCache(queryClient, c.id, (atual) => ({ ...atual, ativa: !c.ativa }));
+      return { anterior };
+    },
+    onSuccess: (r, c) => toast.success(`Cota ${tagCota(c)} ${r.ativa ? "ativada" : "desativada"}`),
+    onError: (e, _c, contexto) => {
+      desfazer(queryClient, contexto?.anterior);
+      toast.error(e.message);
+    },
+    onSettled: () => {
       for (const chave of ["cotas", "clientes", "cliente"]) {
         queryClient.invalidateQueries({ queryKey: [chave] });
       }
     },
-    onError: (e) => toast.error(e.message),
   });
 
   const colunas = 7 + (mostrarCliente ? 1 : 0) + (acoes ? 1 : 0);
@@ -56,13 +72,27 @@ export function TabelaCotas({ cotas, carregando, editavel, mostrarCliente = true
         <Table>
           <TableHeader>
             <TableRow>
-              {mostrarCliente && <TableHead>Cliente</TableHead>}
-              <TableHead>Grupo</TableHead>
-              <TableHead>Cota</TableHead>
+              {mostrarCliente && (
+                <Coluna campo="cliente_nome" ordem={ordem} aoOrdenar={aoOrdenar}>
+                  Cliente
+                </Coluna>
+              )}
+              <Coluna campo="grupo" ordem={ordem} aoOrdenar={aoOrdenar}>
+                Grupo
+              </Coluna>
+              <Coluna campo="cota" ordem={ordem} aoOrdenar={aoOrdenar}>
+                Cota
+              </Coluna>
               <TableHead>Versão</TableHead>
-              <TableHead>Tipo</TableHead>
-              <TableHead>Modalidade</TableHead>
-              <TableHead>Situação</TableHead>
+              <Coluna campo="tipo_consorcio" ordem={ordem} aoOrdenar={aoOrdenar}>
+                Tipo
+              </Coluna>
+              <Coluna campo="modalidade_padrao" ordem={ordem} aoOrdenar={aoOrdenar}>
+                Modalidade
+              </Coluna>
+              <Coluna campo="ativa" ordem={ordem} aoOrdenar={aoOrdenar}>
+                Situação
+              </Coluna>
               <TableHead className="text-right">{editavel ? "Ativa" : ""}</TableHead>
               {acoes && <TableHead />}
             </TableRow>
@@ -119,7 +149,7 @@ export function TabelaCotas({ cotas, carregando, editavel, mostrarCliente = true
       <AlertDialog
         open={alvo !== null}
         onOpenChange={(aberto) => {
-          if (!aberto && !alterar.isPending) setAlvo(null);
+          if (!aberto) setAlvo(null);
         }}
       >
         <AlertDialogContent>
@@ -135,17 +165,47 @@ export function TabelaCotas({ cotas, carregando, editavel, mostrarCliente = true
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel disabled={alterar.isPending}>Cancelar</AlertDialogCancel>
-            <AlertDialogAction
-              variant={alvo?.ativa ? "destructive" : "default"}
-              disabled={alterar.isPending}
-              onClick={() => alvo && alterar.mutate(alvo)}
-            >
-              {alterar.isPending ? "Salvando…" : alvo?.ativa ? "Desativar" : "Ativar"}
+            <AlertDialogCancel>Cancelar</AlertDialogCancel>
+            <AlertDialogAction variant={alvo?.ativa ? "destructive" : "default"} onClick={() => alvo && alterar.mutate(alvo)}>
+              {alvo?.ativa ? "Desativar" : "Ativar"}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
     </>
+  );
+}
+
+/** Coluna que ordena ao ser clicada. Sem aoOrdenar, é um cabeçalho comum. */
+function Coluna({
+  campo,
+  ordem,
+  aoOrdenar,
+  className,
+  children,
+}: {
+  campo: CampoOrdem;
+  ordem?: Ordem;
+  aoOrdenar?: (campo: CampoOrdem) => void;
+  className?: string;
+  children: React.ReactNode;
+}) {
+  if (!aoOrdenar) {
+    return <TableHead className={className}>{children}</TableHead>;
+  }
+  const ativa = ordem?.campo === campo;
+  return (
+    <TableHead className={className} aria-sort={ativa ? (ordem.crescente ? "ascending" : "descending") : "none"}>
+      <button
+        type="button"
+        onClick={() => aoOrdenar(campo)}
+        className="-mx-1 inline-flex items-center gap-1 rounded px-1 transition-colors outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
+      >
+        {children}
+        <span aria-hidden className={ativa ? "text-foreground" : "text-muted-foreground/40"}>
+          {ativa && !ordem.crescente ? "\u2193" : "\u2191"}
+        </span>
+      </button>
+    </TableHead>
   );
 }

@@ -70,13 +70,16 @@ export function CamposCliente({
   valor,
   aoMudar,
   prefixo = "cliente",
+  colunas = 3,
 }: {
   valor: ClienteFormulario;
   aoMudar: (v: ClienteFormulario) => void;
   prefixo?: string;
+  /** 1 no painel lateral, 3 numa página larga. */
+  colunas?: 1 | 3;
 }) {
   return (
-    <div className="grid gap-4 sm:grid-cols-3">
+    <div className={colunas === 1 ? "grid gap-4" : "grid gap-4 sm:grid-cols-3"}>
       <Campo id={`${prefixo}-nome`} rotulo="Nome">
         <Input
           id={`${prefixo}-nome`}
@@ -115,16 +118,19 @@ export function CamposCota({
   aoMudar,
   prefixo,
   travarIdentidade = false,
+  colunas = 4,
 }: {
   valor: CotaFormulario;
   aoMudar: (v: CotaFormulario) => void;
   prefixo: string;
   /** Cota com lance ou execução: a API recusa mudar administradora, grupo, cota e versão. */
   travarIdentidade?: boolean;
+  /** 2 no painel lateral, 4 numa página larga. */
+  colunas?: 2 | 4;
 }) {
   const numero = (texto: string) => (texto.trim() === "" ? null : Number(texto));
   return (
-    <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+    <div className={colunas === 2 ? "grid gap-4 sm:grid-cols-2" : "grid gap-4 sm:grid-cols-2 lg:grid-cols-4"}>
       <Campo id={`${prefixo}-grupo`} rotulo="Grupo" dica="Só números; os zeros à esquerda entram sozinhos.">
         <Input
           id={`${prefixo}-grupo`}
