@@ -156,6 +156,14 @@ func (s *Servidor) Rotas() http.Handler {
 	mux.Handle("GET /auth/sessao", s.autenticado(s.sessao))
 	mux.Handle("POST /auth/logout", s.autenticado(s.logout))
 
+	// Meu perfil: dados de contato e credenciais pessoais (perfil.go). Todo perfil mexe nos
+	// próprios dados; o panorama de quem já cadastrou o quê é só do admin.
+	mux.Handle("GET /perfil", s.autenticado(s.meuPerfil))
+	mux.Handle("PATCH /perfil", s.autenticado(s.atualizarMeuPerfil))
+	mux.Handle("PUT /perfil/credenciais/{credencial}", s.autenticado(s.gravarMinhaCredencial))
+	mux.Handle("DELETE /perfil/credenciais/{credencial}", s.autenticado(s.apagarMinhaCredencial))
+	mux.Handle("GET /credenciais", s.autenticado(exigirPerfil(s.panoramaCredenciais, admins...)))
+
 	mux.Handle("GET /clientes", s.autenticado(s.listarClientes))
 	mux.Handle("GET /clientes/{id}", s.autenticado(s.buscarCliente))
 	mux.Handle("GET /cotas", s.autenticado(s.listarCotas))

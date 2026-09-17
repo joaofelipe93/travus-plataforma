@@ -147,6 +147,7 @@ merge do PR "chore: versão X.Y.Z" → tag vX.Y.Z + release → workflow Deploy:
     - `whatsapp.go` + `internal/checkin` (cliente): tela WhatsApp, **só admin**, com auditoria. `GET /integracoes/whatsapp` (estado, número, QR, grupo, fila; notificador fora do ar vira `indisponivel` com 200), `GET …/grupos`, `PUT …/grupo`, `POST …/teste`, `POST …/desconectar` (exige `"confirmar": true`). Repassa ao notificador pela rede interna com `CHECKIN_ADMIN_TOKEN` (`CHECKIN_URL`); o navegador nunca vê o token.
     - `vigia.go`: a cada 5 min confere banco, contato do worker (10 min), fila parada, cota em `erro_apos_confirmar` (24 h), Drive, backup (26 h, erro), disco (80%), certificado (14 dias) e, com `VIGIA_CHECKIN=true` (produção), o notificador (sem resposta ou WhatsApp fora há 10 min, sem grupo, mensagens que desistiram, fila parada); manda e-mail só quando muda (novos, lembrete a cada 12 h, resolvidos), sem nome de cliente, e faz ping no monitor externo (`VIGIA_PING_URL`). `internal/alerta`: SMTP com STARTTLS obrigatório (ou TLS na 465). Sem `SMTP_HOST`, os alertas só vão para o log.
     - `sse.go`: `GET /execucoes/{id}/eventos` (SSE, `Last-Event-ID`, `event: fim`); `Hub` com `LISTEN execucao_eventos` (trigger no insert).
+    - `perfil.go` + `internal/credenciais`: "Meu perfil" (ver "Perfil e credenciais pessoais"). `GET /perfil` (dados, catálogo e o que a pessoa já cadastrou), `PATCH /perfil` (nome, telefone, cargo, observações), `PUT`/`DELETE /perfil/credenciais/{credencial}`, `GET /credenciais` (**só admin**: quem tem e quem falta). Auditoria sem valores (`perfil_atualizado`, `credencial_gravada`, `credencial_removida`).
   - `internal/importacao`: `LerPlanilha` porta as regras do `workers/canopus/src/csv.js` (teste de paridade contra o csv.js original em `testdata/paridade`); `Planejar` compara com o cadastro; aplicar recalcula a prévia na transação e recusa se o cadastro mudou.
   - `internal/testedb`: testes de integração (pulados sem `TEST_DATABASE_URL`).
   - `cmd/api`: `serve`, `migrate up|down|status`, `usuario …`, `google importar-token|status`, `alerta testar`, `healthcheck`. Screenshots vencidos (30 dias) são apagados de hora em hora; PDFs de comprovante não expiram.
@@ -177,6 +178,15 @@ merge do PR "chore: versão X.Y.Z" → tag vX.Y.Z + release → workflow Deploy:
 | `leitura` | ver clientes, cotas, importações, execuções, revisões e comprovantes |
 | `operador` | + importar planilha, ativar/desativar cota, criar e cancelar dry-run, pedir reimpressão de comprovante, enviar comprovante ao Drive |
 | `admin` | tudo do operador + **aprovar lance real**, ver a situação do Google Drive e **gerenciar o WhatsApp do notificador** (QR, grupo, teste, desconectar) |
+
+Qualquer perfil cuida do **próprio** perfil (dados de contato e credenciais pessoais); só o admin vê o panorama de quem já cadastrou cada credencial.
+
+## Perfil e credenciais pessoais
+
+- **Dados de contato** em `usuarios` (`telefone`, `cargo`, `observacoes`, migração 00008): servem para saber a quem recorrer. Cada pessoa edita só os seus. **E-mail e perfil não se editam pela tela**: o e-mail é o login e o perfil é decisão de admin (`make usuario`). Criar, desativar e trocar senha continuam no terminal.
+- **Credenciais pessoais** em `credenciais_usuario`: o token de cada pessoa num serviço de terceiros (ex.: Trello), para o serviço agir em nome dela. O que existe está no catálogo em `api/internal/credenciais` (id, nome, o que é, como obter, campos) — **credencial nova = uma entrada lá**, e a tela e a validação saem dela.
+- Os valores vão cifrados com AES-256-GCM (`CHAVE_CRIPTOGRAFIA`, mesmo cofre do token do Google) no contexto `credencial:<usuario_id>:<credencial>`: o que está gravado para uma pessoa não decifra no lugar do de outra. **O valor nunca volta ao navegador nem entra na auditoria**: a tela mostra só a dica (últimos 4 caracteres do campo principal) e as datas. Sem `CHAVE_CRIPTOGRAFIA` a API recusa gravar (503).
+- Um serviço usa `credenciais.Ler(ctx, q, cofre, usuarioID, "trello")`; `ErrNaoCadastrada` é o caso normal de "o operador ainda não cadastrou" e vira um aviso pedindo o token, não um erro.
 
 ## Regras da importação
 

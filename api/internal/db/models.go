@@ -141,6 +141,15 @@ type Cota struct {
 	AtualizadoEm     time.Time
 }
 
+type CredenciaisUsuario struct {
+	UsuarioID     int64
+	Credencial    string
+	DadosCifrados []byte
+	Dica          string
+	CriadoEm      time.Time
+	AtualizadoEm  time.Time
+}
+
 type ExecucaoCota struct {
 	ID                     int64
 	ExecucaoID             int64
@@ -254,4 +263,7 @@ type Usuario struct {
 	Ativo        bool
 	CriadoEm     time.Time
 	AtualizadoEm time.Time
+	Telefone     *string
+	Cargo        *string
+	Observacoes  *string
 }
