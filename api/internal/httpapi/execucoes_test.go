@@ -11,7 +11,6 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"strings"
 	"testing"
 	"time"
@@ -69,19 +68,14 @@ type detalheExecucao struct {
 	Cotas  []cotaExecucaoJSON `json:"cotas"`
 }
 
-// cenarioExecucoes: operador logado, 4 cotas importadas da planilha fictícia e os dois handlers.
+// cenarioExecucoes: operador logado, 4 cotas fictícias cadastradas pelo CRM e os dois handlers.
 func cenarioExecucoes(t *testing.T) (*Servidor, *navegador, []cotaJSON, http.Handler) {
 	t.Helper()
 	s := novoServidorTeste(t)
 	h := s.Rotas()
 	criarUsuario(t, s, "operador@exemplo.com", db.PerfilUsuarioOperador)
 	n, _ := entrar(t, h, "operador@exemplo.com", senhaTeste)
-	planilha, err := os.ReadFile("../importacao/testdata/paridade/01-planilha-clientes.csv")
-	if err != nil {
-		t.Fatal(err)
-	}
-	imp := decodificar[importacaoJSON](t, n.enviarPlanilha("clientes.csv", planilha))
-	esperarStatus(t, n.enviar(http.MethodPost, fmt.Sprintf("/importacoes/%d/aplicar", imp.ID), nil, ""), http.StatusOK, "aplicar planilha")
+	cadastroFicticio(t, n)
 	cotas := decodificar[struct{ Cotas []cotaJSON }](t, n.req(http.MethodGet, "/cotas", nil, nil)).Cotas
 	return s, n, cotas, s.RotasInternas()
 }

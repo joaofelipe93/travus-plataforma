@@ -28,9 +28,11 @@ type Props = {
   editavel: boolean;
   mostrarCliente?: boolean;
   mensagemVazia: string;
+  /** Botões do CRM (editar, excluir) numa coluna à direita, quando a tela oferece. */
+  acoes?: (cota: Cota) => React.ReactNode;
 };
 
-export function TabelaCotas({ cotas, carregando, editavel, mostrarCliente = true, mensagemVazia }: Props) {
+export function TabelaCotas({ cotas, carregando, editavel, mostrarCliente = true, mensagemVazia, acoes }: Props) {
   const queryClient = useQueryClient();
   const [alvo, setAlvo] = useState<Cota | null>(null);
 
@@ -46,7 +48,7 @@ export function TabelaCotas({ cotas, carregando, editavel, mostrarCliente = true
     onError: (e) => toast.error(e.message),
   });
 
-  const colunas = 7 + (mostrarCliente ? 1 : 0);
+  const colunas = 7 + (mostrarCliente ? 1 : 0) + (acoes ? 1 : 0);
 
   return (
     <>
@@ -62,6 +64,7 @@ export function TabelaCotas({ cotas, carregando, editavel, mostrarCliente = true
               <TableHead>Modalidade</TableHead>
               <TableHead>Situação</TableHead>
               <TableHead className="text-right">{editavel ? "Ativa" : ""}</TableHead>
+              {acoes && <TableHead />}
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -106,6 +109,7 @@ export function TabelaCotas({ cotas, carregando, editavel, mostrarCliente = true
                     />
                   )}
                 </TableCell>
+                {acoes && <TableCell className="text-right whitespace-nowrap">{acoes(c)}</TableCell>}
               </TableRow>
             ))}
           </TableBody>

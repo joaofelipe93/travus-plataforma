@@ -100,7 +100,7 @@ func TestHealthSoAceitaGET(t *testing.T) {
 
 func TestRotasProtegidasSemCookie(t *testing.T) {
 	h := servidorSemBanco(nil).Rotas()
-	for _, rota := range []string{"GET /auth/sessao", "GET /cotas", "GET /clientes", "POST /importacoes", "PATCH /cotas/1"} {
+	for _, rota := range []string{"GET /auth/sessao", "GET /cotas", "GET /clientes", "POST /clientes", "PATCH /cotas/1"} {
 		metodo, caminho, _ := cortar(rota)
 		rec := httptest.NewRecorder()
 		h.ServeHTTP(rec, httptest.NewRequest(metodo, caminho, nil))

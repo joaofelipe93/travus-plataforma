@@ -128,7 +128,7 @@ export default function PaginaNovaExecucao() {
             {cotas.isSuccess && visiveis.length === 0 && (
               <TableRow>
                 <TableCell colSpan={5} className="py-8 text-center text-muted-foreground">
-                  {todas.length ? "Nenhuma cota com esse filtro." : "Nenhuma cota ativa. Importe a planilha ou ative cotas."}
+                  {todas.length ? "Nenhuma cota com esse filtro." : "Nenhuma cota ativa. Cadastre cotas no cliente ou ative as que estão inativas."}
                 </TableCell>
               </TableRow>
             )}

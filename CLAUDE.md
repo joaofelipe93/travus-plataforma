@@ -138,7 +138,7 @@ merge do PR "chore: versão X.Y.Z" → tag vX.Y.Z + release → workflow Deploy:
   - O Traefik tem os aliases `api.localhost`/`app.localhost` na rede `borda` (o Next.js no servidor chama a API pelo gateway). Ele leva alguns segundos para ligar rotas de um container recém-saudável (o `make up` espera).
 - **API** (`api/`, Go 1.26): `net/http` com mux do Go 1.22+, `pgx/v5`, goose v3 (`goose.NewProvider`, migrações embutidas), **sqlc** (`internal/db`, gerado e commitado). Imagem distroless. Duas portas: **8080** pública (Traefik) e **8081** interna (worker, token `WORKER_TOKEN`, sem rota no Traefik).
   - `internal/auth`: senha argon2id (19 MiB, t=2, p=1, no máximo 2 cálculos simultâneos), token de sessão de 256 bits (o banco guarda só o SHA-256), token CSRF.
-  - `internal/httpapi`: rotas; `autenticado` valida a sessão **de novo** (não confia em cabeçalho do gateway) e exige `Origin` permitida + `X-CSRF-Token` em POST/PATCH/DELETE; `exigirPerfil`. Cookie `__Host-travus_sessao` (HttpOnly, Secure, SameSite=Strict); sessão expira com 12 h sem uso ou 7 dias. Auditoria de login, falhas, logout, importações, ativação de cotas e execuções (criação e cancelamento).
+  - `internal/httpapi`: rotas; `autenticado` valida a sessão **de novo** (não confia em cabeçalho do gateway) e exige `Origin` permitida + `X-CSRF-Token` em POST/PATCH/DELETE; `exigirPerfil`. Cookie `__Host-travus_sessao` (HttpOnly, Secure, SameSite=Strict); sessão expira com 12 h sem uso ou 7 dias. Auditoria de login, falhas, logout, cadastro (cliente e cota criados, editados, excluídos), ativação de cotas e execuções (criação e cancelamento).
     - `execucoes.go`: criar dry-run (só cotas ativas; `real` é recusado aqui), listar, detalhar (com os lances), cancelar, baixar screenshot/PDF (`/arquivos/{id}`, só com sessão).
     - `interno.go`: fila do worker (`/internal/tarefas/proxima` com `FOR UPDATE SKIP LOCKED` e trava de 2 min, renovar, iniciar/concluir cota, screenshot, eventos, finalizar, liberar no SIGTERM). Trava vencida devolve a execução à fila. Tipos entregues: `dry_run`, `reimpressao` e, só com a chave, `real`. Na finalização, cota que ficou em `confirmacao_iniciada` vira `erro_apos_confirmar`.
     - `reais.go`: `GET /execucoes/{id}/revisao` (revisão do dry-run), `POST /execucoes/reais` (**só admin**, chave ligada, dry-run concluído há menos de 2 h e ainda não aprovado, quantidade de cotas digitada, "registrar mesmo assim" por cota que já tem lance na assembleia), `POST /execucoes/reimpressoes` (comprovante de um protocolo pelo Histórico; `enviar_drive` opcional), `POST /lances/{id}/reenviar-drive`, `GET /integracoes/google-drive` (admin).
@@ -147,14 +147,16 @@ merge do PR "chore: versão X.Y.Z" → tag vX.Y.Z + release → workflow Deploy:
     - `whatsapp.go` + `internal/checkin` (cliente): tela WhatsApp, **só admin**, com auditoria. `GET /integracoes/whatsapp` (estado, número, QR, grupo, fila; notificador fora do ar vira `indisponivel` com 200), `GET …/grupos`, `PUT …/grupo`, `POST …/teste`, `POST …/desconectar` (exige `"confirmar": true`). Repassa ao notificador pela rede interna com `CHECKIN_ADMIN_TOKEN` (`CHECKIN_URL`); o navegador nunca vê o token.
     - `vigia.go`: a cada 5 min confere banco, contato do worker (10 min), fila parada, cota em `erro_apos_confirmar` (24 h), Drive, backup (26 h, erro), disco (80%), certificado (14 dias) e, com `VIGIA_CHECKIN=true` (produção), o notificador (sem resposta ou WhatsApp fora há 10 min, sem grupo, mensagens que desistiram, fila parada); manda e-mail só quando muda (novos, lembrete a cada 12 h, resolvidos), sem nome de cliente, e faz ping no monitor externo (`VIGIA_PING_URL`). `internal/alerta`: SMTP com STARTTLS obrigatório (ou TLS na 465). Sem `SMTP_HOST`, os alertas só vão para o log.
     - `sse.go`: `GET /execucoes/{id}/eventos` (SSE, `Last-Event-ID`, `event: fim`); `Hub` com `LISTEN execucao_eventos` (trigger no insert).
-  - `internal/importacao`: `LerPlanilha` porta as regras do `workers/canopus/src/csv.js` (teste de paridade contra o csv.js original em `testdata/paridade`); `Planejar` compara com o cadastro; aplicar recalcula a prévia na transação e recusa se o cadastro mudou.
+    - `crm.go`: cadastro do Canopus (clientes e cotas digitados). `POST /clientes` (com as cotas juntas, numa transação), `PATCH`/`DELETE /clientes/{id}`, `POST /cotas`, `PUT`/`DELETE /cotas/{id}`. Nome repetido ou cota repetida viram 409; cota com lance ou execução não muda de identidade nem some (409, desative).
+  - `internal/cadastro`: valida e normaliza o que o formulário manda (nome em maiúsculas com espaços únicos, grupo/cota/versão só com dígitos e zeros à esquerda 6/4/2, modalidade, dia do mês, data AAAA-MM-DD).
+  - `internal/importacao`: só histórico. A importação de planilha saiu da plataforma com o CRM; o pacote (e o teste de paridade contra o `csv.js` do script legado, em `testdata/paridade`) fica como referência das regras que o CRM herdou, e a tabela `importacoes` continua porque as cotas importadas apontam para ela.
   - `internal/testedb`: testes de integração (pulados sem `TEST_DATABASE_URL`).
   - `cmd/api`: `serve`, `migrate up|down|status`, `usuario …`, `google importar-token|status`, `alerta testar`, `healthcheck`. Screenshots vencidos (30 dias) são apagados de hora em hora; PDFs de comprovante não expiram.
 - **Web** (`web/`, Next.js 16, App Router, TypeScript, Tailwind 4, shadcn/ui estilo base-nova (Base UI, não Radix: use `render` em vez de `asChild`), TanStack Query, `output: "standalone"`). **O Next 16 tem mudanças incompatíveis: leia `web/AGENTS.md` e o guia relevante em `web/node_modules/next/dist/docs/` antes de escrever código** (ex.: `middleware` virou `proxy`; `useSearchParams` precisa de `<Suspense>`; env de runtime com `await connection()`).
   - O navegador chama a API em `/api/...` (mesma origem). `src/lib/api.ts` manda o `X-CSRF-Token`, e em 401 recarrega para o login.
   - `(app)/layout.tsx` busca `/auth/sessao` antes de mostrar as telas; botões aparecem conforme o perfil, mas quem decide é a API.
   - **Um espaço por serviço**, com tema escuro único nas cores da marca Travus Capital (azul-noite e ouro; fontes Inter e Poppins empacotadas por `@fontsource` + `next/font/local`, sem Google no build). `src/lib/servicos.ts` é o registro: cada serviço tem id, nome, descrição e abas com perfis; o trilho (`components/trilho.tsx`, serviço ativo marcado em ouro) e o cabeçalho com abas (`components/espaco-servico.tsx`, usado no `layout.tsx` de cada serviço) saem dele. Serviço novo = entrada no registro + pasta `app/(app)/<id>/` com `layout.tsx`. O ouro fica reservado para a marca, o serviço ativo, o botão principal e o foco.
-  - Telas: `/login`, `/status` e, por serviço, **Canopus** `/canopus/execucoes` (lista), `/canopus/execucoes/nova` (escolher cotas ativas), `/canopus/execucoes/[id]` (progresso por `EventSource`, cotas, lances já existentes na assembleia, screenshots, comprovantes, log, cancelar, botão "Revisar para lance real"), `/canopus/execucoes/[id]/revisao` (revisão do dry-run: cotas, "registrar mesmo assim", confirmação digitando a quantidade; mostra o bloqueio quando a chave está desligada), `/canopus/cotas`, `/canopus/clientes`, `/canopus/clientes/[id]` (lances com PDF e situação no Drive, Reimprimir, "Buscar comprovante no Histórico"), `/canopus/importar`; **Reservas** `/reservas/whatsapp` (só admin: QR com `qrcode.react`, consultado a cada 2 s até conectar, grupo, teste, desconectar).
+  - Telas: `/login`, `/status` e, por serviço, **Canopus** `/canopus/execucoes` (lista), `/canopus/execucoes/nova` (escolher cotas ativas), `/canopus/execucoes/[id]` (progresso por `EventSource`, cotas, lances já existentes na assembleia, screenshots, comprovantes, log, cancelar, botão "Revisar para lance real"), `/canopus/execucoes/[id]/revisao` (revisão do dry-run: cotas, "registrar mesmo assim", confirmação digitando a quantidade; mostra o bloqueio quando a chave está desligada), `/canopus/cotas`, `/canopus/clientes` (lista, com "Novo cliente"), `/canopus/clientes/novo` (cadastro do cliente com as cotas dele), `/canopus/clientes/[id]` (editar e excluir o cliente, cadastrar/editar/excluir cotas, lances com PDF e situação no Drive, Reimprimir, "Buscar comprovante no Histórico"); **Reservas** `/reservas/whatsapp` (só admin: QR com `qrcode.react`, consultado a cada 2 s até conectar, grupo, teste, desconectar).
   - `page.tsx` só pode exportar o componente da página (o build do Next recusa exports extras): componentes compartilhados vão para `src/components/` (ex.: `comprovante.tsx`).
 - **Worker Canopus** (`workers/canopus/`, Node + Playwright **1.63.0 exato**; a imagem `mcr.microsoft.com/playwright:v1.63.0-noble` precisa ter a mesma versão do `package-lock.json`).
   - `src/worker.js`: laço da fila. **Só dry-run: não há caminho para Confirmar** (um teste lê o arquivo e falha se aparecer `confirmAndWaitReport`, `downloadReportPdf` ou `btnConfirma`). Por cota: `backToFilter` (a partir da 2ª) → `searchCota` → `lerDadosCredenciamento` → `selectSegundoFixo` → `captureBeforeConfirm` → envia screenshot → `lerHistorico` (só leitura, depois do screenshot) → conclui. `NewconCotaError` → erro conhecido; outro erro → inesperado; ambos com screenshot. SIGTERM: termina a cota atual e devolve à fila (`stop_grace_period: 90s`).
@@ -174,17 +176,21 @@ merge do PR "chore: versão X.Y.Z" → tag vX.Y.Z + release → workflow Deploy:
 
 | Perfil | Pode |
 |---|---|
-| `leitura` | ver clientes, cotas, importações, execuções, revisões e comprovantes |
-| `operador` | + importar planilha, ativar/desativar cota, criar e cancelar dry-run, pedir reimpressão de comprovante, enviar comprovante ao Drive |
+| `leitura` | ver clientes, cotas, execuções, revisões e comprovantes |
+| `operador` | + cadastrar, editar e excluir cliente e cota, ativar/desativar cota, criar e cancelar dry-run, pedir reimpressão de comprovante, enviar comprovante ao Drive |
 | `admin` | tudo do operador + **aprovar lance real**, ver a situação do Google Drive e **gerenciar o WhatsApp do notificador** (QR, grupo, teste, desconectar) |
 
-## Regras da importação
+## Regras do cadastro (CRM)
 
-- Cliente = nome normalizado (maiúsculas, espaços únicos); a planilha não tem CPF.
-- Reimportar cria e atualiza. Cota que sumiu da planilha **não** é desativada, só aparece na prévia.
-- Telefone/e-mail vazios na planilha não apagam o cadastro.
-- Colunas sem uso ficam em `cotas.dados_planilha`; "ACESSO A COTA" é sempre descartada.
-- Modalidade padrão: `segundo_fixo`. Grupo/cota/versão com zeros à esquerda (6/4/2), versão padrão `00`.
+O Canopus é um CRM: **admin e operador digitam** o cliente e as cotas dele (`/canopus/clientes/novo`).
+Não há mais importação de planilha.
+
+- Cliente = nome normalizado (maiúsculas, espaços únicos); a administradora não dá CPF. Nome repetido é o mesmo cliente: a API recusa com 409.
+- Grupo/cota/versão só com dígitos e zeros à esquerda (6/4/2), versão padrão `00`; administradora padrão `CANOPUS`; modalidade padrão `segundo_fixo`.
+- O formulário manda todos os campos: **telefone ou e-mail em branco apagam** o contato (ao contrário da importação, em que coluna vazia não mexia no cadastro).
+- Os campos que a planilha trazia soltos são colunas da cota: `vendedor`, `forma_pagamento`, `vencimento_parcela`, `dia_assembleia`, `contratacao` (migração 00008, que trouxe o que estava em `dados_planilha`). `dados_planilha` continua no banco com o que veio da importação antiga — não é mais escrito.
+- **Cota com lance ou execução é histórico**: não muda de administradora, grupo, cota, versão nem de cliente, e não se exclui (409; para tirá-la das execuções, desative). Cliente com cotas também não se exclui.
+- Só a API valida de verdade: a tela ajuda a preencher, mas quem recusa é o servidor.
 
 ## Execuções e proteção contra lance duplicado
 
@@ -217,7 +223,9 @@ lance real:  dry-run concluído → revisão → admin aprova (chave ligada, < 2
 ## Etapas
 
 - **Etapa 0 (fundação)**: validada.
-- **Etapa 1 (login e cadastro)**: validada.
+- **Etapa 1 (login e cadastro)**: validada. Em 17/09/2026 o cadastro virou **CRM**: a importação de planilha
+  saiu da interface e da API (o histórico continua legível), admin e operador digitam cliente e cotas, e os campos
+  que a planilha trazia soltos viraram colunas da cota. O design das telas ainda vai ser estruturado com o usuário.
 - **Etapa 2 (dry-run pela interface)**: validada.
 - **Etapa 3 (lance real, implementado e testado sem confirmar)**: revisão, aprovação só por admin, trava antes do clique, protocolo, `lances`, PDF no Postgres (bytea; armazenamento de objetos depois) e no Drive, reimpressão pelo Histórico, auditoria, token do Google cifrado no banco. *Em validação.* O primeiro lance real só com pedido explícito do usuário.
 - **Etapa 5 (notificador de check-in)**: trazido do projeto airbnb para `workers/checkin-whatsapp`, SQLite trocado pelo Postgres (schema `checkin`), no compose e no gateway, tela WhatsApp para o admin (QR, grupo, teste, desconectar) e vigia. *Testado localmente sem parear o número*; falta a migração na VM (`docs/producao.md`, seção 9), que depende da Etapa 4.
@@ -227,6 +235,10 @@ lance real:  dry-run concluído → revisão → admin aprova (chave ligada, < 2
 
 - Modalidade para cotas sem "2º Fixo" (grupo 6620: só Livre, Fixo, Limitado). Hoje é erro conhecido.
 - Domínio (`app.`/`api.`): o usuário define e cria depois.
+
+Decididas pelo usuário no CRM (17/09/2026): a importação por planilha sai da interface e da API, mas a tabela
+`importacoes` e o histórico ficam; **admin e operador** cadastram e editam; os campos extras da planilha viram
+colunas de verdade na cota.
 
 Decididas pelo usuário na Etapa 3: "Parcelas em Atraso" → aceitar e marcar o lance; cota que já tem lance na assembleia → pular, salvo "registrar mesmo assim" por cota na revisão; só admin aprova lance real; prazo de oferta encerrado → erro conhecido; PDF do teste de reimpressão não vai ao Drive.
 

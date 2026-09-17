@@ -10,6 +10,65 @@ import (
 	"time"
 )
 
+const atualizarCota = `-- name: AtualizarCota :one
+UPDATE cotas
+SET cliente_id         = $1,
+    administradora     = $2,
+    grupo              = $3,
+    cota               = $4,
+    versao             = $5,
+    tipo_consorcio     = $6,
+    modalidade_padrao  = $7,
+    ativa              = $8,
+    vendedor           = $9,
+    forma_pagamento    = $10,
+    vencimento_parcela = $11,
+    dia_assembleia     = $12,
+    contratacao        = $13,
+    atualizado_em      = now()
+WHERE id = $14
+RETURNING id
+`
+
+type AtualizarCotaParams struct {
+	ClienteID         int64
+	Administradora    string
+	Grupo             string
+	Cota              string
+	Versao            string
+	TipoConsorcio     *string
+	ModalidadePadrao  string
+	Ativa             bool
+	Vendedor          *string
+	FormaPagamento    *string
+	VencimentoParcela *int16
+	DiaAssembleia     *int16
+	Contratacao       *time.Time
+	ID                int64
+}
+
+func (q *Queries) AtualizarCota(ctx context.Context, arg AtualizarCotaParams) (int64, error) {
+	row := q.db.QueryRow(ctx, atualizarCota,
+		arg.ClienteID,
+		arg.Administradora,
+		arg.Grupo,
+		arg.Cota,
+		arg.Versao,
+		arg.TipoConsorcio,
+		arg.ModalidadePadrao,
+		arg.Ativa,
+		arg.Vendedor,
+		arg.FormaPagamento,
+		arg.VencimentoParcela,
+		arg.DiaAssembleia,
+		arg.Contratacao,
+		arg.ID,
+	)
+	var id int64
+	err := row.Scan(&id)
+	return id, err
+}
+
 const atualizarCotaImportada = `-- name: AtualizarCotaImportada :exec
 UPDATE cotas
 SET cliente_id     = $1,
@@ -37,6 +96,123 @@ func (q *Queries) AtualizarCotaImportada(ctx context.Context, arg AtualizarCotaI
 		arg.ID,
 	)
 	return err
+}
+
+const buscarCota = `-- name: BuscarCota :one
+SELECT q.id, q.cliente_id, c.nome AS cliente_nome, q.administradora, q.grupo, q.cota, q.versao,
+       q.tipo_consorcio, q.modalidade_padrao, q.ativa, q.atualizado_em,
+       q.vendedor, q.forma_pagamento, q.vencimento_parcela, q.dia_assembleia, q.contratacao
+FROM cotas q
+JOIN clientes c ON c.id = q.cliente_id
+WHERE q.id = $1
+`
+
+type BuscarCotaRow struct {
+	ID                int64
+	ClienteID         int64
+	ClienteNome       string
+	Administradora    string
+	Grupo             string
+	Cota              string
+	Versao            string
+	TipoConsorcio     *string
+	ModalidadePadrao  string
+	Ativa             bool
+	AtualizadoEm      time.Time
+	Vendedor          *string
+	FormaPagamento    *string
+	VencimentoParcela *int16
+	DiaAssembleia     *int16
+	Contratacao       *time.Time
+}
+
+func (q *Queries) BuscarCota(ctx context.Context, id int64) (BuscarCotaRow, error) {
+	row := q.db.QueryRow(ctx, buscarCota, id)
+	var i BuscarCotaRow
+	err := row.Scan(
+		&i.ID,
+		&i.ClienteID,
+		&i.ClienteNome,
+		&i.Administradora,
+		&i.Grupo,
+		&i.Cota,
+		&i.Versao,
+		&i.TipoConsorcio,
+		&i.ModalidadePadrao,
+		&i.Ativa,
+		&i.AtualizadoEm,
+		&i.Vendedor,
+		&i.FormaPagamento,
+		&i.VencimentoParcela,
+		&i.DiaAssembleia,
+		&i.Contratacao,
+	)
+	return i, err
+}
+
+const contarUsoDaCota = `-- name: ContarUsoDaCota :one
+SELECT (SELECT count(*) FROM lances l WHERE l.cota_id = $1)::int         AS lances,
+       (SELECT count(*) FROM execucao_cotas ec WHERE ec.cota_id = $1)::int AS execucoes
+`
+
+type ContarUsoDaCotaRow struct {
+	Lances    int32
+	Execucoes int32
+}
+
+// Cota com lance registrado ou já usada numa execução não se apaga: é histórico.
+func (q *Queries) ContarUsoDaCota(ctx context.Context, cotaID int64) (ContarUsoDaCotaRow, error) {
+	row := q.db.QueryRow(ctx, contarUsoDaCota, cotaID)
+	var i ContarUsoDaCotaRow
+	err := row.Scan(&i.Lances, &i.Execucoes)
+	return i, err
+}
+
+const criarCota = `-- name: CriarCota :one
+INSERT INTO cotas (cliente_id, administradora, grupo, cota, versao, tipo_consorcio,
+                   modalidade_padrao, ativa, vendedor, forma_pagamento,
+                   vencimento_parcela, dia_assembleia, contratacao)
+VALUES ($1, $2, $3, $4, $5, $6,
+        $7, $8, $9, $10,
+        $11, $12, $13)
+RETURNING id
+`
+
+type CriarCotaParams struct {
+	ClienteID         int64
+	Administradora    string
+	Grupo             string
+	Cota              string
+	Versao            string
+	TipoConsorcio     *string
+	ModalidadePadrao  string
+	Ativa             bool
+	Vendedor          *string
+	FormaPagamento    *string
+	VencimentoParcela *int16
+	DiaAssembleia     *int16
+	Contratacao       *time.Time
+}
+
+func (q *Queries) CriarCota(ctx context.Context, arg CriarCotaParams) (int64, error) {
+	row := q.db.QueryRow(ctx, criarCota,
+		arg.ClienteID,
+		arg.Administradora,
+		arg.Grupo,
+		arg.Cota,
+		arg.Versao,
+		arg.TipoConsorcio,
+		arg.ModalidadePadrao,
+		arg.Ativa,
+		arg.Vendedor,
+		arg.FormaPagamento,
+		arg.VencimentoParcela,
+		arg.DiaAssembleia,
+		arg.Contratacao,
+	)
+	var id int64
+	err := row.Scan(&id)
+	return id, err
 }
 
 const definirCotaAtiva = `-- name: DefinirCotaAtiva :one
@@ -70,6 +246,18 @@ func (q *Queries) DefinirCotaAtiva(ctx context.Context, arg DefinirCotaAtivaPara
 		&i.Ativa,
 	)
 	return i, err
+}
+
+const excluirCota = `-- name: ExcluirCota :execrows
+DELETE FROM cotas WHERE id = $1
+`
+
+func (q *Queries) ExcluirCota(ctx context.Context, id int64) (int64, error) {
+	result, err := q.db.Exec(ctx, excluirCota, id)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const inserirCota = `-- name: InserirCota :one
@@ -107,7 +295,8 @@ func (q *Queries) InserirCota(ctx context.Context, arg InserirCotaParams) (int64
 
 const listarCotas = `-- name: ListarCotas :many
 SELECT q.id, q.cliente_id, c.nome AS cliente_nome, q.administradora, q.grupo, q.cota, q.versao,
-       q.tipo_consorcio, q.modalidade_padrao, q.ativa, q.atualizado_em
+       q.tipo_consorcio, q.modalidade_padrao, q.ativa, q.atualizado_em,
+       q.vendedor, q.forma_pagamento, q.vencimento_parcela, q.dia_assembleia, q.contratacao
 FROM cotas q
 JOIN clientes c ON c.id = q.cliente_id
 WHERE ($1::bigint IS NULL OR q.cliente_id = $1::bigint)
@@ -128,17 +317,22 @@ type ListarCotasParams struct {
 }
 
 type ListarCotasRow struct {
-	ID               int64
-	ClienteID        int64
-	ClienteNome      string
-	Administradora   string
-	Grupo            string
-	Cota             string
-	Versao           string
-	TipoConsorcio    *string
-	ModalidadePadrao string
-	Ativa            bool
-	AtualizadoEm     time.Time
+	ID                int64
+	ClienteID         int64
+	ClienteNome       string
+	Administradora    string
+	Grupo             string
+	Cota              string
+	Versao            string
+	TipoConsorcio     *string
+	ModalidadePadrao  string
+	Ativa             bool
+	AtualizadoEm      time.Time
+	Vendedor          *string
+	FormaPagamento    *string
+	VencimentoParcela *int16
+	DiaAssembleia     *int16
+	Contratacao       *time.Time
 }
 
 func (q *Queries) ListarCotas(ctx context.Context, arg ListarCotasParams) ([]ListarCotasRow, error) {
@@ -167,6 +361,11 @@ func (q *Queries) ListarCotas(ctx context.Context, arg ListarCotasParams) ([]Lis
 			&i.ModalidadePadrao,
 			&i.Ativa,
 			&i.AtualizadoEm,
+			&i.Vendedor,
+			&i.FormaPagamento,
+			&i.VencimentoParcela,
+			&i.DiaAssembleia,
+			&i.Contratacao,
 		); err != nil {
 			return nil, err
 		}

@@ -89,7 +89,7 @@ export default function PaginaCotas() {
           cotas={lista}
           carregando={cotas.isPending}
           editavel={podeEditar(sessao.data?.usuario.perfil)}
-          mensagemVazia={filtrando ? "Nenhuma cota com esses filtros." : "Nenhuma cota cadastrada. Importe a planilha para começar."}
+          mensagemVazia={filtrando ? "Nenhuma cota com esses filtros." : "Nenhuma cota cadastrada. Cadastre um cliente com as cotas dele para começar."}
         />
       )}
     </div>
