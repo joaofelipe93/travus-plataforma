@@ -92,6 +92,7 @@ export function Trilho({ usuario }: { usuario: Usuario }) {
               </DropdownMenuLabel>
             </DropdownMenuGroup>
             <DropdownMenuSeparator />
+            <DropdownMenuItem render={<Link href="/perfil" />}>Meu perfil</DropdownMenuItem>
             <DropdownMenuItem onClick={() => sair.mutate()} disabled={sair.isPending}>
               Sair
             </DropdownMenuItem>
