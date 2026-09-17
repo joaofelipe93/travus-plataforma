@@ -1,0 +1,22 @@
+# Imagens prontas do GitHub Container Registry, compiladas pela CI a partir da tag da versão
+# (.github/workflows/deploy.yml). Vai por cima do docker-compose.yml e do docker-compose.prod.yml
+# só no deploy pelo GitHub (publicar.sh --imagens): a VM baixa em vez de compilar.
+# O deploy manual (make deploy) e o make prod-local continuam compilando.
+#
+#   VERSAO=0.2.0 docker compose -f deploy/docker-compose.yml -f deploy/docker-compose.prod.yml \
+#     -f deploy/docker-compose.imagens.yml pull && ... up -d --no-build
+services:
+  migrate:
+    image: ${REGISTRO:-ghcr.io/joaofelipe93}/travus-api:${VERSAO:?defina VERSAO}
+  api:
+    image: ${REGISTRO:-ghcr.io/joaofelipe93}/travus-api:${VERSAO:?defina VERSAO}
+  cli:
+    image: ${REGISTRO:-ghcr.io/joaofelipe93}/travus-api:${VERSAO:?defina VERSAO}
+  web:
+    image: ${REGISTRO:-ghcr.io/joaofelipe93}/travus-web:${VERSAO:?defina VERSAO}
+  worker-canopus:
+    image: ${REGISTRO:-ghcr.io/joaofelipe93}/travus-worker-canopus:${VERSAO:?defina VERSAO}
+  worker-legado:
+    image: ${REGISTRO:-ghcr.io/joaofelipe93}/travus-worker-canopus:${VERSAO:?defina VERSAO}
+  checkin-whatsapp:
+    image: ${REGISTRO:-ghcr.io/joaofelipe93}/travus-checkin-whatsapp:${VERSAO:?defina VERSAO}

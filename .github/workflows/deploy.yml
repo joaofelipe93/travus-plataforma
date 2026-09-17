@@ -1,0 +1,157 @@
+# Deploy em produção. Dispara quando o release-please publica uma versão (merge do PR
+# "chore: versão X.Y.Z") ou à mão, escolhendo uma versão já lançada (reimplantar ou voltar para
+# uma versão específica).
+#
+#   1. imagens: compila api, web, worker-canopus e checkin-whatsapp a partir da TAG e publica no
+#      GHCR (ghcr.io/joaofelipe93/travus-*:X.Y.Z). Imagem que já existe não é refeita.
+#   2. producao: ESPERA A APROVAÇÃO do usuário (ambiente "producao"), então pede à VM
+#      "publicar vX.Y.Z" pela chave de deploy (que só aceita publicar/voltar/estado). A VM baixa o
+#      código da tag, recusa com execução em andamento, baixa as imagens, faz backup do Postgres,
+#      migra e sobe. Depois, smoke de produção de fora e conferência da versão no /health.
+#      Se a troca falhar no meio ou o smoke falhar: rollback automático para a versão anterior
+#      e o job fica vermelho. Recusa antes de mudar algo (código 3): nada a desfazer.
+name: Deploy
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      versao:
+        description: "Versão já lançada a publicar (ex.: v0.2.0)"
+        required: true
+
+concurrency:
+  group: deploy-producao
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  REGISTRO: ghcr.io/joaofelipe93
+  TAG: ${{ github.event.release.tag_name || inputs.versao }}
+
+jobs:
+  imagens:
+    name: Imagens da versão
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Versão válida
+        run: |
+          [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "::error::versão inválida: $TAG (use vX.Y.Z)"; exit 1; }
+      - uses: actions/checkout@v4
+        with:
+          ref: refs/tags/${{ env.TAG }}
+      - name: version.txt igual à tag
+        run: |
+          [ "v$(cat version.txt)" = "$TAG" ] || { echo "::error::version.txt ($(cat version.txt)) não bate com a tag $TAG"; exit 1; }
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Compilar e publicar
+        run: |
+          versao=${TAG#v}
+          commit=$(git rev-parse --short=12 HEAD)
+          for par in api:api web:web worker-canopus:workers/canopus checkin-whatsapp:workers/checkin-whatsapp; do
+            nome=${par%%:*}; contexto=${par#*:}
+            imagem="$REGISTRO/travus-$nome:$versao"
+            if docker manifest inspect "$imagem" > /dev/null 2>&1; then
+              echo "já existe: $imagem"
+              continue
+            fi
+            echo "::group::$imagem"
+            docker buildx build --push \
+              --build-arg VERSAO="$versao" --build-arg COMMIT="$commit" \
+              --label org.opencontainers.image.source="https://github.com/${{ github.repository }}" \
+              --label org.opencontainers.image.version="$versao" \
+              --label org.opencontainers.image.revision="$(git rev-parse HEAD)" \
+              --cache-from "type=gha,scope=$nome" --cache-to "type=gha,scope=$nome,mode=max" \
+              -t "$imagem" -t "$REGISTRO/travus-$nome:sha-$commit" \
+              "$contexto"
+            echo "::endgroup::"
+          done
+      - name: Resumo
+        run: |
+          {
+            echo "### Imagens de $TAG"
+            for nome in api web worker-canopus checkin-whatsapp; do echo "- \`$REGISTRO/travus-$nome:${TAG#v}\`"; done
+            echo
+            echo "A publicação em produção espera a aprovação no job **producao**."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  producao:
+    name: Produção
+    needs: imagens
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    environment:
+      name: producao
+      url: https://${{ vars.DOMINIO_APP }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: refs/tags/${{ env.TAG }}
+      - name: Chave de deploy
+        env:
+          CHAVE: ${{ secrets.DEPLOY_SSH_KEY }}
+          HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+        run: |
+          install -d -m 700 ~/.ssh
+          printf '%s\n' "$CHAVE" > ~/.ssh/deploy && chmod 600 ~/.ssh/deploy
+          printf '%s\n' "$HOSTS" > ~/.ssh/known_hosts
+      - name: Publicar na VM
+        id: publicar
+        env:
+          HOST: ${{ vars.DEPLOY_HOST }}
+        run: |
+          set +e
+          ssh -i ~/.ssh/deploy -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o BatchMode=yes \
+            -o ServerAliveInterval=30 "travus@$HOST" "publicar $TAG"
+          codigo=$?
+          echo "codigo=$codigo" >> "$GITHUB_OUTPUT"
+          if [ "$codigo" = 3 ]; then
+            echo "::error::a VM recusou o deploy sem mudar nada (veja a mensagem acima)"
+          elif [ "$codigo" != 0 ]; then
+            echo "::error::o deploy falhou no meio da troca: voltando para a versão anterior"
+          fi
+          exit "$codigo"
+      - name: Smoke de produção
+        id: smoke
+        env:
+          APP: ${{ vars.DOMINIO_APP }}
+          API: ${{ vars.DOMINIO_API }}
+        run: |
+          bash tools/smoke/producao.sh "$APP" "$API"
+          no_ar=$(curl -fsS -m 15 "https://$API/health" | python3 -c 'import json,sys; print(json.load(sys.stdin)["versao"])')
+          [ "v$no_ar" = "$TAG" ] || { echo "::error::o /health mostra v$no_ar, esperado $TAG"; exit 1; }
+          echo "Versão no ar: v$no_ar"
+      - name: Rollback automático
+        if: failure() && (steps.smoke.outcome == 'failure' || (steps.publicar.outcome == 'failure' && steps.publicar.outputs.codigo != '3'))
+        env:
+          HOST: ${{ vars.DEPLOY_HOST }}
+        run: |
+          ssh -i ~/.ssh/deploy -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o BatchMode=yes \
+            -o ServerAliveInterval=30 "travus@$HOST" voltar
+          echo "::warning::$TAG não ficou no ar: a VM voltou para a versão anterior (o banco não é desfeito; backup antes do deploy em /opt/travus/backups/antes-do-deploy)"
+      - name: Resumo
+        if: always()
+        env:
+          PUBLICAR: ${{ steps.publicar.outcome }}
+          SMOKE: ${{ steps.smoke.outcome }}
+        run: |
+          {
+            echo "### Deploy de $TAG"
+            echo "- publicar na VM: $PUBLICAR"
+            echo "- smoke de produção: $SMOKE"
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Apagar a chave
+        if: always()
+        run: rm -f ~/.ssh/deploy
