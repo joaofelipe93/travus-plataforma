@@ -276,3 +276,43 @@ export type GrupoWhatsapp = {
   nome: string;
   participantes: number;
 };
+
+// Meu perfil (api/internal/httpapi/perfil.go). O valor de uma credencial nunca vem da API:
+// só a dica (últimos caracteres) e quando foi cadastrada.
+export type MeuPerfil = {
+  id: number;
+  email: string;
+  nome: string;
+  perfil: Perfil;
+  telefone: string | null;
+  cargo: string | null;
+  observacoes: string | null;
+  criado_em: string;
+  atualizado_em: string;
+};
+
+export type CampoCredencial = {
+  id: string;
+  rotulo: string;
+  ajuda?: string;
+  obrigatorio: boolean;
+};
+
+export type Credencial = {
+  id: string;
+  nome: string;
+  descricao: string;
+  como_obter: string;
+  link_ajuda?: string;
+  campos: CampoCredencial[];
+  cadastrada: boolean;
+  dica?: string;
+  atualizada_em: string | null;
+};
+
+export type RespostaPerfil = {
+  usuario: MeuPerfil;
+  credenciais: Credencial[];
+  // Sem CHAVE_CRIPTOGRAFIA na API não dá para guardar credencial: a tela avisa.
+  cofre_configurado: boolean;
+};
