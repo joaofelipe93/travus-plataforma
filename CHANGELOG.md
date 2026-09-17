@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.0](https://github.com/joaofelipe93/travus-plataforma/compare/v0.1.0...v0.2.0) (2026-09-17)
+
+
+### Novidades
+
+* **deploy:** deploy pelo GitHub com aprovação, backup e rollback automático ([#6](https://github.com/joaofelipe93/travus-plataforma/issues/6)) ([41ca75a](https://github.com/joaofelipe93/travus-plataforma/commit/41ca75ab4c6b5699164c05043968eef25079f649))
+
 ## 0.1.0 (2026-09-16)
 
 
