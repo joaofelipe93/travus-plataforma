@@ -40,6 +40,10 @@ case "${acao:-}" in
       mv "$temporario" "$destino"
       trap - EXIT
     fi
+    # Versões anteriores ao deploy pelo GitHub (v0.1.0) não têm o modo --imagens: o publicar.sh
+    # delas falharia e o workflow faria rollback à toa. Essas só pelo deploy manual.
+    [ -f "$destino/deploy/docker-compose.imagens.yml" ] \
+      || recusar "$argumento é anterior ao deploy pelo GitHub (sem deploy/docker-compose.imagens.yml): use o make deploy"
     exec bash "$destino/deploy/vm/publicar.sh" --imagens "$argumento"
     ;;
   voltar)
