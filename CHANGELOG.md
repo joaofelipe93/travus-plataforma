@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.1](https://github.com/joaofelipe93/travus-plataforma/compare/v0.2.0...v0.2.1) (2026-09-17)
+
+
+### Correções
+
+* **deploy:** recusar na VM versão anterior ao deploy pelo GitHub ([#8](https://github.com/joaofelipe93/travus-plataforma/issues/8)) ([2fd6b64](https://github.com/joaofelipe93/travus-plataforma/commit/2fd6b646c3a116c7615aa768d12cd1fc72ab9f2a))
+
 ## [0.2.0](https://github.com/joaofelipe93/travus-plataforma/compare/v0.1.0...v0.2.0) (2026-09-17)
 
 
