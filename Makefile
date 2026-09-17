@@ -13,6 +13,13 @@ export COMMIT := $(shell git rev-parse --short=12 HEAD 2>/dev/null || echo desco
 # O Traefik leva alguns segundos para ligar as rotas depois que o container fica saudável.
 ESPERAR_GATEWAY = for i in $$(seq 30); do [ "$$(curl -s -o /dev/null -w '%{http_code}' http://app.localhost/login)" = 200 ] && exit 0; sleep 1; done; echo "aviso: app.localhost/login ainda não responde 200 (veja make logs s=traefik)"
 
+# Vários agentes em worktrees dividem a mesma stack local (projeto "travus") e o mesmo banco de
+# teste: make test e make smoke esperam a vez nesta trava, comum a todos os worktrees do repositório.
+TRAVA := $(shell git rev-parse --path-format=absolute --git-common-dir 2>/dev/null || echo /tmp)/travus-make.lock
+NA_FILA = @flock -n "$(TRAVA)" true || echo "== outro make test ou make smoke está rodando nesta máquina (outro worktree): esperando a vez"; \
+	flock -w 3600 "$(TRAVA)"
+DESTINO_WORKTREE = $(abspath $(CURDIR)/../travus-$(subst /,-,$(b)))
+
 # VM de produção (deploy, deploy-voltar, backup-baixar): make deploy VM=travus@<ip-ou-host>
 VM ?=
 PRECISA_VM = @test -n "$(VM)" || { echo "informe a VM: make $@ VM=travus@<ip-ou-host>"; exit 1; }
@@ -22,7 +29,7 @@ PRECISA_VM = @test -n "$(VM)" || { echo "informe a VM: make $@ VM=travus@<ip-ou-
 FORA_DA_VM = @test ! -d /opt/travus/compartilhado || { echo "esta é a VM de produção: publique com make deploy (na sua máquina), não com make $@"; exit 1; }
 
 .DEFAULT_GOAL := help
-.PHONY: help env up down checkin verificar configurar-ci logs ps migrate usuario google-token google-status test smoke dev-web sqlc paridade-csv worker-dry-run \
+.PHONY: help env up down checkin verificar configurar-ci worktree testes-sem-fila logs ps migrate usuario google-token google-status test smoke dev-web sqlc paridade-csv worker-dry-run \
 	backup restaurar-teste alerta-teste prod-local smoke-producao deploy deploy-voltar backup-baixar
 
 help: ## Lista os comandos
@@ -72,7 +79,10 @@ backup: env ## Backup do Postgres agora, em deploy/backups (tem dados de cliente
 restaurar-teste: env ## Restaura o último backup num banco temporário e compara com o banco em uso
 	$(COMPOSE) --profile backup run --rm backup testar-restauracao
 
-test: env ## Testes: api e checkin-whatsapp (com Postgres), web (lint e tipos), worker Canopus (node:test, sem Newcon), scripts (sintaxe)
+test: env ## Testes: api e checkin-whatsapp (com Postgres), web (lint e tipos), worker Canopus (node:test, sem Newcon), scripts (sintaxe); um por vez na máquina
+	$(NA_FILA) $(MAKE) --no-print-directory testes-sem-fila
+
+testes-sem-fila: env
 	$(COMPOSE) up -d --wait postgres
 	$(COMPOSE) --profile teste run --rm api-teste
 	cd web && npm run lint && npx next typegen && npx tsc --noEmit
@@ -88,8 +98,23 @@ verificar: ## Checagens da CI de segurança: arquivos proibidos, migrações seg
 	git fetch --quiet origin main && bash tools/ci/checar-migracoes.sh origin/main
 	docker run --rm -v "$(CURDIR):/repo:ro" ghcr.io/gitleaks/gitleaks:v8.28.0 git /repo --no-banner --redact --gitleaks-ignore-path /repo/.gitleaksignore
 
-smoke: ## Checagens pelo gateway com curl (precisa de make up)
-	bash tools/smoke/etapa1.sh
+smoke: ## Checagens pelo gateway com curl (precisa de make up); um por vez na máquina
+	$(NA_FILA) bash tools/smoke/etapa1.sh
+
+worktree: ## Área de trabalho para um agente: make worktree b=tipo/assunto (em ../travus-tipo-assunto, a partir da origin/main)
+	@echo "$(b)" | grep -qE '^(feat|fix|perf|revert|docs|ci|build|refactor|test|chore|style)/[a-z0-9-]+$$' \
+		|| { echo "use: make worktree b=tipo/assunto (ex.: b=feat/reservas-historico)"; exit 1; }
+	@test -f deploy/.env || { echo "rode make up nesta pasta antes (cria o deploy/.env que os worktrees copiam)"; exit 1; }
+	git fetch --quiet origin main
+	git worktree add -b "$(b)" "$(DESTINO_WORKTREE)" origin/main
+	@# Mesmo deploy/.env: a stack local e o volume do Postgres são os mesmos para todos os worktrees.
+	install -m 600 deploy/.env "$(DESTINO_WORKTREE)/deploy/.env"
+	@# Credenciais FICTÍCIAS do Newcon: um agente num worktree nunca entra no Newcon por engano.
+	@printf '%s\n' 'NEWCON_URL=https://newcon.invalid/WWW/frmCorCcCnsLogin.aspx' 'NEWCON_USER=agente-ficticio' 'NEWCON_PASS=agente-ficticio' \
+		> "$(DESTINO_WORKTREE)/workers/canopus/.env" && chmod 600 "$(DESTINO_WORKTREE)/workers/canopus/.env"
+	cd "$(DESTINO_WORKTREE)/web" && npm ci --no-audit --no-fund --silent
+	cd "$(DESTINO_WORKTREE)/workers/canopus" && npm ci --no-audit --no-fund --silent
+	@echo "Pronto: $(DESTINO_WORKTREE) (branch $(b)). Siga o CONTRIBUTING.md."
 
 dev-web: env ## Web em modo desenvolvimento (next dev) atrás do Traefik; make up volta ao normal
 	$(FORA_DA_VM)

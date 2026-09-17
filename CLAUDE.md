@@ -23,7 +23,7 @@ O segundo serviço é o **notificador de check-in** (`workers/checkin-whatsapp`)
 5. **Não altere nada em `/home/joao/Documentos/newcon-automation`.** Só copie de lá.
 6. Se algo do Newcon se comportar diferente de `docs/canopus-newcon.md`, **pare e avise** antes de mudar a lógica.
 7. Sem push, repositório remoto novo ou deploy sem pedido explícito. Trabalhe por etapas: proponha o plano, espere o ok e pare no fim de cada etapa para validação. Commits pequenos e descritivos, no padrão `feat:`/`fix:`/`docs:`/`ci:`… (o versionamento vai ler).
-10. **A `main` é protegida: só entra por PR com a CI verde** (vários agentes trabalham ao mesmo tempo). Nunca faça push direto na `main` nem tente contornar a proteção. Trabalhe num branch próprio (`tipo/assunto`, ex.: `feat/reservas-historico`), rode `make test` e `make verificar` antes de abrir o PR e mantenha o branch atualizado com a `main` (a proteção exige). Ver "CI" abaixo.
+10. **A `main` é protegida: só entra por PR com a CI verde** (vários agentes trabalham ao mesmo tempo). Nunca faça push direto na `main` nem tente contornar a proteção. **Siga o [`CONTRIBUTING.md`](CONTRIBUTING.md)**: uma área por tarefa (`make worktree b=tipo/assunto`), `make test` e `make verificar` antes do PR, título no padrão, branch atualizado com a `main`. Merge do PR de versão, aprovação de deploy e "Voltar versão" são só do usuário.
 8. Uma sessão de login no Newcon por vez: nunca rode dry-run da plataforma, `make worker-dry-run` e scripts de descoberta ao mesmo tempo.
 9. **WhatsApp do notificador**: nunca pareie o chip da produção fora da VM de produção (`make checkin` local mostra QR de verdade: não escaneie) e nunca rode dois notificadores com a mesma sessão. "Enviar mensagem de teste", `POST /whatsapp/test` e um webhook com o token certo **mandam mensagem ao grupo real**: só com pedido do usuário. Testes automáticos usam dublês do WhatsApp; os smokes só mandam webhook sem token.
 
@@ -38,8 +38,9 @@ make ps              # estado dos containers
 make migrate         # aplica migrações pendentes
 make usuario args='criar --email ana@exemplo.com --nome "Ana" --perfil operador'
                      # também: listar | senha --email X | desativar --email X | ativar --email X
-make test            # api e checkin-whatsapp (com Postgres de teste), web (eslint + tsc), worker Canopus (node:test, sem Newcon)
+make test            # api e checkin-whatsapp (com Postgres de teste), web (eslint + tsc), worker Canopus (node:test, sem Newcon); um por vez na máquina
 make verificar       # checagens de segurança da CI: arquivos proibidos, migrações seguras, gitleaks
+make worktree b=feat/assunto   # área de trabalho de um agente (../travus-feat-assunto, .env certos, Newcon fictício)
 make smoke           # checagens pelo gateway com curl (precisa de make up; não cria execução)
 make dev-web         # web com next dev (recarga automática) atrás do Traefik; make up volta ao normal
 make sqlc            # regera api/internal/db depois de mudar migrações ou consultas
