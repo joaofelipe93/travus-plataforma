@@ -22,7 +22,7 @@ PRECISA_VM = @test -n "$(VM)" || { echo "informe a VM: make $@ VM=travus@<ip-ou-
 FORA_DA_VM = @test ! -d /opt/travus/compartilhado || { echo "esta é a VM de produção: publique com make deploy (na sua máquina), não com make $@"; exit 1; }
 
 .DEFAULT_GOAL := help
-.PHONY: help env up down checkin verificar logs ps migrate usuario google-token google-status test smoke dev-web sqlc paridade-csv worker-dry-run \
+.PHONY: help env up down checkin verificar configurar-ci logs ps migrate usuario google-token google-status test smoke dev-web sqlc paridade-csv worker-dry-run \
 	backup restaurar-teste alerta-teste prod-local smoke-producao deploy deploy-voltar backup-baixar
 
 help: ## Lista os comandos
@@ -130,6 +130,12 @@ deploy: ## Publica o commit atual na VM: make deploy VM=travus@<ip-ou-host> (nã
 	echo "Publicando v$(VERSAO) (commit $$versao) em $(VM)"; \
 	git archive --format=tar HEAD | ssh $(VM) "mkdir -p /opt/travus/releases/$$versao && tar -x -C /opt/travus/releases/$$versao" && \
 	ssh -t $(VM) "FORCAR=$(FORCAR) bash /opt/travus/releases/$$versao/deploy/vm/publicar.sh $$versao"
+
+configurar-ci: ## Instala a entrada do deploy pelo GitHub na VM e autoriza a chave só para ela: make configurar-ci VM=travus@<ip> CHAVE=arquivo.pub
+	$(PRECISA_VM)
+	@test -n "$(CHAVE)" && test -f "$(CHAVE)" || { echo "informe a chave pública: make configurar-ci VM=... CHAVE=arquivo.pub"; exit 1; }
+	ssh $(VM) 'install -d -m 755 /opt/travus/bin && cat > /opt/travus/bin/entrada-ci.sh.novo && chmod 755 /opt/travus/bin/entrada-ci.sh.novo && mv /opt/travus/bin/entrada-ci.sh.novo /opt/travus/bin/entrada-ci.sh' < deploy/vm/entrada-ci.sh
+	ssh $(VM) 'read -r chave; linha="restrict,command=\"/opt/travus/bin/entrada-ci.sh\" $$chave"; grep -qxF "$$linha" ~/.ssh/authorized_keys || { printf "%s\n" "$$linha" >> ~/.ssh/authorized_keys; echo "chave de deploy autorizada (só publicar, voltar e estado)"; }' < "$(CHAVE)"
 
 deploy-voltar: ## Volta a VM para a versão publicada antes: make deploy-voltar VM=travus@<ip-ou-host>
 	$(PRECISA_VM)

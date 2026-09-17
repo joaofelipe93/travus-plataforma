@@ -1,0 +1,59 @@
+# Voltar para a versão publicada antes da atual (rollback manual), com a mesma aprovação do
+# deploy. Para ir a uma versão específica, use o workflow Deploy com a versão desejada.
+# O código volta; as migrações do banco não são desfeitas (o backup antes de cada deploy fica em
+# /opt/travus/backups/antes-do-deploy na VM, e restaurar é manual).
+name: Voltar versão
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirmar:
+        description: 'Digite VOLTAR para voltar à versão anterior'
+        required: true
+
+concurrency:
+  group: deploy-producao
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  voltar:
+    name: Voltar na produção
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    environment:
+      name: producao
+      url: https://${{ vars.DOMINIO_APP }}
+    steps:
+      - name: Confirmação
+        env:
+          CONFIRMAR: ${{ inputs.confirmar }}
+        run: '[ "$CONFIRMAR" = VOLTAR ] || { echo "::error::digite VOLTAR para confirmar"; exit 1; }'
+      - uses: actions/checkout@v4
+      - name: Chave de deploy
+        env:
+          CHAVE: ${{ secrets.DEPLOY_SSH_KEY }}
+          HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+        run: |
+          install -d -m 700 ~/.ssh
+          printf '%s\n' "$CHAVE" > ~/.ssh/deploy && chmod 600 ~/.ssh/deploy
+          printf '%s\n' "$HOSTS" > ~/.ssh/known_hosts
+      - name: Voltar na VM
+        env:
+          HOST: ${{ vars.DEPLOY_HOST }}
+        run: |
+          ssh -i ~/.ssh/deploy -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o BatchMode=yes \
+            -o ServerAliveInterval=30 "travus@$HOST" voltar
+          ssh -i ~/.ssh/deploy -o IdentitiesOnly=yes -o BatchMode=yes "travus@$HOST" estado
+      - name: Smoke de produção
+        env:
+          APP: ${{ vars.DOMINIO_APP }}
+          API: ${{ vars.DOMINIO_API }}
+        run: |
+          bash tools/smoke/producao.sh "$APP" "$API"
+          echo "Versão no ar: $(curl -fsS -m 15 "https://$API/health" | python3 -c 'import json,sys; print(json.load(sys.stdin)["versao"])')" >> "$GITHUB_STEP_SUMMARY"
+      - name: Apagar a chave
+        if: always()
+        run: rm -f ~/.ssh/deploy

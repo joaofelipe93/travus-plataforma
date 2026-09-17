@@ -164,12 +164,38 @@ Depois da migração:
 - **Trocar o token do webhook**: apague a linha `CHECKIN_WEBHOOK_SECRET` do `.env` da VM, publique (o `publicar.sh` gera outro) e atualize o PMS.
 - **Backup**: eventos e fila estão no Postgres (`checkin.eventos`, `checkin.mensagens`) e entram no dump; os payloads têm nome, telefone e e-mail de hóspedes. A sessão do WhatsApp fica no volume `travus_checkin-dados` e **não** tem backup: perdida a VM, pareie de novo.
 
+## 10. Deploy pelo GitHub (padrão)
+
+Depois do primeiro deploy manual (seções 1 a 5), as versões seguintes vão pelo GitHub:
+
+1. Os PRs entram na `main` (CI verde). O release-please mantém o PR **"chore: versão X.Y.Z"** com o `CHANGELOG.md`.
+2. **Você faz o merge do PR de versão** quando quiser lançar. Isso cria a tag `vX.Y.Z` e o release.
+3. O workflow **Deploy** compila as imagens da tag e publica no GHCR (job "Imagens da versão").
+4. **Na primeira vez, e sempre que surgir um pacote novo**: em https://github.com/joaofelipe93?tab=packages, abra cada `travus-*` → Package settings → Change visibility → **Public**. A VM baixa sem login; as imagens não têm segredos.
+5. O job **Produção** fica esperando: em Actions → Deploy → **Review deployments** → marque `producao` → **Approve and deploy**.
+6. A VM recusa se houver execução em andamento (tente de novo depois), baixa as imagens, faz backup, migra e sobe. O workflow roda o smoke de produção e confere a versão no `/health`. Se algo falhar depois de começar a troca, volta sozinho para a versão anterior e o job fica vermelho.
+
+Voltar à mão: Actions → **Voltar versão** → Run workflow → digite `VOLTAR` → aprovar. Para uma versão específica: Actions → **Deploy** → Run workflow → `vX.Y.Z` (precisa já ter release).
+
+Configuração (já feita em 17/09/2026; refazer só se trocar de VM ou de chave):
+
+```bash
+ssh-keygen -t ed25519 -N "" -C travus-deploy-github-actions -f /tmp/deploy
+make configurar-ci VM=travus@<ip> CHAVE=/tmp/deploy.pub     # entrada-ci.sh + chave restrita
+gh secret set DEPLOY_SSH_KEY --env producao < /tmp/deploy
+ssh-keygen -F <ip> | grep -v '^#' | gh secret set DEPLOY_KNOWN_HOSTS --env producao
+gh variable set DEPLOY_HOST --env producao --body <ip>
+rm /tmp/deploy /tmp/deploy.pub
+```
+
+Para revogar a chave: apague a linha `restrict,command="/opt/travus/bin/entrada-ci.sh" …` do `~/.ssh/authorized_keys` do `travus` na VM.
+
 ## Rotina
 
 | Tarefa | Como |
 |---|---|
-| Publicar | commit → `make deploy VM=travus@<ip>` (recusa com execução em andamento) |
-| Voltar uma versão | `make deploy-voltar VM=travus@<ip>`. **Migrações não são desfeitas**: se a versão nova mudou o banco, voltar pode não funcionar |
+| Publicar | merge do PR de versão → aprovar o job Produção no GitHub (seção 10). Plano B: `make deploy VM=travus@<ip>` |
+| Voltar uma versão | workflow **Voltar versão** no GitHub, ou `make deploy-voltar VM=travus@<ip>`. **Migrações não são desfeitas** (backup antes de cada deploy em `backups/antes-do-deploy`) |
 | Logs | `ssh -t travus@<ip> 'cd /opt/travus/atual && make logs s=api'` (api, worker-canopus, checkin-whatsapp, traefik, backup…) |
 | WhatsApp do notificador | tela `https://app.<domínio>/reservas/whatsapp` (só admin): conexão, QR, grupo, teste, fila |
 | Estado | `ssh travus@<ip> 'cd /opt/travus/atual && make ps'` |

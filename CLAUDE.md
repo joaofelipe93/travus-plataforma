@@ -92,6 +92,24 @@ Também é obrigatório o **"Título do PR no padrão"** (`.github/workflows/tit
 - O workflow usa o secret `RELEASE_PLEASE_TOKEN` (token fine-grained só deste repositório com Contents, Pull requests e Issues em leitura e escrita): com o `GITHUB_TOKEN`, o PR de versão não dispararia a CI. O token tem validade: renovar antes de vencer.
 - A versão e o commit entram nas imagens pelo build (`VERSAO`/`COMMIT`, exportados pelo `Makefile` e pelo `publicar.sh` a partir de `version.txt` e do git) e aparecem no `/health` da API e do notificador, no log de início do worker, em `/status` e no menu do usuário no trilho. Sem eles, `dev`.
 
+## Deploy (CD)
+
+**Padrão: pelo GitHub, com aprovação.** Plano B: `make deploy` da máquina do usuário (compila na VM).
+
+```
+merge do PR "chore: versão X.Y.Z" → tag vX.Y.Z + release → workflow Deploy:
+  imagens   compila api, web, worker-canopus e checkin-whatsapp da TAG → ghcr.io/joaofelipe93/travus-*:X.Y.Z
+  producao  ESPERA APROVAÇÃO (ambiente "producao") → ssh "publicar vX.Y.Z" → smoke de produção
+            + versão no /health → se a troca falhar no meio ou o smoke falhar: rollback automático
+```
+
+- **Chave de deploy restrita**: no `authorized_keys` do `travus`, `restrict,command="/opt/travus/bin/entrada-ci.sh"` (instalado por `make configurar-ci VM=… CHAVE=….pub`). Ela só aceita `publicar vX.Y.Z` (a VM baixa o código da **tag** direto do GitHub: a chave escolhe versão, não envia código), `voltar` e `estado`; sem shell, sem terminal, sem túnel. Tags `v*` protegidas por ruleset (só admin cria, altera ou apaga).
+- **`publicar.sh --imagens vX.Y.Z`** (com `deploy/docker-compose.imagens.yml`): confere `version.txt` = tag, recusa com execução em andamento, baixa as imagens, faz **backup antes do deploy** (`backup.sh antes-do-deploy`, 10 guardados em `backups/antes-do-deploy`), migra e sobe. **Código 3 = recusado antes de mudar qualquer coisa** (nada a desfazer, o workflow não faz rollback); outro código = falhou no meio da troca (rollback). O histórico (`versoes-publicadas`) guarda `<id> <modo>` e o `--voltar` sobe a anterior do jeito que ela foi publicada (imagens ou compilar). Imagens de versões que saíram das 5 releases guardadas são apagadas.
+- **Rollback manual**: workflow **Voltar versão** (digitar `VOLTAR`, mesma aprovação) ou **Deploy** à mão com uma versão já lançada. O código volta; **as migrações não** (por isso a CI exige migrações seguras e há o backup antes de cada deploy).
+- Ambiente `producao` no GitHub: aprovação obrigatória do usuário, só `main` e tags `v*`; segredos `DEPLOY_SSH_KEY`, `DEPLOY_KNOWN_HOSTS`; variáveis `DEPLOY_HOST`, `DOMINIO_APP`, `DOMINIO_API`.
+- **Aprovar o job "Produção" é o pedido explícito de deploy** (regra 7): nunca aprove por conta própria.
+- Os pacotes do GHCR precisam ser **públicos** (a VM baixa sem login; as imagens não têm segredos). Pacote novo nasce privado: tornar público uma vez, em github.com/joaofelipe93?tab=packages.
+
 ## Arquitetura
 
 ```

@@ -5,6 +5,8 @@
 #   backup.sh agora               um backup já (make backup)
 #   backup.sh diario              laço: um backup por dia, a partir de BACKUP_HORA (padrão 3 h)
 #   backup.sh testar-restauracao  restaura o último backup num banco temporário (make restaurar-teste)
+#   backup.sh antes-do-deploy <rótulo>  backup antes de migrar uma versão nova (publicar.sh); falha = deploy
+#                                       não segue. Em antes-do-deploy/ (10), sem mexer nos diários.
 #
 # Em /backups: diario/ (7), semanal/ (4, domingos), mensal/ (6, dia 1), arquivos .dump
 # (pg_dump -Fc) só para o dono. O vigia da API lê ultimo-ok e ultimo-erro.
@@ -50,6 +52,22 @@ fazer_backup() {
   log "backup ok: $destino ($(du -h "$destino" | cut -f1))"
 }
 
+antes_do_deploy() { # rótulo (versão que vai subir)
+  rotulo=$(printf '%s' "${1:-}" | tr -c 'A-Za-z0-9.-' '_')
+  [ -n "$rotulo" ] || { log "uso: backup.sh antes-do-deploy <rótulo>"; return 2; }
+  (umask 077 && mkdir -p "$DIR/antes-do-deploy")
+  destino="$DIR/antes-do-deploy/travus-$(date +%Y%m%d-%H%M%S)-antes-de-$rotulo.dump"
+  parcial="$destino.parcial"
+  if ! (umask 077 && pg_dump -Fc -Z 6 -f "$parcial") || ! pg_restore -l "$parcial" > /dev/null; then
+    rm -f "$parcial"
+    log "ERRO: backup antes do deploy falhou"
+    return 1
+  fi
+  mv "$parcial" "$destino"
+  manter antes-do-deploy 10
+  log "backup antes do deploy ok: $destino ($(du -h "$destino" | cut -f1))"
+}
+
 diario() {
   hora=${BACKUP_HORA:-3}
   log "backup diário a partir das ${hora} h, em $DIR"
@@ -84,8 +102,9 @@ case "${1:-}" in
   agora) fazer_backup ;;
   diario) diario ;;
   testar-restauracao) testar_restauracao ;;
+  antes-do-deploy) antes_do_deploy "${2:-}" ;;
   *)
-    echo "uso: backup.sh agora | diario | testar-restauracao" >&2
+    echo "uso: backup.sh agora | diario | testar-restauracao | antes-do-deploy <rótulo>" >&2
     exit 2
     ;;
 esac
