@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.5.0](https://github.com/joaofelipe93/travus-plataforma/compare/v0.4.0...v0.5.0) (2026-09-18)
+
+
+### Novidades
+
+* **web:** CRM do Canopus com cadastro digitado no lugar da planilha ([#15](https://github.com/joaofelipe93/travus-plataforma/issues/15)) ([8bbed2e](https://github.com/joaofelipe93/travus-plataforma/commit/8bbed2e5abc2edef8fb0ad9b7b5ee567af0756e6))
+
 ## [0.4.0](https://github.com/joaofelipe93/travus-plataforma/compare/v0.3.0...v0.4.0) (2026-09-17)
 
 
