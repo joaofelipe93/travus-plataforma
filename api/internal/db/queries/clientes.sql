@@ -30,3 +30,26 @@ SET telefone      = COALESCE(sqlc.narg(telefone), telefone),
     email         = COALESCE(sqlc.narg(email), email),
     atualizado_em = now()
 WHERE id = @id;
+
+-- No CRM o cadastro é digitado: telefone/e-mail em branco no formulário apagam o que estava lá
+-- (diferente da importação, em que coluna vazia não mexia no cadastro).
+-- name: CriarClienteCadastro :one
+INSERT INTO clientes (nome, nome_normalizado, telefone, email, origem)
+VALUES (@nome, @nome_normalizado, sqlc.narg(telefone), sqlc.narg(email), 'cadastro')
+RETURNING id, nome, telefone, email, origem, criado_em, atualizado_em;
+
+-- name: AtualizarCliente :one
+UPDATE clientes
+SET nome             = @nome,
+    nome_normalizado = @nome_normalizado,
+    telefone         = sqlc.narg(telefone),
+    email            = sqlc.narg(email),
+    atualizado_em    = now()
+WHERE id = @id
+RETURNING id, nome, telefone, email, origem, criado_em, atualizado_em;
+
+-- name: ExcluirCliente :execrows
+DELETE FROM clientes WHERE id = @id;
+
+-- name: ContarCotasDoCliente :one
+SELECT count(*)::int FROM cotas WHERE cliente_id = @cliente_id;

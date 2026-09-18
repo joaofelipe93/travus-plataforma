@@ -44,6 +44,12 @@ type cotaJSON struct {
 	ModalidadePadrao string    `json:"modalidade_padrao"`
 	Ativa            bool      `json:"ativa"`
 	AtualizadoEm     time.Time `json:"atualizado_em"`
+	// Campos do cadastro (antes soltos em dados_planilha). Contratação em AAAA-MM-DD.
+	Vendedor          *string `json:"vendedor"`
+	FormaPagamento    *string `json:"forma_pagamento"`
+	VencimentoParcela *int16  `json:"vencimento_parcela"`
+	DiaAssembleia     *int16  `json:"dia_assembleia"`
+	Contratacao       *string `json:"contratacao"`
 }
 
 // padraoLike escapa % e _ digitados na busca.
@@ -212,6 +218,8 @@ func cotasParaJSON(rows []db.ListarCotasRow) []cotaJSON {
 			ID: c.ID, ClienteID: c.ClienteID, ClienteNome: c.ClienteNome, Administradora: c.Administradora,
 			Grupo: c.Grupo, Cota: c.Cota, Versao: c.Versao, TipoConsorcio: c.TipoConsorcio,
 			ModalidadePadrao: c.ModalidadePadrao, Ativa: c.Ativa, AtualizadoEm: c.AtualizadoEm,
+			Vendedor: c.Vendedor, FormaPagamento: c.FormaPagamento, VencimentoParcela: c.VencimentoParcela,
+			DiaAssembleia: c.DiaAssembleia, Contratacao: dataOuNil(c.Contratacao),
 		})
 	}
 	return out

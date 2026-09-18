@@ -164,17 +164,23 @@ func (s *Servidor) Rotas() http.Handler {
 	mux.Handle("DELETE /perfil/credenciais/{credencial}", s.autenticado(s.apagarMinhaCredencial))
 	mux.Handle("GET /credenciais", s.autenticado(exigirPerfil(s.panoramaCredenciais, admins...)))
 
+	// CRM do Canopus (crm.go): o cadastro é digitado, não mais importado de planilha.
 	mux.Handle("GET /clientes", s.autenticado(s.listarClientes))
+	mux.Handle("POST /clientes", s.autenticado(exigirPerfil(s.criarCliente, editores...)))
 	mux.Handle("GET /clientes/{id}", s.autenticado(s.buscarCliente))
+	mux.Handle("PATCH /clientes/{id}", s.autenticado(exigirPerfil(s.atualizarCliente, editores...)))
+	mux.Handle("DELETE /clientes/{id}", s.autenticado(exigirPerfil(s.excluirCliente, editores...)))
 	mux.Handle("GET /cotas", s.autenticado(s.listarCotas))
+	mux.Handle("POST /cotas", s.autenticado(exigirPerfil(s.criarCota, editores...)))
 	mux.Handle("GET /cotas/grupos", s.autenticado(s.listarGrupos))
+	mux.Handle("PUT /cotas/{id}", s.autenticado(exigirPerfil(s.atualizarCota, editores...)))
 	mux.Handle("PATCH /cotas/{id}", s.autenticado(exigirPerfil(s.definirCotaAtiva, editores...)))
+	mux.Handle("DELETE /cotas/{id}", s.autenticado(exigirPerfil(s.excluirCota, editores...)))
 
+	// Importações antigas: só consulta. Importar planilha saiu da plataforma com o CRM;
+	// o histórico fica porque as cotas importadas apontam para ele.
 	mux.Handle("GET /importacoes", s.autenticado(s.listarImportacoes))
-	mux.Handle("POST /importacoes", s.autenticado(exigirPerfil(s.criarImportacao, editores...)))
 	mux.Handle("GET /importacoes/{id}", s.autenticado(s.buscarImportacao))
-	mux.Handle("POST /importacoes/{id}/aplicar", s.autenticado(exigirPerfil(s.aplicarImportacao, editores...)))
-	mux.Handle("POST /importacoes/{id}/descartar", s.autenticado(exigirPerfil(s.descartarImportacao, editores...)))
 
 	mux.Handle("GET /execucoes", s.autenticado(s.listarExecucoes))
 	mux.Handle("POST /execucoes", s.autenticado(exigirPerfil(s.criarExecucao, editores...)))

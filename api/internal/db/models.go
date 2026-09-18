@@ -126,19 +126,24 @@ type Cliente struct {
 }
 
 type Cota struct {
-	ID               int64
-	ClienteID        int64
-	Administradora   string
-	Grupo            string
-	Cota             string
-	Versao           string
-	TipoConsorcio    *string
-	ModalidadePadrao string
-	Ativa            bool
-	DadosPlanilha    []byte
-	ImportacaoID     *int64
-	CriadoEm         time.Time
-	AtualizadoEm     time.Time
+	ID                int64
+	ClienteID         int64
+	Administradora    string
+	Grupo             string
+	Cota              string
+	Versao            string
+	TipoConsorcio     *string
+	ModalidadePadrao  string
+	Ativa             bool
+	DadosPlanilha     []byte
+	ImportacaoID      *int64
+	CriadoEm          time.Time
+	AtualizadoEm      time.Time
+	Vendedor          *string
+	FormaPagamento    *string
+	VencimentoParcela *int16
+	DiaAssembleia     *int16
+	Contratacao       *time.Time
 }
 
 type CredenciaisUsuario struct {

@@ -8,17 +8,14 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/joaofelipe93/travus-plataforma/api/internal/auth"
 	"github.com/joaofelipe93/travus-plataforma/api/internal/db"
-	"github.com/joaofelipe93/travus-plataforma/api/internal/importacao"
 	"github.com/joaofelipe93/travus-plataforma/api/internal/testedb"
 )
 
@@ -82,15 +79,6 @@ func (n *navegador) enviar(metodo, caminho string, corpo io.Reader, contentType 
 func (n *navegador) enviarJSON(metodo, caminho string, v any) *httptest.ResponseRecorder {
 	b, _ := json.Marshal(v)
 	return n.enviar(metodo, caminho, bytes.NewReader(b), "application/json")
-}
-
-func (n *navegador) enviarPlanilha(nome string, conteudo []byte) *httptest.ResponseRecorder {
-	var corpo bytes.Buffer
-	mw := multipart.NewWriter(&corpo)
-	fw, _ := mw.CreateFormFile("arquivo", nome)
-	_, _ = fw.Write(conteudo)
-	_ = mw.Close()
-	return n.enviar(http.MethodPost, "/importacoes", &corpo, mw.FormDataContentType())
 }
 
 func entrar(t *testing.T, h http.Handler, email, senha string) (*navegador, *httptest.ResponseRecorder) {
@@ -240,105 +228,269 @@ func TestPerfilLeitura(t *testing.T) {
 	esperarStatus(t, n.req(http.MethodGet, "/cotas", nil, nil), http.StatusOK, "leitura vê cotas")
 	esperarStatus(t, n.req(http.MethodGet, "/clientes", nil, nil), http.StatusOK, "leitura vê clientes")
 	esperarStatus(t, n.enviarJSON(http.MethodPatch, "/cotas/1", map[string]bool{"ativa": false}), http.StatusForbidden, "leitura desativa cota")
-	esperarStatus(t, n.enviarPlanilha("x.csv", []byte("grupo,cota\n6650,924\n")), http.StatusForbidden, "leitura importa")
+	esperarStatus(t, n.enviarJSON(http.MethodPost, "/clientes", map[string]any{"nome": "X"}), http.StatusForbidden, "leitura cadastra cliente")
+	esperarStatus(t, n.enviarJSON(http.MethodPost, "/cotas", map[string]any{"cliente_id": 1, "grupo": "6650", "cota": "924"}), http.StatusForbidden, "leitura cadastra cota")
+	esperarStatus(t, n.enviar(http.MethodDelete, "/clientes/1", nil, ""), http.StatusForbidden, "leitura exclui cliente")
 }
 
-func TestImportacaoCompleta(t *testing.T) {
+// respostaCadastro é o que POST/PATCH de cliente devolvem: o cliente com as cotas dele.
+type respostaCadastro struct {
+	Cliente clienteJSON `json:"cliente"`
+	Cotas   []cotaJSON  `json:"cotas"`
+}
+
+func (n *navegador) cadastrarCliente(t *testing.T, corpo map[string]any) respostaCadastro {
+	t.Helper()
+	rec := n.enviarJSON(http.MethodPost, "/clientes", corpo)
+	esperarStatus(t, rec, http.StatusCreated, "cadastrar cliente")
+	return decodificar[respostaCadastro](t, rec)
+}
+
+// cotaFicticia: os campos de uma cota como o formulário do CRM manda.
+func cotaFicticia(grupo, cota string, extras map[string]any) map[string]any {
+	c := map[string]any{
+		"grupo": grupo, "cota": cota, "tipo_consorcio": "IMÓVEL",
+		"vendedor": "VENDEDOR EXEMPLO", "forma_pagamento": "BOLETO",
+		"vencimento_parcela": 15, "dia_assembleia": 15,
+	}
+	for k, v := range extras {
+		c[k] = v
+	}
+	return c
+}
+
+// cadastroFicticio repõe pelo CRM o cenário que a planilha de exemplo criava: 3 clientes e
+// 4 cotas (duas do mesmo cliente).
+func cadastroFicticio(t *testing.T, n *navegador) {
+	t.Helper()
+	n.cadastrarCliente(t, map[string]any{
+		"nome": "CLIENTE EXEMPLO UM", "telefone": "(11) 90000-0000", "email": "cliente.um@exemplo.com",
+		"cotas": []map[string]any{
+			cotaFicticia("1234", "56", map[string]any{"contratacao": "2025-10-01"}),
+			cotaFicticia("1234", "89", map[string]any{"contratacao": "2025-10-01"}),
+		},
+	})
+	n.cadastrarCliente(t, map[string]any{
+		"nome": "CLIENTE EXEMPLO DOIS",
+		"cotas": []map[string]any{
+			cotaFicticia("5678", "12", map[string]any{"tipo_consorcio": "AUTOMÓVEL"}),
+		},
+	})
+	n.cadastrarCliente(t, map[string]any{
+		"nome": "EXEMPLO, CLIENTE TRÊS",
+		"cotas": []map[string]any{
+			cotaFicticia("6.650", "0924", map[string]any{
+				"forma_pagamento": "PIX", "vencimento_parcela": 20, "dia_assembleia": 20,
+			}),
+		},
+	})
+}
+
+func TestCadastrarClienteComCotas(t *testing.T) {
 	s := novoServidorTeste(t)
 	h := s.Rotas()
 	criarUsuario(t, s, "operador@exemplo.com", db.PerfilUsuarioOperador)
 	n, _ := entrar(t, h, "operador@exemplo.com", senhaTeste)
 
-	planilha, err := os.ReadFile("../importacao/testdata/paridade/01-planilha-clientes.csv")
-	if err != nil {
-		t.Fatal(err)
+	criado := n.cadastrarCliente(t, map[string]any{
+		"nome": "  cliente   exemplo um  ", "telefone": "(11) 90000-0000", "email": "cliente.um@exemplo.com",
+		"cotas": []map[string]any{
+			cotaFicticia("6.650", "924", map[string]any{"contratacao": "2025-10-01"}),
+			cotaFicticia("8100", "1835", map[string]any{"tipo_consorcio": "automóvel", "modalidade_padrao": "livre", "ativa": false}),
+		},
+	})
+	if criado.Cliente.Nome != "cliente exemplo um" {
+		t.Errorf("nome guardado = %q (espaços deviam virar um só)", criado.Cliente.Nome)
+	}
+	if criado.Cliente.Origem != "cadastro" {
+		t.Errorf("origem = %q, quer cadastro", criado.Cliente.Origem)
+	}
+	if len(criado.Cotas) != 2 {
+		t.Fatalf("cotas criadas = %d, quer 2", len(criado.Cotas))
+	}
+	primeira := criado.Cotas[0]
+	if primeira.Grupo != "006650" || primeira.Cota != "0924" || primeira.Versao != "00" {
+		t.Errorf("zeros à esquerda: %+v", primeira)
+	}
+	if primeira.Administradora != "CANOPUS" || primeira.ModalidadePadrao != "segundo_fixo" || !primeira.Ativa {
+		t.Errorf("padrões da cota: %+v", primeira)
+	}
+	if primeira.Contratacao == nil || *primeira.Contratacao != "2025-10-01" {
+		t.Errorf("contratação: %v", primeira.Contratacao)
+	}
+	if primeira.VencimentoParcela == nil || *primeira.VencimentoParcela != 15 ||
+		primeira.DiaAssembleia == nil || *primeira.DiaAssembleia != 15 ||
+		primeira.FormaPagamento == nil || *primeira.FormaPagamento != "BOLETO" ||
+		primeira.Vendedor == nil || *primeira.Vendedor != "VENDEDOR EXEMPLO" {
+		t.Errorf("campos da planilha na cota: %+v", primeira)
+	}
+	segunda := criado.Cotas[1]
+	if segunda.ModalidadePadrao != "livre" || segunda.Ativa ||
+		segunda.TipoConsorcio == nil || *segunda.TipoConsorcio != "AUTOMÓVEL" {
+		t.Errorf("segunda cota: %+v", segunda)
 	}
 
-	rec := n.enviarPlanilha("clientes.csv", planilha)
-	esperarStatus(t, rec, http.StatusCreated, "prévia")
-	imp := decodificar[importacaoJSON](t, rec)
-	if want := (importacao.Totais{Linhas: 4, Clientes: 3, ClientesNovos: 3, CotasNovas: 4}); imp.Previa.Totais != want {
-		t.Fatalf("totais = %+v, quer %+v", imp.Previa.Totais, want)
+	detalhe := decodificar[respostaCadastro](t, n.req(http.MethodGet, fmt.Sprintf("/clientes/%d", criado.Cliente.ID), nil, nil))
+	if len(detalhe.Cotas) != 2 {
+		t.Errorf("cotas no detalhe = %d, quer 2", len(detalhe.Cotas))
 	}
-	aplicar := fmt.Sprintf("/importacoes/%d/aplicar", imp.ID)
-	esperarStatus(t, n.enviar(http.MethodPost, aplicar, nil, ""), http.StatusOK, "aplicar")
-	esperarStatus(t, n.enviar(http.MethodPost, aplicar, nil, ""), http.StatusConflict, "aplicar de novo")
+	if contarAuditoria(t, s, "cliente_criado") != 1 {
+		t.Error("cadastro não registrado na auditoria")
+	}
 
-	cotas := decodificar[struct{ Cotas []cotaJSON }](t, n.req(http.MethodGet, "/cotas", nil, nil)).Cotas
-	if len(cotas) != 4 {
-		t.Fatalf("cotas cadastradas = %d, quer 4", len(cotas))
+	// Mesmo nome com outra grafia: é o mesmo cliente (a planilha nunca teve CPF).
+	repetido := n.enviarJSON(http.MethodPost, "/clientes", map[string]any{"nome": "Cliente Exemplo Um"})
+	esperarStatus(t, repetido, http.StatusConflict, "cliente repetido")
+
+	// Cota que já existe, mesmo em outro cliente.
+	outro := n.enviarJSON(http.MethodPost, "/clientes", map[string]any{
+		"nome":  "CLIENTE EXEMPLO DOIS",
+		"cotas": []map[string]any{cotaFicticia("6650", "0924", nil)},
+	})
+	esperarStatus(t, outro, http.StatusConflict, "cota repetida")
+	clientes := decodificar[struct{ Clientes []clienteResumoJSON }](t, n.req(http.MethodGet, "/clientes", nil, nil)).Clientes
+	if len(clientes) != 1 {
+		t.Errorf("a transação devia ter desfeito o cliente da cota repetida: %d clientes", len(clientes))
+	}
+}
+
+func TestCadastroRecusaDadoInvalido(t *testing.T) {
+	s := novoServidorTeste(t)
+	h := s.Rotas()
+	criarUsuario(t, s, "operador@exemplo.com", db.PerfilUsuarioOperador)
+	n, _ := entrar(t, h, "operador@exemplo.com", senhaTeste)
+
+	casos := map[string]map[string]any{
+		"sem nome":            {"nome": "   "},
+		"e-mail sem arroba":   {"nome": "A", "email": "nao-e-email"},
+		"grupo sem número":    {"nome": "A", "cotas": []map[string]any{{"grupo": "abc", "cota": "12"}}},
+		"grupo zerado":        {"nome": "A", "cotas": []map[string]any{{"grupo": "0", "cota": "12"}}},
+		"cota grande demais":  {"nome": "A", "cotas": []map[string]any{{"grupo": "6650", "cota": "123456"}}},
+		"dia fora do mês":     {"nome": "A", "cotas": []map[string]any{{"grupo": "6650", "cota": "12", "dia_assembleia": 32}}},
+		"data em outro forma": {"nome": "A", "cotas": []map[string]any{{"grupo": "6650", "cota": "12", "contratacao": "01/10/2025"}}},
+		"modalidade inexis.":  {"nome": "A", "cotas": []map[string]any{{"grupo": "6650", "cota": "12", "modalidade_padrao": "turbo"}}},
+		"cota duas vezes": {"nome": "A", "cotas": []map[string]any{
+			{"grupo": "6650", "cota": "12"}, {"grupo": "006650", "cota": "0012"},
+		}},
+	}
+	for nome, corpo := range casos {
+		esperarStatus(t, n.enviarJSON(http.MethodPost, "/clientes", corpo), http.StatusBadRequest, nome)
 	}
 	clientes := decodificar[struct{ Clientes []clienteResumoJSON }](t, n.req(http.MethodGet, "/clientes", nil, nil)).Clientes
-	if len(clientes) != 3 {
-		t.Fatalf("clientes cadastrados = %d, quer 3", len(clientes))
-	}
-	busca := decodificar[struct{ Cotas []cotaJSON }](t, n.req(http.MethodGet, "/cotas?busca=6650", nil, nil)).Cotas
-	if len(busca) != 1 || busca[0].Grupo != "006650" || busca[0].Cota != "0924" || busca[0].ModalidadePadrao != "segundo_fixo" {
-		t.Errorf("busca por grupo: %+v", busca)
-	}
-
-	// Reimportação: sem a última linha e com telefone novo para o cliente DOIS.
-	texto := strings.Replace(string(planilha), "5678, 12 ,AUTOMÓVEL,,,", "5678, 12 ,AUTOMÓVEL,,(11) 92222-2222,", 1)
-	linhas := strings.Split(strings.TrimRight(texto, "\n"), "\n")
-	texto = strings.Join(linhas[:len(linhas)-1], "\n") + "\n"
-
-	rec = n.enviarPlanilha("clientes-v2.csv", []byte(texto))
-	esperarStatus(t, rec, http.StatusCreated, "prévia da reimportação")
-	imp2 := decodificar[importacaoJSON](t, rec)
-	if want := (importacao.Totais{Linhas: 3, Clientes: 2, ClientesAlterados: 1, CotasSemMudanca: 3, ForaDaPlanilha: 1}); imp2.Previa.Totais != want {
-		t.Fatalf("totais da reimportação = %+v, quer %+v", imp2.Previa.Totais, want)
-	}
-	esperarStatus(t, n.enviar(http.MethodPost, fmt.Sprintf("/importacoes/%d/aplicar", imp2.ID), nil, ""), http.StatusOK, "aplicar reimportação")
-
-	dois := decodificar[struct{ Clientes []clienteResumoJSON }](t, n.req(http.MethodGet, "/clientes?busca=dois", nil, nil)).Clientes
-	if len(dois) != 1 || dois[0].Telefone == nil || *dois[0].Telefone != "(11) 92222-2222" {
-		t.Errorf("telefone do cliente DOIS não atualizado: %+v", dois)
-	}
-	// A cota fora da planilha continua ativa.
-	if ativas := decodificar[struct{ Cotas []cotaJSON }](t, n.req(http.MethodGet, "/cotas?ativa=true", nil, nil)).Cotas; len(ativas) != 4 {
-		t.Errorf("cotas ativas = %d, quer 4", len(ativas))
-	}
-	if contarAuditoria(t, s, "importacao_aplicada") != 2 {
-		t.Error("importações aplicadas não registradas na auditoria")
+	if len(clientes) != 0 {
+		t.Errorf("nenhum cadastro devia ter passado: %+v", clientes)
 	}
 }
 
-func TestPreviaDesatualizadaEDescartar(t *testing.T) {
+func TestEditarCliente(t *testing.T) {
 	s := novoServidorTeste(t)
 	h := s.Rotas()
 	criarUsuario(t, s, "operador@exemplo.com", db.PerfilUsuarioOperador)
 	n, _ := entrar(t, h, "operador@exemplo.com", senhaTeste)
-	planilha, _ := os.ReadFile("../importacao/testdata/paridade/01-planilha-clientes.csv")
 
-	a := decodificar[importacaoJSON](t, n.enviarPlanilha("a.csv", planilha))
-	b := decodificar[importacaoJSON](t, n.enviarPlanilha("b.csv", planilha))
-	esperarStatus(t, n.enviar(http.MethodPost, fmt.Sprintf("/importacoes/%d/aplicar", b.ID), nil, ""), http.StatusOK, "aplicar B")
-	rec := n.enviar(http.MethodPost, fmt.Sprintf("/importacoes/%d/aplicar", a.ID), nil, "")
-	esperarStatus(t, rec, http.StatusConflict, "aplicar A depois de B")
-	if !strings.Contains(rec.Body.String(), "cadastro mudou") {
+	um := n.cadastrarCliente(t, map[string]any{"nome": "CLIENTE UM", "telefone": "(11) 90000-0000", "email": "um@exemplo.com"})
+	n.cadastrarCliente(t, map[string]any{"nome": "CLIENTE DOIS"})
+	caminho := fmt.Sprintf("/clientes/%d", um.Cliente.ID)
+
+	// No CRM o formulário manda tudo: campo em branco apaga o contato.
+	rec := n.enviarJSON(http.MethodPatch, caminho, map[string]any{"nome": "CLIENTE UM E MEIO", "telefone": "", "email": "novo@exemplo.com"})
+	esperarStatus(t, rec, http.StatusOK, "editar cliente")
+	editado := decodificar[respostaCadastro](t, rec).Cliente
+	if editado.Nome != "CLIENTE UM E MEIO" || editado.Telefone != nil || editado.Email == nil || *editado.Email != "novo@exemplo.com" {
+		t.Errorf("cliente editado: %+v", editado)
+	}
+	if contarAuditoria(t, s, "cliente_editado") != 1 {
+		t.Error("edição não auditada")
+	}
+
+	esperarStatus(t, n.enviarJSON(http.MethodPatch, caminho, map[string]any{"nome": "cliente dois"}), http.StatusConflict, "nome de outro cliente")
+	esperarStatus(t, n.enviarJSON(http.MethodPatch, "/clientes/999999", map[string]any{"nome": "X"}), http.StatusNotFound, "cliente inexistente")
+	esperarStatus(t, n.enviarJSON(http.MethodPatch, caminho, map[string]any{"nome": "X", "cotas": []map[string]any{{"grupo": "6650", "cota": "1"}}}),
+		http.StatusBadRequest, "cotas no PATCH do cliente")
+}
+
+func TestCadastrarEditarEExcluirCota(t *testing.T) {
+	s := novoServidorTeste(t)
+	h := s.Rotas()
+	criarUsuario(t, s, "operador@exemplo.com", db.PerfilUsuarioOperador)
+	n, _ := entrar(t, h, "operador@exemplo.com", senhaTeste)
+
+	um := n.cadastrarCliente(t, map[string]any{"nome": "CLIENTE UM"})
+	dois := n.cadastrarCliente(t, map[string]any{"nome": "CLIENTE DOIS"})
+
+	rec := n.enviarJSON(http.MethodPost, "/cotas", cotaFicticia("6650", "924", map[string]any{"cliente_id": um.Cliente.ID}))
+	esperarStatus(t, rec, http.StatusCreated, "criar cota")
+	cota := decodificar[struct {
+		Cota cotaJSON `json:"cota"`
+	}](t, rec).Cota
+	if cota.ClienteID != um.Cliente.ID || cota.Grupo != "006650" || cota.Cota != "0924" {
+		t.Fatalf("cota criada: %+v", cota)
+	}
+	esperarStatus(t, n.enviarJSON(http.MethodPost, "/cotas", cotaFicticia("6650", "924", map[string]any{"cliente_id": dois.Cliente.ID})),
+		http.StatusConflict, "cota repetida em outro cliente")
+	esperarStatus(t, n.enviarJSON(http.MethodPost, "/cotas", cotaFicticia("6650", "1", map[string]any{"cliente_id": 999999})),
+		http.StatusNotFound, "cliente inexistente")
+	esperarStatus(t, n.enviarJSON(http.MethodPost, "/cotas", cotaFicticia("6650", "1", nil)), http.StatusBadRequest, "cota sem cliente")
+
+	// Editar: muda modalidade, contato da planilha e o dono.
+	caminho := fmt.Sprintf("/cotas/%d", cota.ID)
+	rec = n.enviarJSON(http.MethodPut, caminho, cotaFicticia("6650", "924", map[string]any{
+		"cliente_id": dois.Cliente.ID, "modalidade_padrao": "fixo", "vendedor": "OUTRO VENDEDOR", "contratacao": "2024-12-13",
+	}))
+	esperarStatus(t, rec, http.StatusOK, "editar cota")
+	editada := decodificar[struct {
+		Cota cotaJSON `json:"cota"`
+	}](t, rec).Cota
+	if editada.ClienteID != dois.Cliente.ID || editada.ModalidadePadrao != "fixo" ||
+		editada.Vendedor == nil || *editada.Vendedor != "OUTRO VENDEDOR" ||
+		editada.Contratacao == nil || *editada.Contratacao != "2024-12-13" {
+		t.Errorf("cota editada: %+v", editada)
+	}
+	if contarAuditoria(t, s, "cota_editada") != 1 {
+		t.Error("edição da cota não auditada")
+	}
+
+	// Cota usada numa execução: dá para mudar os dados, não a identidade nem o dono.
+	n.criarDryRun(t, []int64{cota.ID})
+	rec = n.enviarJSON(http.MethodPut, caminho, cotaFicticia("6650", "925", map[string]any{"cliente_id": dois.Cliente.ID}))
+	esperarStatus(t, rec, http.StatusConflict, "mudar identidade de cota com histórico")
+	if !strings.Contains(rec.Body.String(), "histórico") {
 		t.Errorf("mensagem: %s", rec.Body.String())
 	}
+	esperarStatus(t, n.enviarJSON(http.MethodPut, caminho, cotaFicticia("6650", "924", map[string]any{
+		"cliente_id": dois.Cliente.ID, "modalidade_padrao": "limitado",
+	})), http.StatusOK, "mudar só os dados de cota com histórico")
 
-	descartar := fmt.Sprintf("/importacoes/%d/descartar", a.ID)
-	esperarStatus(t, n.enviar(http.MethodPost, descartar, nil, ""), http.StatusOK, "descartar A")
-	esperarStatus(t, n.enviar(http.MethodPost, descartar, nil, ""), http.StatusConflict, "descartar A de novo")
+	esperarStatus(t, n.enviar(http.MethodDelete, caminho, nil, ""), http.StatusConflict, "excluir cota com histórico")
+
+	// Cota sem histórico: exclui.
+	nova := decodificar[struct {
+		Cota cotaJSON `json:"cota"`
+	}](t, n.enviarJSON(http.MethodPost, "/cotas", cotaFicticia("6650", "2068", map[string]any{"cliente_id": um.Cliente.ID}))).Cota
+	esperarStatus(t, n.enviar(http.MethodDelete, fmt.Sprintf("/cotas/%d", nova.ID), nil, ""), http.StatusNoContent, "excluir cota")
+	esperarStatus(t, n.enviar(http.MethodDelete, fmt.Sprintf("/cotas/%d", nova.ID), nil, ""), http.StatusNotFound, "excluir de novo")
+	if contarAuditoria(t, s, "cota_excluida") != 1 {
+		t.Error("exclusão da cota não auditada")
+	}
+
+	// Cliente com cota não se exclui; sem cota, sim.
+	esperarStatus(t, n.enviar(http.MethodDelete, fmt.Sprintf("/clientes/%d", dois.Cliente.ID), nil, ""), http.StatusConflict, "excluir cliente com cota")
+	esperarStatus(t, n.enviar(http.MethodDelete, fmt.Sprintf("/clientes/%d", um.Cliente.ID), nil, ""), http.StatusNoContent, "excluir cliente sem cota")
+	if contarAuditoria(t, s, "cliente_excluido") != 1 {
+		t.Error("exclusão do cliente não auditada")
+	}
 }
 
-func TestImportacaoComErros(t *testing.T) {
+// A importação de planilha saiu com o CRM: o histórico continua legível, escrever não.
+func TestImportacaoSoLeitura(t *testing.T) {
 	s := novoServidorTeste(t)
 	h := s.Rotas()
 	criarUsuario(t, s, "operador@exemplo.com", db.PerfilUsuarioOperador)
 	n, _ := entrar(t, h, "operador@exemplo.com", senhaTeste)
 
-	rec := n.enviarPlanilha("erros.csv", []byte("nome,grupo,cota\nA,6650,924\nB,0,1\n"))
-	esperarStatus(t, rec, http.StatusCreated, "prévia com erro")
-	imp := decodificar[importacaoJSON](t, rec)
-	if imp.Previa.Totais.Erros != 1 || imp.Previa.Erros[0].Linha != 3 {
-		t.Fatalf("erros: %+v", imp.Previa.Erros)
-	}
-	esperarStatus(t, n.enviar(http.MethodPost, fmt.Sprintf("/importacoes/%d/aplicar", imp.ID), nil, ""), http.StatusUnprocessableEntity, "aplicar com erro")
-
-	esperarStatus(t, n.enviarPlanilha("ruim.csv", []byte("nome,numero\nX,1\n")), http.StatusUnprocessableEntity, "planilha sem colunas")
+	esperarStatus(t, n.req(http.MethodGet, "/importacoes", nil, nil), http.StatusOK, "histórico de importações")
+	esperarStatus(t, n.enviarJSON(http.MethodPost, "/importacoes", map[string]any{}), http.StatusMethodNotAllowed, "importar planilha")
+	esperarStatus(t, n.enviar(http.MethodPost, "/importacoes/1/aplicar", nil, ""), http.StatusNotFound, "aplicar importação")
 }
 
 func TestAtivarEDesativarCota(t *testing.T) {
@@ -346,8 +498,8 @@ func TestAtivarEDesativarCota(t *testing.T) {
 	h := s.Rotas()
 	criarUsuario(t, s, "operador@exemplo.com", db.PerfilUsuarioOperador)
 	n, _ := entrar(t, h, "operador@exemplo.com", senhaTeste)
-	imp := decodificar[importacaoJSON](t, n.enviarPlanilha("c.csv", []byte("nome,grupo,cota\nA,6650,2068\nB,6650,924\n")))
-	esperarStatus(t, n.enviar(http.MethodPost, fmt.Sprintf("/importacoes/%d/aplicar", imp.ID), nil, ""), http.StatusOK, "aplicar")
+	n.cadastrarCliente(t, map[string]any{"nome": "A", "cotas": []map[string]any{cotaFicticia("6650", "2068", nil)}})
+	n.cadastrarCliente(t, map[string]any{"nome": "B", "cotas": []map[string]any{cotaFicticia("6650", "924", nil)}})
 
 	cota := decodificar[struct{ Cotas []cotaJSON }](t, n.req(http.MethodGet, "/cotas?busca=2068", nil, nil)).Cotas[0]
 	caminho := fmt.Sprintf("/cotas/%d", cota.ID)

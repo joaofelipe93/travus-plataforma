@@ -10,6 +10,56 @@ import (
 	"time"
 )
 
+const atualizarCliente = `-- name: AtualizarCliente :one
+UPDATE clientes
+SET nome             = $1,
+    nome_normalizado = $2,
+    telefone         = $3,
+    email            = $4,
+    atualizado_em    = now()
+WHERE id = $5
+RETURNING id, nome, telefone, email, origem, criado_em, atualizado_em
+`
+
+type AtualizarClienteParams struct {
+	Nome            string
+	NomeNormalizado string
+	Telefone        *string
+	Email           *string
+	ID              int64
+}
+
+type AtualizarClienteRow struct {
+	ID           int64
+	Nome         string
+	Telefone     *string
+	Email        *string
+	Origem       string
+	CriadoEm     time.Time
+	AtualizadoEm time.Time
+}
+
+func (q *Queries) AtualizarCliente(ctx context.Context, arg AtualizarClienteParams) (AtualizarClienteRow, error) {
+	row := q.db.QueryRow(ctx, atualizarCliente,
+		arg.Nome,
+		arg.NomeNormalizado,
+		arg.Telefone,
+		arg.Email,
+		arg.ID,
+	)
+	var i AtualizarClienteRow
+	err := row.Scan(
+		&i.ID,
+		&i.Nome,
+		&i.Telefone,
+		&i.Email,
+		&i.Origem,
+		&i.CriadoEm,
+		&i.AtualizadoEm,
+	)
+	return i, err
+}
+
 const atualizarContatoCliente = `-- name: AtualizarContatoCliente :exec
 UPDATE clientes
 SET telefone      = COALESCE($1, telefone),
@@ -61,6 +111,17 @@ func (q *Queries) BuscarCliente(ctx context.Context, id int64) (BuscarClienteRow
 	return i, err
 }
 
+const contarCotasDoCliente = `-- name: ContarCotasDoCliente :one
+SELECT count(*)::int FROM cotas WHERE cliente_id = $1
+`
+
+func (q *Queries) ContarCotasDoCliente(ctx context.Context, clienteID int64) (int32, error) {
+	row := q.db.QueryRow(ctx, contarCotasDoCliente, clienteID)
+	var column_1 int32
+	err := row.Scan(&column_1)
+	return column_1, err
+}
+
 const criarCliente = `-- name: CriarCliente :one
 INSERT INTO clientes (nome, nome_normalizado, telefone, email, origem)
 VALUES ($1, $2, $3, $4, $5)
@@ -86,6 +147,63 @@ func (q *Queries) CriarCliente(ctx context.Context, arg CriarClienteParams) (int
 	var id int64
 	err := row.Scan(&id)
 	return id, err
+}
+
+const criarClienteCadastro = `-- name: CriarClienteCadastro :one
+INSERT INTO clientes (nome, nome_normalizado, telefone, email, origem)
+VALUES ($1, $2, $3, $4, 'cadastro')
+RETURNING id, nome, telefone, email, origem, criado_em, atualizado_em
+`
+
+type CriarClienteCadastroParams struct {
+	Nome            string
+	NomeNormalizado string
+	Telefone        *string
+	Email           *string
+}
+
+type CriarClienteCadastroRow struct {
+	ID           int64
+	Nome         string
+	Telefone     *string
+	Email        *string
+	Origem       string
+	CriadoEm     time.Time
+	AtualizadoEm time.Time
+}
+
+// No CRM o cadastro é digitado: telefone/e-mail em branco no formulário apagam o que estava lá
+// (diferente da importação, em que coluna vazia não mexia no cadastro).
+func (q *Queries) CriarClienteCadastro(ctx context.Context, arg CriarClienteCadastroParams) (CriarClienteCadastroRow, error) {
+	row := q.db.QueryRow(ctx, criarClienteCadastro,
+		arg.Nome,
+		arg.NomeNormalizado,
+		arg.Telefone,
+		arg.Email,
+	)
+	var i CriarClienteCadastroRow
+	err := row.Scan(
+		&i.ID,
+		&i.Nome,
+		&i.Telefone,
+		&i.Email,
+		&i.Origem,
+		&i.CriadoEm,
+		&i.AtualizadoEm,
+	)
+	return i, err
+}
+
+const excluirCliente = `-- name: ExcluirCliente :execrows
+DELETE FROM clientes WHERE id = $1
+`
+
+func (q *Queries) ExcluirCliente(ctx context.Context, id int64) (int64, error) {
+	result, err := q.db.Exec(ctx, excluirCliente, id)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const listarClientes = `-- name: ListarClientes :many

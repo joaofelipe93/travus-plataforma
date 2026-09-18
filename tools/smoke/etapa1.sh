@@ -5,15 +5,14 @@
 #   bash tools/smoke/etapa1.sh
 #
 # Cria (ou redefine a senha de) três usuários de teste, smoke-operador@, smoke-leitura@ e
-# smoke-admin@travus.local, e os desativa no fim. Envia uma planilha FICTÍCIA só para gerar a
-# prévia e a descarta: o cadastro não é alterado. Nunca cria execução (não acessa o Newcon).
+# smoke-admin@travus.local, e os desativa no fim. No cadastro só manda pedidos que a API
+# recusa: nenhum cliente ou cota é criado. Nunca cria execução (não acessa o Newcon).
 set -uo pipefail
 
 RAIZ="$(cd "$(dirname "$0")/../.." && pwd)"
 COMPOSE=(docker compose -f "$RAIZ/deploy/docker-compose.yml")
 APP=http://app.localhost
 API=http://api.localhost
-PLANILHA="$RAIZ/api/internal/importacao/testdata/paridade/01-planilha-clientes.csv"
 COOKIE_NOME="__Host-travus_sessao"
 SENHA="smoke-$(openssl rand -hex 12)"
 FALHAS=0
@@ -84,20 +83,22 @@ esperar "GET app.localhost/api/auth/sessao (operador)" 200 "$(codigo -H "Cookie:
 esperar "GET app.localhost/api/cotas (operador)" 200 "$(codigo -H "Cookie: $OPERADOR_COOKIE" "$APP/api/cotas")"
 esperar "GET app.localhost/canopus/cotas (página, operador)" 200 "$(codigo -H "Cookie: $OPERADOR_COOKIE" "$APP/canopus/cotas")"
 
-echo "== CSRF e perfis"
-esperar "POST importação sem token CSRF" 403 "$(codigo -H "Cookie: $OPERADOR_COOKIE" -H "Origin: $APP" -F "arquivo=@$PLANILHA" "$APP/api/importacoes")"
+echo "== CSRF e perfis (cadastro do CRM: só pedidos recusados, nada é criado)"
+esperar "POST cliente sem token CSRF" 403 "$(codigo -H "Cookie: $OPERADOR_COOKIE" -H "Origin: $APP" -H 'Content-Type: application/json' -d '{"nome":"SMOKE"}' "$APP/api/clientes")"
 
 login smoke-leitura@travus.local
 LEITURA_COOKIE=$COOKIE LEITURA_CSRF=$CSRF
 esperar "GET app.localhost/api/cotas (leitura)" 200 "$(codigo -H "Cookie: $LEITURA_COOKIE" "$APP/api/cotas")"
-esperar "POST importação (leitura)" 403 "$(codigo -H "Cookie: $LEITURA_COOKIE" -H "Origin: $APP" -H "X-CSRF-Token: $LEITURA_CSRF" -F "arquivo=@$PLANILHA" "$APP/api/importacoes")"
+esperar "POST cliente (leitura)" 403 "$(codigo -H "Cookie: $LEITURA_COOKIE" -H "Origin: $APP" -H "X-CSRF-Token: $LEITURA_CSRF" -H 'Content-Type: application/json' -d '{"nome":"SMOKE"}' "$APP/api/clientes")"
+esperar "DELETE cliente (leitura)" 403 "$(codigo -X DELETE -H "Cookie: $LEITURA_COOKIE" -H "Origin: $APP" -H "X-CSRF-Token: $LEITURA_CSRF" "$APP/api/clientes/1")"
 
-RESPOSTA=$(curl -s -w '\n%{http_code}' -H "Cookie: $OPERADOR_COOKIE" -H "Origin: $APP" -H "X-CSRF-Token: $OPERADOR_CSRF" -F "arquivo=@$PLANILHA" "$APP/api/importacoes")
-esperar "POST importação (operador, planilha fictícia)" 201 "$(tail -1 <<<"$RESPOSTA")"
-IMPORTACAO=$(head -1 <<<"$RESPOSTA" | sed -nE 's/^\{"id":([0-9]+).*/\1/p')
-if [[ -n "$IMPORTACAO" ]]; then
-  esperar "descartar a prévia fictícia" 200 "$(codigo -X POST -H "Cookie: $OPERADOR_COOKIE" -H "Origin: $APP" -H "X-CSRF-Token: $OPERADOR_CSRF" "$APP/api/importacoes/$IMPORTACAO/descartar")"
-fi
+# Pedidos inválidos de propósito: a API recusa antes de gravar.
+esperar "POST cliente sem nome (operador, recusado)" 400 "$(codigo -H "Cookie: $OPERADOR_COOKIE" -H "Origin: $APP" -H "X-CSRF-Token: $OPERADOR_CSRF" -H 'Content-Type: application/json' -d '{"nome":"   "}' "$APP/api/clientes")"
+esperar "POST cota sem cliente (operador, recusado)" 400 "$(codigo -H "Cookie: $OPERADOR_COOKIE" -H "Origin: $APP" -H "X-CSRF-Token: $OPERADOR_CSRF" -H 'Content-Type: application/json' -d '{"grupo":"6650","cota":"924"}' "$APP/api/cotas")"
+
+echo "== Importação de planilha: saiu com o CRM, o histórico continua legível"
+esperar "POST importação não existe mais" 405 "$(codigo -H "Cookie: $OPERADOR_COOKIE" -H "Origin: $APP" -H "X-CSRF-Token: $OPERADOR_CSRF" -H 'Content-Type: application/json' -d '{}' "$APP/api/importacoes")"
+esperar "GET histórico de importações (leitura)" 200 "$(codigo -H "Cookie: $LEITURA_COOKIE" "$APP/api/importacoes")"
 
 echo "== Execuções (sem criar dry-run: isso faria o worker entrar no Newcon)"
 esperar "GET app.localhost/api/execucoes (leitura)" 200 "$(codigo -H "Cookie: $LEITURA_COOKIE" "$APP/api/execucoes")"

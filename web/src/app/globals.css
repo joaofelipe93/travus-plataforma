@@ -91,11 +91,15 @@ body {
   --border: var(--linha);
   --input: #34364f;
   --ring: var(--ouro);
-  --chart-1: #d6b23e;
-  --chart-2: #6f9fd8;
-  --chart-3: #5fbf8a;
-  --chart-4: #b48be0;
-  --chart-5: #e0a03a;
+  /* Paleta dos gráficos: ordem fixa, nunca reciclada (uma 5ª categoria vira "Outros").
+     Validada para o fundo escuro dos painéis: faixa de luminosidade, saturação mínima,
+     contraste >= 3:1 e separação suficiente para daltonismo. O ouro fica de fora de
+     propósito: ele é da marca, não de série de dado. */
+  --chart-1: #5a8fd0;
+  --chart-2: #cf7f35;
+  --chart-3: #3da476;
+  --chart-4: #9b72cf;
+  --chart-5: var(--texto-apagado);
   --radius: 0.5rem;
   --sidebar: #161725;
   --sidebar-foreground: var(--texto);

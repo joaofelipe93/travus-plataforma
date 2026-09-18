@@ -28,7 +28,6 @@ export const servicos: readonly Servico[] = [
       { href: "/canopus/execucoes", rotulo: "Execuções", perfis: null },
       { href: "/canopus/cotas", rotulo: "Cotas", perfis: null },
       { href: "/canopus/clientes", rotulo: "Clientes", perfis: null },
-      { href: "/canopus/importar", rotulo: "Importar planilha", perfis: ["admin", "operador"] },
     ],
   },
   {

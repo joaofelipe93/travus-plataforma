@@ -42,7 +42,7 @@ export function EspacoServico({ id, children }: { id: string; children: React.Re
           })}
         </nav>
       </header>
-      <main className="w-full max-w-6xl flex-1 px-8 py-6">
+      <main className="w-full max-w-[96rem] flex-1 px-8 py-6">
         {semPermissao ? (
           <Alert className="max-w-xl">
             <AlertTitle>Sem acesso a esta tela</AlertTitle>
