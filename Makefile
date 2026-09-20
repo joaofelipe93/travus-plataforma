@@ -93,8 +93,9 @@ testes-sem-fila: env
 	for f in deploy/vm/*.sh tools/smoke/*.sh; do bash -n "$$f" || exit 1; done
 	DOMINIO_APP=app.exemplo.com.br DOMINIO_API=api.exemplo.com.br BACKUP_DIR=/tmp $(PROD) config --quiet
 
-verificar: ## Checagens da CI de segurança: arquivos proibidos, migrações seguras (contra origin/main) e segredos (gitleaks)
+verificar: ## Checagens da CI de segurança: arquivos proibidos, versões em sincronia, migrações seguras (contra origin/main) e segredos (gitleaks)
 	bash tools/ci/arquivos-proibidos.sh
+	bash tools/ci/checar-versoes.sh
 	git fetch --quiet origin main && bash tools/ci/checar-migracoes.sh origin/main
 	docker run --rm -v "$(CURDIR):/repo:ro" ghcr.io/gitleaks/gitleaks:v8.28.0 git /repo --no-banner --redact --gitleaks-ignore-path /repo/.gitleaksignore
 

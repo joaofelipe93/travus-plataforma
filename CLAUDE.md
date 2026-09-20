@@ -76,12 +76,14 @@ Não há cadastro público de usuários: só `make usuario`. A senha é pedida n
 | Notificador de check-in | migrações no banco de teste, baileys em 6.7.24, typecheck e testes |
 | Web (Next.js) | lint, tipos e `next build` |
 | Worker Canopus | sintaxe e testes (inclui a garantia de que não há caminho para Confirmar) |
-| Scripts e compose | sintaxe dos scripts, compose local e de produção válidos |
+| Scripts e compose | sintaxe dos scripts, compose local e de produção válidos e **versões em sincronia** (`tools/ci/checar-versoes.sh`: Node e Go dos Dockerfiles iguais aos da CI, `go.mod` cabendo neles, imagem do Playwright igual ao pacote do worker) |
 | Segurança | nenhum arquivo proibido versionado (`tools/ci/arquivos-proibidos.sh`) e gitleaks no histórico inteiro (falsos positivos revisados em `.gitleaksignore`; segredo de verdade se troca, não se ignora) |
 | Migrações seguras para rollback | `tools/ci/checar-migracoes.sh`: migração existente não se edita; número novo maior que o da `main` e sem repetição (dois PRs com a mesma versão: renumere); o Up não destrói nem renomeia, salvo `-- ci: destrutiva-aprovada: <motivo>` |
 | Integração | `make up` com credenciais fictícias do Newcon, build da imagem do notificador e `make smoke` (sem execução, sem WhatsApp) |
 
-Localmente: `make test` (testes) e `make verificar` (segurança e migrações).
+Localmente: `make test` (testes) e `make verificar` (segurança, versões e migrações).
+
+**Dependências** (`.github/dependabot.yml`): PRs semanais agrupados por pasta (Go, npm da web e dos dois workers, imagens dos Dockerfiles e as próprias ações), no padrão `chore(deps)`, passando pela CI como qualquer PR. Ficam de fora, de propósito: `baileys` (travado em 6.7.24) e `playwright` com a imagem `mcr.microsoft.com/playwright` (sobem juntos, à mão). Atualização que desencontra versão entre arquivos é barrada pelo job Scripts e compose.
 
 Também é obrigatório o **"Título do PR no padrão"** (`.github/workflows/titulo-pr.yml`): o merge é por squash e o título do PR vira a mensagem do commit na `main`, que o versionamento lê. Formato `tipo(escopo)!: descrição`, com `feat`, `fix`, `perf`, `revert`, `docs`, `ci`, `build`, `refactor`, `test`, `chore` ou `style`; `!` marca mudança incompatível.
 

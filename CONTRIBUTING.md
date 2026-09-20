@@ -56,6 +56,7 @@ mudança incompatível. Exemplos: `feat(reservas): histórico de mensagens`,
 - **`api/internal/db` é gerado** (`make sqlc`). Em conflito, resolva as migrações e consultas e
   gere de novo; não resolva o código gerado à mão.
 - **`version.txt` e `CHANGELOG.md` são do release-please.** Não edite.
+- **Versões amarradas**: Node e Go aparecem nos Dockerfiles e na CI, e o Playwright aparece na imagem e no `package-lock` do worker Canopus. Mudou num lugar, mude em todos (`make verificar` confere). PR do Dependabot que quebrar isso reprova: ajuste o outro lado no mesmo PR.
 - Remova o worktree quando o PR entrar: `git worktree remove ../travus-<tipo>-<assunto>`.
 
 ## O que um agente nunca faz

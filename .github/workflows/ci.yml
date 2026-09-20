@@ -157,6 +157,8 @@ jobs:
           sh -n workers/canopus/docker-entrypoint.sh
           sh -n deploy/backup/backup.sh
           for f in deploy/vm/*.sh tools/smoke/*.sh tools/ci/*.sh; do bash -n "$f" || exit 1; done
+      - name: Versões iguais nos Dockerfiles, na CI e no package-lock
+        run: bash tools/ci/checar-versoes.sh
       - name: Compose local e de produção válidos
         env:
           POSTGRES_PASSWORD: x
