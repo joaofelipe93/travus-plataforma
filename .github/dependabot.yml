@@ -1,0 +1,66 @@
+# Atualização de dependências: o Dependabot abre PRs semanais que passam pela CI como qualquer
+# outro (a main continua exigindo tudo verde). Os títulos saem no padrão "chore(deps): …", que o
+# release-please entende e não coloca no changelog.
+#
+# Atualizações agrupadas por pasta para não virar uma enxurrada de PRs; o que é incompatível com
+# o projeto fica bloqueado aqui, com o motivo:
+#   - baileys travado em 6.7.24 (a 7.x tem quedas silenciosas de conexão; a CI também confere);
+#   - playwright só sobe junto com a imagem mcr.microsoft.com/playwright, que traz os navegadores
+#     (tools/ci/checar-versoes.sh conferiria, mas o PR nasceria quebrado à toa).
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule: { interval: weekly, day: monday, time: "09:00", timezone: America/Sao_Paulo }
+    commit-message: { prefix: "ci(deps)" }
+    open-pull-requests-limit: 3
+    groups:
+      acoes: { patterns: ["*"] }
+
+  - package-ecosystem: gomod
+    directory: /api
+    schedule: { interval: weekly, day: monday, time: "09:00", timezone: America/Sao_Paulo }
+    commit-message: { prefix: "chore(deps)" }
+    open-pull-requests-limit: 3
+    groups:
+      api: { patterns: ["*"], update-types: [minor, patch] }
+
+  - package-ecosystem: npm
+    directory: /web
+    schedule: { interval: weekly, day: monday, time: "09:00", timezone: America/Sao_Paulo }
+    commit-message: { prefix: "chore(deps)", prefix-development: "chore(deps-dev)" }
+    open-pull-requests-limit: 3
+    groups:
+      web: { patterns: ["*"], update-types: [minor, patch] }
+
+  - package-ecosystem: npm
+    directory: /workers/checkin-whatsapp
+    schedule: { interval: weekly, day: monday, time: "09:00", timezone: America/Sao_Paulo }
+    commit-message: { prefix: "chore(deps)", prefix-development: "chore(deps-dev)" }
+    open-pull-requests-limit: 3
+    ignore:
+      - dependency-name: baileys
+    groups:
+      checkin-whatsapp: { patterns: ["*"], update-types: [minor, patch] }
+
+  - package-ecosystem: npm
+    directory: /workers/canopus
+    schedule: { interval: weekly, day: monday, time: "09:00", timezone: America/Sao_Paulo }
+    commit-message: { prefix: "chore(deps)", prefix-development: "chore(deps-dev)" }
+    open-pull-requests-limit: 3
+    ignore:
+      - dependency-name: playwright
+    groups:
+      canopus: { patterns: ["*"], update-types: [minor, patch] }
+
+  # Imagens base dos Dockerfiles (Node, Go, Postgres em ferramentas). A CI confere se o Node e o
+  # Go das imagens continuam iguais aos da própria CI (tools/ci/checar-versoes.sh).
+  - package-ecosystem: docker
+    directories: [/api, /web, /workers/checkin-whatsapp, /workers/canopus]
+    schedule: { interval: weekly, day: monday, time: "09:00", timezone: America/Sao_Paulo }
+    commit-message: { prefix: "chore(deps)" }
+    open-pull-requests-limit: 3
+    ignore:
+      - dependency-name: mcr.microsoft.com/playwright
+    groups:
+      imagens: { patterns: ["*"] }
