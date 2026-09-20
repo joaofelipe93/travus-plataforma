@@ -31,7 +31,7 @@ jobs:
         env:
           CONFIRMAR: ${{ inputs.confirmar }}
         run: '[ "$CONFIRMAR" = VOLTAR ] || { echo "::error::digite VOLTAR para confirmar"; exit 1; }'
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Chave de deploy
         env:
           CHAVE: ${{ secrets.DEPLOY_SSH_KEY }}
