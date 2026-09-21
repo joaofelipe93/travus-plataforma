@@ -83,7 +83,7 @@ Não há cadastro público de usuários: só `make usuario`. A senha é pedida n
 
 Localmente: `make test` (testes) e `make verificar` (segurança, versões e migrações).
 
-**Dependências** (`.github/dependabot.yml`): PRs semanais agrupados por pasta (Go, npm da web e dos dois workers, imagens dos Dockerfiles e as próprias ações), no padrão `chore(deps)`, passando pela CI como qualquer PR. Ficam de fora, de propósito: `baileys` (travado em 6.7.24) e `playwright` com a imagem `mcr.microsoft.com/playwright` (sobem juntos, à mão). Atualização que desencontra versão entre arquivos é barrada pelo job Scripts e compose.
+**Dependências** (`.github/dependabot.yml`): PRs semanais agrupados por pasta (Go, npm da web e dos dois workers, imagens dos Dockerfiles e as próprias ações), no padrão `chore(deps)`, passando pela CI como qualquer PR. Ficam de fora, de propósito: `baileys` (travado em 6.7.24), `playwright` com a imagem `mcr.microsoft.com/playwright` (sobem juntos, à mão) e as versões **maiores** da imagem `node` e do `@types/node` (o runtime fica no **24 LTS**; o 26 vira LTS em outubro de 2026 e a troca sobe os três Dockerfiles, a CI e os tipos num PR só). Atualização que desencontra versão entre arquivos é barrada pelo job Scripts e compose.
 
 Também é obrigatório o **"Título do PR no padrão"** (`.github/workflows/titulo-pr.yml`): o merge é por squash e o título do PR vira a mensagem do commit na `main`, que o versionamento lê. Formato `tipo(escopo)!: descrição`, com `feat`, `fix`, `perf`, `revert`, `docs`, `ci`, `build`, `refactor`, `test`, `chore` ou `style`; `!` marca mudança incompatível.
 

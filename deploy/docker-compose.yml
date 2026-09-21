@@ -297,7 +297,7 @@ services:
 
   # Testes da API com Postgres (make test), num banco separado: travus_teste.
   api-teste:
-    image: golang:1.26.8-alpine
+    image: golang:1.27.0-alpine
     profiles: [teste]
     working_dir: /src
     command: ["sh", "-c", "go vet ./... && go test -p 1 -count=1 ./..."]
