@@ -4,7 +4,8 @@
 # no build ou, pior, em produção.
 #
 #   1. Node: web/Dockerfile, workers/checkin-whatsapp/Dockerfile e NODE_VERSION da CI;
-#   2. Go: api/Dockerfile e GO_VERSION da CI (e a linha "go" do go.mod não pode ser maior);
+#   2. Go: api/Dockerfile, o serviço api-teste do compose e GO_VERSION da CI (e a linha "go"
+#      do go.mod não pode ser maior);
 #   3. Playwright: a tag da imagem do worker Canopus e o pacote no package-lock.json
 #      (a imagem traz os navegadores; versões diferentes quebram o worker no Newcon).
 #
@@ -34,6 +35,9 @@ done
 
 versao_go_imagem=$(sed -nE 's/^FROM golang:([0-9.]+)-.*/\1/p' api/Dockerfile | head -1)
 conferir "Go da CI e do api/Dockerfile" "$ci_go" "$versao_go_imagem" "api/Dockerfile"
+
+go_compose=$(sed -nE 's/^ *image: golang:([0-9.]+)-.*/\1/p' deploy/docker-compose.yml | head -1)
+conferir "Go da CI e do serviço api-teste" "$ci_go" "$go_compose" "deploy/docker-compose.yml"
 
 # A linha "go" do go.mod é o piso da linguagem: não pode pedir mais do que a imagem/CI usam.
 go_mod=$(sed -nE 's/^go ([0-9.]+).*/\1/p' api/go.mod | head -1)

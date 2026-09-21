@@ -30,6 +30,10 @@ updates:
     schedule: { interval: weekly, day: monday, time: "09:00", timezone: America/Sao_Paulo }
     commit-message: { prefix: "chore(deps)", prefix-development: "chore(deps-dev)" }
     open-pull-requests-limit: 3
+    ignore:
+      # Os tipos acompanham o Node que roda de verdade (hoje o 24 LTS): sobem junto com a imagem.
+      - dependency-name: "@types/node"
+        update-types: [version-update:semver-major]
     groups:
       web: { patterns: ["*"], update-types: [minor, patch] }
 
@@ -62,5 +66,9 @@ updates:
     open-pull-requests-limit: 3
     ignore:
       - dependency-name: mcr.microsoft.com/playwright
+      # Node só em versão LTS: o 26 vira LTS em outubro de 2026. Até lá, ficamos no 24 LTS
+      # (a troca mexe em três Dockerfiles, na CI e nos @types/node, num PR só).
+      - dependency-name: node
+        update-types: [version-update:semver-major]
     groups:
       imagens: { patterns: ["*"] }
