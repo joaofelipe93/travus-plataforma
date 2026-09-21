@@ -1,10 +1,10 @@
 # syntax=docker/dockerfile:1
-FROM node:24.21.0-alpine AS deps
+FROM node:26.9.0-alpine AS deps
 WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci --no-audit --no-fund
 
-FROM node:24.21.0-alpine AS build
+FROM node:26.9.0-alpine AS build
 WORKDIR /app
 ENV NEXT_TELEMETRY_DISABLED=1
 # Versão (version.txt) e commit, passados pelo compose; o Next embute no build (NEXT_PUBLIC_*).
@@ -17,7 +17,7 @@ COPY . .
 RUN npm run build
 
 # Só o servidor standalone (sem node_modules completo).
-FROM node:24.21.0-alpine
+FROM node:26.9.0-alpine
 WORKDIR /app
 ENV NODE_ENV=production \
     NEXT_TELEMETRY_DISABLED=1 \

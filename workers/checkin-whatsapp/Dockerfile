@@ -6,7 +6,7 @@
 
 # Dependências (com as de desenvolvimento: o make test roda nesta fase). O libsignal do baileys
 # vem do GitHub (git). O git não vai para a imagem final.
-FROM node:24.21.0-bookworm-slim AS deps
+FROM node:26.8.2-bookworm-slim AS deps
 RUN apt-get update \
  && apt-get install -y --no-install-recommends git ca-certificates \
  && rm -rf /var/lib/apt/lists/*
@@ -19,7 +19,7 @@ COPY tsconfig.json ./
 COPY src ./src
 RUN npm run build && npm prune --omit=dev --no-audit --no-fund
 
-FROM node:24.21.0-bookworm-slim
+FROM node:26.8.2-bookworm-slim
 WORKDIR /app
 # Versão (version.txt) e commit, passados pelo compose; aparecem no /health.
 ARG VERSAO=dev
