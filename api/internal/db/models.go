@@ -94,16 +94,17 @@ type CheckinConfiguracao struct {
 }
 
 type CheckinEvento struct {
-	ID         int64
-	ChaveDedup string
-	Origem     string
-	Payload    []byte
-	RecebidoEm time.Time
+	ID           int64
+	ChaveDedup   string
+	Origem       string
+	Payload      []byte
+	RecebidoEm   time.Time
+	ProcessadoEm *time.Time
 }
 
 type CheckinMensagem struct {
 	ID                 int64
-	EventoID           int64
+	EventoID           *int64
 	DestinoJid         string
 	Texto              string
 	Status             string
@@ -112,6 +113,31 @@ type CheckinMensagem struct {
 	UltimoErro         *string
 	EnviadaEm          *time.Time
 	CriadaEm           time.Time
+	ResumoID           *int64
+}
+
+type CheckinReserva struct {
+	ID             int64
+	ReservaID      string
+	Status         string
+	CheckIn        time.Time
+	CheckOut       *time.Time
+	Imovel         *string
+	Hospede        *string
+	Hospedes       *int32
+	Canal          *string
+	Telefone       *string
+	UltimoEventoID int64
+	CriadaEm       time.Time
+	AtualizadaEm   time.Time
+}
+
+type CheckinResumo struct {
+	ID       int64
+	Tipo     string
+	Data     time.Time
+	Reservas int32
+	CriadoEm time.Time
 }
 
 type Cliente struct {

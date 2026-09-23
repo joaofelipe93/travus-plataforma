@@ -14,13 +14,11 @@ function capitalizar(value: string): string {
   return value.charAt(0).toUpperCase() + value.slice(1)
 }
 
-export function formatCheckinMessage(evt: CheckinEvent): string {
-  // Mesmo webhook, dois eventos: o título é o que separa um do outro no grupo.
-  const titulo = isCancelamento(evt)
-    ? '❌ *Cancelamento de Reserva*'
-    : '✅ *Nova Reserva Realizada*'
-
-  const cabecalho = [titulo, '']
+/**
+ * O bloco de uma reserva (chalé, datas, hóspede…), igual na mensagem avulsa e em cada item do
+ * resumo diário. Campo que não veio não aparece.
+ */
+export function linhasReserva(evt: CheckinEvent): string[] {
   const lines: string[] = []
 
   if (evt.imovel) lines.push(`🏠 ${evt.imovel}`)
@@ -38,6 +36,18 @@ export function formatCheckinMessage(evt: CheckinEvent): string {
   if (evt.canal) lines.push(`🌐 ${capitalizar(evt.canal)}`)
   if (evt.telefone) lines.push(`☎️ ${evt.telefone}`)
 
+  return lines
+}
+
+export function formatCheckinMessage(evt: CheckinEvent): string {
+  // Mesmo webhook, dois eventos: o título é o que separa um do outro no grupo.
+  const titulo = isCancelamento(evt)
+    ? '❌ *Cancelamento de Reserva*'
+    : '✅ *Nova Reserva Realizada*'
+
+  const cabecalho = [titulo, '']
+  const lines = linhasReserva(evt)
+
   // Sem o JSON cru anexado, esta linha passa a ser o único sinal no grupo de
   // que chegou um formato desconhecido — o payload continua inteiro no banco.
   if (isUnmapped(evt)) {
@@ -51,4 +61,18 @@ export function formatCheckinMessage(evt: CheckinEvent): string {
   }
 
   return [...cabecalho, ...lines].join('\n')
+}
+
+export type TipoResumo = 'hoje' | 'amanha'
+
+/**
+ * Resumo diário (issue #17): todas as reservas confirmadas com check-in no dia, numa mensagem
+ * só, um bloco por reserva separado por linha em branco. Sem reservas não há resumo (quem
+ * chama não envia nada).
+ */
+export function formatResumo(tipo: TipoResumo, reservas: CheckinEvent[]): string {
+  const titulo =
+    tipo === 'amanha' ? '✅ *Reservas Confirmadas para Amanhã*' : '✅ *Reservas Confirmadas para Hoje*'
+  const blocos = reservas.map((r) => linhasReserva(r).join('\n'))
+  return [titulo, ...blocos].join('\n\n')
 }

@@ -6,6 +6,7 @@ import { grupoDestino } from './db/configuracao.js'
 import { buildServer } from './server.js'
 import { connect, disconnect, getStatus } from './whatsapp/client.js'
 import { startOutboxWorker, stopOutboxWorker } from './whatsapp/outbox.js'
+import { preencherReservas, startResumoDiario, stopResumoDiario } from './resumos/agendador.js'
 
 /**
  * Em modo `pretty` o pino-pretty roda numa worker thread: um `process.exit()`
@@ -55,6 +56,10 @@ async function main() {
     'iniciando notificador de check-in',
   )
 
+  // Antes do webhook e do primeiro resumo (ver preencherReservas). Banco fora do ar derruba o
+  // boot, e o container sobe de novo.
+  await preencherReservas()
+
   const app = buildServer()
 
   // A conexão do WhatsApp não bloqueia o boot: o HTTP precisa aceitar webhooks
@@ -62,6 +67,7 @@ async function main() {
   connect().catch((err) => logger.error({ err }, 'falha na conexão inicial do WhatsApp'))
 
   startOutboxWorker()
+  startResumoDiario()
 
   await app.listen({ port: env.PORT, host: env.HOST })
 
@@ -93,6 +99,7 @@ async function main() {
 
     try {
       // Espera o ciclo em andamento: fechar o banco no meio dele perderia o registro do envio.
+      await stopResumoDiario()
       await stopOutboxWorker()
       await app.close()
       await disconnect()

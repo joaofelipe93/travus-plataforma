@@ -1,29 +1,13 @@
 import { createHash } from 'node:crypto'
 import type { FastifyInstance } from 'fastify'
 import { grupoDestino } from '../db/configuracao.js'
-import { insertEvent } from '../db/events.js'
-import { enqueue, hasMessageForEvent } from '../db/outbox.js'
+import { eventoProcessado, insertEvent } from '../db/events.js'
 import { normalizeCheckin, isUnmapped } from '../domain/checkin.js'
-import { formatCheckinMessage } from '../domain/template.js'
+import { idReserva } from '../domain/reserva-id.js'
+import { tratarEvento } from '../resumos/evento.js'
 import { requireToken } from './auth.js'
 
 const SOURCE = 'nova-reserva'
-
-/** Campos de id mais comuns; sem nenhum deles, cai no hash do payload. */
-const ID_FIELDS = [
-  'id',
-  'event_id',
-  'reservation_id',
-  'booking_id',
-  // O provedor real (workflow do PMS) manda o id da reserva neste nome. Sem
-  // ele a chave caía no SHA-256 do corpo, que inclui `_workflow_execution_id`
-  // — valor que muda a cada execução, fazendo um reprocessamento da mesma
-  // reserva escapar da deduplicação e duplicar a mensagem no grupo.
-  'booking_uuid',
-  'confirmation_code',
-  'reservation_code',
-  'uuid',
-]
 
 /**
  * Sufixo de status para a chave de deduplicação.
@@ -44,15 +28,8 @@ function statusSuffix(payload: unknown): string {
 
 function resolveDedupeKey(payload: unknown, rawJson: string): string {
   if (payload !== null && typeof payload === 'object') {
-    const record = payload as Record<string, unknown>
-    const sufixo = statusSuffix(payload)
-    for (const field of ID_FIELDS) {
-      const value = record[field]
-      if (typeof value === 'string' && value.trim() !== '') {
-        return `${SOURCE}:${value.trim()}${sufixo}`
-      }
-      if (typeof value === 'number') return `${SOURCE}:${value}${sufixo}`
-    }
+    const id = idReserva(payload)
+    if (id !== undefined) return `${SOURCE}:${id}${statusSuffix(payload)}`
   }
   // O hash já cobre o corpo inteiro, status incluso — não precisa de sufixo.
   return `${SOURCE}:sha256:${createHash('sha256').update(rawJson).digest('hex')}`
@@ -70,18 +47,37 @@ export async function webhookRoutes(app: FastifyInstance) {
       const dedupeKey = resolveDedupeKey(payload, rawJson)
       const event = await insertEvent({ dedupeKey, source: SOURCE, rawPayload: rawJson })
 
-      // Um evento já visto só é ignorado se de fato virou mensagem. Eventos
-      // gravados antes do grupo existir (`stored_no_target`) ficariam presos
-      // como duplicados para sempre — aqui eles são recuperados no reenvio.
-      if (event.isDuplicate && (await hasMessageForEvent(event.id))) {
+      // Um evento já visto só é ignorado se de fato foi tratado (virou mensagem ou entrou na
+      // reserva do resumo). Eventos gravados antes do grupo existir (`stored_no_target`)
+      // ficariam presos como duplicados para sempre — aqui eles são recuperados no reenvio.
+      if (event.isDuplicate && (await eventoProcessado(event.id))) {
         req.log.info({ dedupeKey, eventId: event.id }, 'evento duplicado, ignorado')
         return reply.code(200).send({ status: 'duplicate', eventId: event.id })
       }
 
-      const destino = await grupoDestino()
-      if (!destino) {
+      const evt = normalizeCheckin(payload)
+      const resultado = await tratarEvento({
+        eventId: event.id,
+        reservaId: idReserva(payload),
+        evt,
+        destino: await grupoDestino(),
+      })
+
+      // Nenhum campo reconhecido significa mensagem crua no grupo — o sinal de
+      // que `domain/checkin.ts` precisa ser ajustado ao payload real.
+      if (isUnmapped(evt)) {
+        req.log.warn(
+          { eventId: event.id, dedupeKey, campos: Object.keys(payload as object) },
+          'payload sem campos reconhecidos — ajuste normalizeCheckin (veja GET /events)',
+        )
+      }
+
+      if (resultado.acao === 'sem_destino') {
         // O evento fica gravado; sem destino não há o que enfileirar.
-        req.log.error({ eventId: event.id }, 'nenhum grupo do WhatsApp escolhido — evento salvo sem envio')
+        req.log.error(
+          { eventId: event.id, motivo: resultado.motivo },
+          'nenhum grupo do WhatsApp escolhido — evento salvo sem envio',
+        )
         return reply.code(200).send({
           status: 'stored_no_target',
           eventId: event.id,
@@ -89,29 +85,19 @@ export async function webhookRoutes(app: FastifyInstance) {
         })
       }
 
-      const evt = normalizeCheckin(payload)
-      const body = formatCheckinMessage(evt)
-      const outboxId = await enqueue({
-        eventId: event.id,
-        targetJid: destino.jid,
-        body,
-      })
-
-      // Nenhum campo reconhecido significa mensagem crua no grupo — o sinal de
-      // que `domain/checkin.ts` precisa ser ajustado ao payload real.
-      if (isUnmapped(evt)) {
-        req.log.warn(
-          { eventId: event.id, outboxId, dedupeKey, campos: Object.keys(payload as object) },
-          'payload sem campos reconhecidos — ajuste normalizeCheckin (veja GET /events)',
+      if (resultado.acao === 'resumo') {
+        req.log.info(
+          { eventId: event.id, dedupeKey, motivo: resultado.motivo },
+          'reserva guardada para o resumo diário',
         )
+        return reply.code(200).send({ status: 'scheduled', eventId: event.id })
       }
 
       req.log.info(
-        { eventId: event.id, outboxId, dedupeKey, bytes: rawJson.length },
+        { eventId: event.id, outboxId: resultado.outboxId, dedupeKey, motivo: resultado.motivo, bytes: rawJson.length },
         'evento enfileirado',
       )
-
-      return reply.code(200).send({ status: 'queued', eventId: event.id, outboxId })
+      return reply.code(200).send({ status: 'queued', eventId: event.id, outboxId: resultado.outboxId })
     },
   )
 }

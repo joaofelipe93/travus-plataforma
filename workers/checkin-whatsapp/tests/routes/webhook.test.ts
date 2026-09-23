@@ -1,5 +1,13 @@
 import { TEST_SECRET, TEST_GROUP_JID } from '../helpers/setup.js'
-import { resetDb, getOutboxRow, contaMensagens } from '../helpers/db.js'
+import {
+  resetDb,
+  getOutboxRow,
+  contaMensagens,
+  getEventRow,
+  listaMensagens,
+  listaReservas,
+  seedResumo,
+} from '../helpers/db.js'
 import { buildWebhookApp } from '../helpers/app.js'
 import { test, describe, before, beforeEach, after } from 'node:test'
 import assert from 'node:assert/strict'
@@ -8,8 +16,40 @@ import type { FastifyInstance } from 'fastify'
 import { env } from '../../src/config/env.js'
 import { listRecentEvents } from '../../src/db/events.js'
 import { definirGrupoDestino } from '../../src/db/configuracao.js'
+import { relogioLocal, somarDias } from '../../src/domain/datas.js'
 
 const URL = '/webhooks/nova-reserva'
+
+// A regra do resumo compara com o dia de hoje no fuso das pousadas: datas relativas a hoje.
+const HOJE = relogioLocal(new Date(), 'America/Sao_Paulo').data
+const ONTEM = somarDias(HOJE, -1)
+const AMANHA = somarDias(HOJE, 1)
+const DEPOIS_DE_AMANHA = somarDias(HOJE, 2)
+const DAQUI_A_UMA_SEMANA = somarDias(HOJE, 7)
+
+/** `AAAA-MM-DD` → `dd/mm/aaaa`, como o provedor real manda. */
+function br(data: string): string {
+  const [ano, mes, dia] = data.split('-')
+  return `${dia}/${mes}/${ano}`
+}
+
+/** Payload no formato do provedor real (dados fictícios). */
+function reservaReal(extra: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
+    guest_name: 'Fulano de Tal',
+    guest_phone: '+55 11 90000 1234',
+    property_name: 'Chalé 01',
+    check_in: br(AMANHA),
+    check_out: br(DEPOIS_DE_AMANHA),
+    guests: '2',
+    channel: 'booking',
+    status: 'confirmed',
+    cancellation_reason: '',
+    booking_uuid: '0a0b0c0d-0000-4000-8000-000000000001',
+    _workflow_execution_id: 968,
+    ...extra,
+  }
+}
 
 let app: FastifyInstance
 
@@ -69,12 +109,14 @@ describe('POST /webhooks/nova-reserva — enfileiramento', () => {
   })
 
   test('enfileira a mensagem e devolve 200 imediatamente', async () => {
+    // Um resumo do dia de check-in já saiu: a reserva vai avulsa (ver "resumo diário" abaixo).
+    await seedResumo('amanha', AMANHA)
     const res = await post({
       id: 'RES-001',
       guest: { name: 'João Silva' },
       listing: { name: 'Apto 302' },
-      check_in: '2026-08-27',
-      check_out: '2026-08-30',
+      check_in: AMANHA,
+      check_out: DEPOIS_DE_AMANHA,
       guests: 2,
     })
 
@@ -89,7 +131,7 @@ describe('POST /webhooks/nova-reserva — enfileiramento', () => {
     assert.equal(row.destino_jid, TEST_GROUP_JID)
     assert.equal(row.status, 'pendente')
     assert.match(row.texto, /👤 João Silva/)
-    assert.match(row.texto, /📅 27\/08\/2026 → 30\/08\/2026/)
+    assert.match(row.texto, new RegExp(`📅 ${br(AMANHA)} → ${br(DEPOIS_DE_AMANHA)}`))
   })
 
   test('grava o payload como veio', async () => {
@@ -229,7 +271,7 @@ describe('POST /webhooks/nova-reserva — chave de deduplicação', () => {
     }
 
     const primeira = await post(reserva)
-    assert.equal(primeira.json().status, 'queued')
+    assert.equal(primeira.json().status, 'scheduled')
 
     // Mesma reserva, outra execução do workflow: corpo diferente, reserva igual.
     const segunda = await post({ ...reserva, _workflow_execution_id: 969 })
@@ -319,7 +361,7 @@ describe('POST /webhooks/nova-reserva — sem grupo configurado', () => {
   })
 
   test('reenvio depois de configurar o grupo recupera o evento preso', async () => {
-    // É o ponto do `hasMessageForEvent` no handler: um evento gravado antes de
+    // É o ponto do `eventoProcessado` no handler: um evento gravado antes de
     // existir destino não pode ficar marcado como duplicado para sempre.
     const payload = { id: 'RES-1', guest_name: 'Ana' }
 
@@ -341,6 +383,106 @@ describe('POST /webhooks/nova-reserva — sem grupo configurado', () => {
   })
 })
 
+describe('POST /webhooks/nova-reserva — resumo diário', () => {
+  beforeEach(async () => {
+    await resetDb()
+    env.WHATSAPP_GROUP_JID = TEST_GROUP_JID
+  })
+
+  test('reserva com data guarda para o resumo e não manda nada agora', async () => {
+    const res = await post(reservaReal())
+    const body = res.json() as { status: string; eventId: number }
+
+    assert.equal(res.statusCode, 200)
+    assert.equal(body.status, 'scheduled')
+    assert.equal(await contaMensagens(), 0)
+    assert.deepEqual(
+      (await listaReservas()).map((r) => [r.reserva_id, r.status, r.check_in, r.hospede]),
+      [['0a0b0c0d-0000-4000-8000-000000000001', 'confirmada', AMANHA, 'Fulano de Tal']],
+    )
+    assert.ok((await getEventRow(body.eventId)).processado_em, 'evento marcado como processado')
+
+    // Reprocessamento no provedor: sem mensagem, o que deduplica é o `processado_em`.
+    const segunda = await post(reservaReal({ _workflow_execution_id: 969 }))
+    assert.equal(segunda.json().status, 'duplicate')
+  })
+
+  test('cancelamento antes do resumo só tira a reserva do resumo', async () => {
+    await post(reservaReal())
+    const res = await post(reservaReal({ status: 'cancelled', cancellation_reason: 'Desistiu' }))
+
+    assert.equal(res.json().status, 'scheduled')
+    assert.equal(await contaMensagens(), 0)
+    assert.deepEqual((await listaReservas()).map((r) => r.status), ['cancelada'])
+  })
+
+  test('reserva que chega depois do resumo do dia vai avulsa', async () => {
+    await seedResumo('amanha', AMANHA)
+
+    const res = await post(reservaReal())
+    assert.equal(res.json().status, 'queued')
+    const row = await getOutboxRow((res.json() as { outboxId: number }).outboxId)
+    assert.match(row.texto, /✅ \*Nova Reserva Realizada\*/)
+    assert.equal((await listaReservas()).length, 1, 'e fica na reserva para o resumo de hoje')
+  })
+
+  test('cancelamento de reserva que já saiu em resumo vai avulsa', async () => {
+    await post(reservaReal())
+    await seedResumo('amanha', AMANHA)
+
+    const res = await post(reservaReal({ status: 'cancelled', cancellation_reason: 'Desistiu' }))
+    assert.equal(res.json().status, 'queued')
+    const row = await getOutboxRow((res.json() as { outboxId: number }).outboxId)
+    assert.match(row.texto, /❌ \*Cancelamento de Reserva\*/)
+  })
+
+  test('cancelamento depois do resumo de reserva que o grupo nunca viu não manda nada', async () => {
+    await seedResumo('amanha', AMANHA)
+    const res = await post(reservaReal({ status: 'cancelled', cancellation_reason: 'Desistiu' }))
+
+    assert.equal(res.json().status, 'scheduled')
+    assert.equal(await contaMensagens(), 0)
+  })
+
+  test('resumo de outro dia não conta: reserva da semana que vem espera o resumo dela', async () => {
+    await seedResumo('amanha', AMANHA)
+    await seedResumo('hoje', HOJE)
+
+    const res = await post(reservaReal({ check_in: br(DAQUI_A_UMA_SEMANA) }))
+    assert.equal(res.json().status, 'scheduled')
+    assert.equal(await contaMensagens(), 0)
+  })
+
+  test('check-in já passado não manda nada, nem com resumo registrado', async () => {
+    await seedResumo('hoje', ONTEM)
+    const res = await post(reservaReal({ check_in: br(ONTEM) }))
+
+    assert.equal(res.json().status, 'scheduled')
+    assert.equal(await contaMensagens(), 0)
+  })
+
+  test('data ilegível não dá para agendar: vai avulsa como antes', async () => {
+    const res = await post(reservaReal({ check_in: 'amanhã cedo' }))
+
+    assert.equal(res.json().status, 'queued')
+    assert.deepEqual(await listaReservas(), [])
+  })
+
+  test('avulsa sem grupo desfaz a reserva e o reenvio com grupo recupera', async () => {
+    await seedResumo('amanha', AMANHA)
+    delete env.WHATSAPP_GROUP_JID
+
+    const antes = await post(reservaReal())
+    assert.equal(antes.json().status, 'stored_no_target')
+    assert.deepEqual(await listaReservas(), [], 'nada gravado além do evento')
+
+    env.WHATSAPP_GROUP_JID = TEST_GROUP_JID
+    const depois = await post(reservaReal())
+    assert.equal(depois.json().status, 'queued')
+    assert.equal(depois.json().eventId, antes.json().eventId)
+    assert.equal((await listaMensagens()).length, 1)
+  })
+})
 
 function sha256(text: string): string {
   return createHash('sha256').update(text).digest('hex')

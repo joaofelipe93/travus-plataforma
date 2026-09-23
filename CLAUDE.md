@@ -8,7 +8,7 @@ Guia para o Claude Code (e para quem mais trabalhar aqui). Interface, mensagens,
 
 Tudo o que se sabe do Newcon (seletores, fluxos, armadilhas) está em **`docs/canopus-newcon.md`. Leia inteiro antes de mexer no worker.**
 
-O segundo serviço é o **notificador de check-in** (`workers/checkin-whatsapp`): recebe o webhook de reserva/cancelamento do PMS e publica a mensagem num grupo do WhatsApp (Baileys). Veio de `/home/joao/Documentos/airbnb`, que roda com PM2 na VM `appairbnb` até a migração (`docs/producao.md`, seção 9). **Antes de mexer nele, leia `workers/checkin-whatsapp/CLAUDE.md`** (deduplicação, Baileys, um processo só).
+O segundo serviço é o **notificador de check-in** (`workers/checkin-whatsapp`): recebe o webhook de reserva/cancelamento do PMS e publica num grupo do WhatsApp (Baileys) um resumo diário das reservas (08h "para Hoje", 17h "para Amanhã"). Veio de `/home/joao/Documentos/airbnb`, que roda com PM2 na VM `appairbnb` até a migração (`docs/producao.md`, seção 9). **Antes de mexer nele, leia `workers/checkin-whatsapp/CLAUDE.md`** (deduplicação, Baileys, um processo só).
 
 ## Regras inegociáveis
 
@@ -169,8 +169,8 @@ merge do PR "chore: versão X.Y.Z" → tag vX.Y.Z + release → workflow Deploy:
   - `src/leitura-credenciamento.js`: seletores de assembleia e do Histórico (só leitura). `src/plataforma.js`: cliente das rotas internas. `src/registro.js`: logger que manda eventos à API. `src/config-worker.js`: só variáveis de ambiente (recusa `NEWCON_URL` com a grafia `frmCorCCCnsLogin`).
   - No container, `docker-entrypoint.sh` bloqueia `--confirm`/`real`, e o Chromium precisa de `shm_size` (ou `--ipc=host`). `legado/` é só referência.
 - **Notificador de check-in** (`workers/checkin-whatsapp/`, Node 24 + TypeScript, Fastify, Baileys **6.7.24** fixo; guia próprio em `workers/checkin-whatsapp/CLAUDE.md`).
-  - Webhook → `checkin.eventos` (deduplicação pelo id da reserva + status) → responde 200 → `checkin.mensagens` → laço da fila envia ao grupo quando o WhatsApp está conectado (6 tentativas com espera).
-  - **Banco: o Postgres da plataforma, schema `checkin`** (migrações 00006 e 00007 da API; mudança de tabela é migração nova na API). Papel `checkin` só com SELECT/INSERT/UPDATE nesse schema; o login é ligado pelo `api migrate up` com `CHECKIN_DB_SENHA`.
+  - Webhook → `checkin.eventos` (deduplicação pelo id da reserva + status) → `checkin.reservas` → responde 200. **Resumo diário** (issue #17): às 08h "Reservas Confirmadas para Hoje" e às 17h "para Amanhã", todas numa mensagem (`checkin.resumos`, um por tipo e dia, nunca duas vezes); avulsa só para a reserva ou o cancelamento que chega depois do resumo do dia e para payload sem id/data. Tudo vai por `checkin.mensagens` → laço da fila envia ao grupo quando o WhatsApp está conectado (6 tentativas com espera).
+  - **Banco: o Postgres da plataforma, schema `checkin`** (migrações 00006, 00007 e 00010 da API; mudança de tabela é migração nova na API). Papel `checkin` só com SELECT/INSERT/UPDATE nesse schema; o login é ligado pelo `api migrate up` com `CHECKIN_DB_SENHA`.
   - Dois tokens: `WEBHOOK_SECRET` (só o webhook, é o que o PMS conhece) e `ADMIN_TOKEN` (`/whatsapp/*`, `/events`: QR e dados de hóspedes, só a API). Única rota no gateway: `POST /webhooks/nova-reserva`.
   - Grupo de destino em `checkin.configuracao` (escolhido na tela) ou `WHATSAPP_GROUP_JID`. Sessão do WhatsApp no volume `checkin-dados` (sem backup: perdeu, pareia de novo). Aparece no celular como "Travus Plataforma".
   - **Um container só**: duas conexões na mesma sessão derrubam uma à outra e cada processo enviaria a fila.
