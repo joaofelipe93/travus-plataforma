@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.6.0](https://github.com/joaofelipe93/travus-plataforma/compare/v0.5.0...v0.6.0) (2026-09-23)
+
+
+### Novidades
+
+* **reservas:** tela de reservas em cartões ([#33](https://github.com/joaofelipe93/travus-plataforma/issues/33)) ([a482ec4](https://github.com/joaofelipe93/travus-plataforma/commit/a482ec43f33c7164ce744bc448ffcccd1ddcb556))
+
 ## [0.5.0](https://github.com/joaofelipe93/travus-plataforma/compare/v0.4.0...v0.5.0) (2026-09-18)
 
 
