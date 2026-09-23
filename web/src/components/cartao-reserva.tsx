@@ -8,6 +8,7 @@ import { cn } from "cn";
 import {
   Ban,
   BedDouble,
+  CalendarClock,
   CheckCheck,
   Clock,
   ExternalLink,
@@ -55,6 +56,7 @@ const AVISO: Record<MensagemReserva, { rotulo: string; Icone: typeof CheckCheck;
   enviada: { rotulo: "avisado no grupo", Icone: CheckCheck, classe: "text-sucesso" },
   pendente: { rotulo: "aviso na fila", Icone: Clock, classe: "text-aviso" },
   falhou: { rotulo: "aviso falhou", Icone: TriangleAlert, classe: "text-destructive" },
+  resumo: { rotulo: "no resumo diário do grupo", Icone: CalendarClock, classe: "text-muted-foreground" },
   sem_mensagem: { rotulo: "sem aviso (nenhum grupo escolhido)", Icone: MessageCircleOff, classe: "text-muted-foreground" },
 };
 

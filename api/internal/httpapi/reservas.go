@@ -42,7 +42,7 @@ type reservaTela struct {
 	RecebidaEm         time.Time  `json:"recebida_em"`
 	AtualizadaEm       time.Time  `json:"atualizada_em"`
 	CanceladaEm        *time.Time `json:"cancelada_em"`
-	// Aviso no grupo: enviada | pendente | falhou | sem_mensagem.
+	// Aviso no grupo: enviada | pendente | falhou | resumo (vai no resumo diário) | sem_mensagem.
 	Mensagem             string  `json:"mensagem"`
 	MensagemCancelamento *string `json:"mensagem_cancelamento"`
 	// false quando nenhum campo conhecido veio no payload (formato novo do PMS).

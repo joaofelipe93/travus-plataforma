@@ -319,7 +319,8 @@ export type RespostaPerfil = {
 
 // Reservas recebidas pelo notificador de check-in (GET /reservas). A reserva e o cancelamento
 // dela vêm juntos num item. Datas da estadia em AAAA-MM-DD.
-export type MensagemReserva = "enviada" | "pendente" | "falhou" | "sem_mensagem";
+// "resumo": sem aviso próprio, a reserva vai no resumo diário do grupo (08h e 17h).
+export type MensagemReserva = "enviada" | "pendente" | "falhou" | "resumo" | "sem_mensagem";
 
 export type Reserva = {
   chave: string;
