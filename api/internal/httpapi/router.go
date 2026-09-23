@@ -196,6 +196,9 @@ func (s *Servidor) Rotas() http.Handler {
 	mux.Handle("POST /lances/{id}/reenviar-drive", s.autenticado(exigirPerfil(s.reenviarAoDrive, editores...)))
 	mux.Handle("GET /integracoes/google-drive", s.autenticado(exigirPerfil(s.situacaoGoogleDrive, admins...)))
 
+	// Reservas recebidas pelo notificador (reservas.go): dados de hóspedes, sem o perfil leitura.
+	mux.Handle("GET /reservas", s.autenticado(exigirPerfil(s.listarReservas, editores...)))
+
 	// WhatsApp do notificador de check-in (whatsapp.go): o QR dá acesso à conta, só admin.
 	mux.Handle("GET /integracoes/whatsapp", s.autenticado(exigirPerfil(s.situacaoWhatsapp, admins...)))
 	mux.Handle("GET /integracoes/whatsapp/grupos", s.autenticado(exigirPerfil(s.gruposWhatsapp, admins...)))
