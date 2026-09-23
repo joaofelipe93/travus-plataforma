@@ -1,13 +1,13 @@
 # CLAUDE.md: notificador de check-in (WhatsApp)
 
-Serviço da Travus Plataforma: recebe o webhook de reserva/cancelamento do PMS e publica a mensagem num **grupo do WhatsApp**. Veio de `~/Documentos/airbnb` (que rodava com PM2 na VM `appairbnb`); aqui roda em container. Leia também o `CLAUDE.md` da raiz.
+Serviço da Travus Plataforma: recebe o webhook de reserva/cancelamento do PMS e publica no **grupo do WhatsApp** um **resumo diário** das reservas (issue #17), com mensagem avulsa só para o que chega tarde demais para o resumo. Veio de `~/Documentos/airbnb` (que rodava com PM2 na VM `appairbnb`); aqui roda em container. Leia também o `CLAUDE.md` da raiz.
 
 O projeto é escrito em português — comentários, logs, mensagens de commit e documentação. Mantenha esse padrão.
 
 ## Na plataforma
 
 - Container `checkin-whatsapp` (`Dockerfile`: Node 24). `HOST=0.0.0.0` dentro do container: a porta não é publicada, só o Traefik e a rede do compose a alcançam.
-- **Banco: o Postgres da plataforma, schema `checkin`** (`checkin.eventos`, `checkin.mensagens`), criado pela migração `api/migrations/00006_checkin_whatsapp.sql`. Mudança de tabela é migração nova na API (goose), nunca DDL no serviço. O serviço conecta com o papel `checkin` (`DATABASE_URL`), que só tem SELECT/INSERT/UPDATE nesse schema e não enxerga o resto da plataforma; o login é ligado pelo `api migrate up` com `CHECKIN_DB_SENHA`. As consultas usam sempre o nome qualificado (`checkin.mensagens`).
+- **Banco: o Postgres da plataforma, schema `checkin`** (`checkin.eventos`, `checkin.mensagens`, `checkin.configuracao`, `checkin.reservas`, `checkin.resumos`), criado pelas migrações `api/migrations/00006`, `00007` e `00010`. Mudança de tabela é migração nova na API (goose), nunca DDL no serviço. O serviço conecta com o papel `checkin` (`DATABASE_URL`), que só tem SELECT/INSERT/UPDATE nesse schema e não enxerga o resto da plataforma; o login é ligado pelo `api migrate up` com `CHECKIN_DB_SENHA`. As consultas usam sempre o nome qualificado (`checkin.mensagens`).
 - Sessão do WhatsApp em `/dados` (volume): `auth_info/` (**credenciais do número pareado**). Fica fora do banco de propósito: não é dado de consulta. Nunca na imagem nem no git.
 - **Envio que sai mas não é registrado** (Postgres caiu entre o `sendText` e o UPDATE): o id fica em memória (`enviadasSemRegistro`) e é registrado antes de qualquer outro envio. Não troque isso por "tenta de novo no próximo ciclo": a mensagem sairia duas vezes no grupo.
 - **Um processo só.** Duas conexões na mesma sessão do Baileys derrubam uma à outra, e cada processo tem o próprio laço da fila (mensagem duplicada no grupo). Não rode este serviço localmente com a sessão da produção.
@@ -35,7 +35,7 @@ Dois tokens (header `x-webhook-token` ou `Authorization: Bearer`), de propósito
 
 | Método | Rota | Token | Descrição |
 |---|---|---|---|
-| `POST` | `/webhooks/nova-reserva` | webhook | Recebe o webhook (qualquer JSON). Responde `queued`, `duplicate` ou `stored_no_target`. **Única rota no gateway.** |
+| `POST` | `/webhooks/nova-reserva` | webhook | Recebe o webhook (qualquer JSON). Responde `scheduled` (guardada para o resumo), `queued` (mensagem avulsa), `duplicate` ou `stored_no_target`. **Única rota no gateway.** |
 | `GET` | `/health` | — | Estado do serviço, da conexão e da fila. |
 | `GET` | `/whatsapp/status` | admin | Conexão, número pareado, **string do QR**, grupo de destino e fila. |
 | `GET` | `/whatsapp/groups` | admin | Grupos do número pareado e JIDs. |
@@ -49,18 +49,36 @@ O grupo de destino é o escolhido na tela (`checkin.configuracao`) ou, enquanto 
 ## Arquitetura
 
 ```
-webhook → grava em `checkin.eventos` → responde 200 → enfileira em `checkin.mensagens` → laço da fila → Baileys → grupo
+webhook → grava em `checkin.eventos` → atualiza `checkin.reservas` → responde 200
+                                          └ (chegou tarde / sem data) → enfileira avulsa em `checkin.mensagens`
+agendador (1 min) → 08h "para Hoje", 17h "para Amanhã" → `checkin.resumos` + `checkin.mensagens`
+laço da fila → Baileys → grupo
 ```
 
 O ponto central é que **a resposta HTTP e o envio do WhatsApp são desacoplados**. O socket do Baileys pode estar reconectando quando o webhook chega, e o provedor não pode esperar por isso. O handler em `src/routes/webhook.ts` nunca chama o WhatsApp; ele só enfileira. Quem entrega é o worker de `src/whatsapp/outbox.ts`, num `setInterval` que **pula o ciclo inteiro quando `isConnected()` é falso** — assim uma desconexão não consome tentativas de retry.
 
 Consequência para quem for mexer: não adicione envio síncrono no caminho do webhook, mesmo que pareça mais simples.
 
+### Resumo diário (issue #17)
+
+O grupo recebia uma mensagem por webhook, e isso poluía a conversa. Agora recebe **dois resumos por dia**, cada um com todas as reservas confirmadas de um dia de check-in numa mensagem só (`formatResumo` em `domain/template.ts`, texto fixado por teste): "✅ *Reservas Confirmadas para Amanhã*" às **17h** (véspera) e "✅ *Reservas Confirmadas para Hoje*" às **08h**. Fuso e horas: `RESUMO_FUSO` (`America/Sao_Paulo`), `RESUMO_HORA_HOJE` (8), `RESUMO_HORA_AMANHA` (17).
+
+- **`checkin.reservas`**: a situação atual de cada reserva (uma linha por id do PMS, `domain/reserva-id.ts`). O webhook atualiza; o cancelamento muda o status e a reserva sai do resumo. Evento mais antigo que o último aplicado não sobrescreve.
+- **`checkin.resumos`**: um registro por `(tipo, data)`, **também sem reserva** (aí sem mensagem). É o que impede o resumo de sair duas vezes e o que o webhook consulta para saber se chegou tarde.
+- **Mensagem avulsa** (`resumos/evento.ts`, `tratarEvento`), só quando o resumo não resolve:
+  - reserva cujo dia de check-in **já teve resumo** (feita depois das 17h para amanhã, ou no próprio dia): "Nova Reserva Realizada", como antes;
+  - cancelamento de reserva confirmada que **já saiu** num resumo ou avulsa: "Cancelamento de Reserva";
+  - payload sem id, sem data de check-in legível (`domain/datas.ts`: `dd/mm/aaaa` ou ISO) ou em formato desconhecido: vai avulsa, como antes.
+  - check-in já passado: só atualiza a reserva.
+- **A trava**: o webhook e o agendador trabalham sob `comTravaDoResumo` (`pg_advisory_xact_lock`, `db/index.ts`). Sem ela, uma reserva gravada enquanto o resumo é montado ficaria fora do resumo e sem avulsa. Não tire.
+- **Agendador** (`resumos/agendador.ts`): confere a cada minuto. Serviço fora do ar na hora → o resumo sai quando ele voltar, **no mesmo dia**. Na primeira subida de um dia depois das 08h, o de hoje sai na hora. Sem grupo escolhido, não registra (sai quando houver grupo).
+- **Primeira subida**: `preencherReservas` preenche `checkin.reservas` com os eventos já recebidos (só com a tabela vazia, antes do HTTP aceitar webhook), sem mandar nada.
+
 ### Idempotência
 
 `dedupe_key` vem do primeiro campo de id encontrado no payload (`id`, `reservation_id`, `booking_id`…) ou, na falta deles, do SHA-256 do corpo. Provedores de webhook reenviam, e sem isso o grupo receberia a mensagem duas vezes.
 
-A sutileza: um evento repetido só é rejeitado se **já gerou mensagem** (`hasMessageForEvent`). Sem essa checagem, eventos gravados antes de `WHATSAPP_GROUP_JID` existir ficariam presos como duplicados para sempre e nunca seriam enviados — exatamente na janela de setup inicial. Não simplifique isso para um `if (isDuplicate) return`.
+A sutileza: um evento repetido só é rejeitado se **já foi processado** (`eventoProcessado`: tem `processado_em`, gravado quando virou avulsa ou entrou na reserva do resumo, ou já gerou mensagem, caso dos eventos anteriores ao resumo diário). Sem essa checagem, eventos gravados antes de `WHATSAPP_GROUP_JID` existir ficariam presos como duplicados para sempre e nunca seriam enviados — exatamente na janela de setup inicial. Não simplifique isso para um `if (isDuplicate) return`.
 
 ### `src/domain/checkin.ts` é o ponto de refatoração
 
@@ -72,7 +90,7 @@ O mesmo webhook entrega **reserva e cancelamento**, distinguidos pelo `status` (
 
 A busca tolerante **continua** de propósito. Há um exemplo de um canal só; um parse estrito com zod agora rejeitaria variações ainda não vistas (outros canais, cancelamento, alteração de reserva). A rede de segurança é a linha `⚠️ Formato não reconhecido` da mensagem, mais o `warn` em `routes/webhook.ts` — se aparecerem, o formato mudou e há payload novo em `GET /events`.
 
-Ao ajustar campos, **nada fora de `checkin.ts` e `template.ts` deve precisar mudar** — se precisar, algo vazou de camada. A exceção conhecida é `ID_FIELDS` em `routes/webhook.ts`, que é chave de deduplicação, não exibição.
+Ao ajustar campos, **nada fora de `checkin.ts` e `template.ts` deve precisar mudar** — se precisar, algo vazou de camada. A exceção conhecida é `ID_FIELDS` em `domain/reserva-id.ts`, que é chave de deduplicação e da reserva, não exibição.
 
 **Cuidado com a chave de deduplicação.** Ela tem duas armadilhas, e as duas já morderam.
 

@@ -6,6 +6,7 @@ package httpapi
 import (
 	"encoding/json"
 	"net/http"
+	"strings"
 	"testing"
 	"time"
 
@@ -130,7 +131,7 @@ func TestMontarReservasJuntaCancelamento(t *testing.T) {
 
 func TestRotaReservas(t *testing.T) {
 	s := novoServidorTeste(t)
-	s.exec(t, "TRUNCATE checkin.mensagens, checkin.eventos RESTART IDENTITY")
+	s.exec(t, "TRUNCATE checkin.mensagens, checkin.resumos, checkin.reservas, checkin.eventos RESTART IDENTITY")
 	h := s.Rotas()
 	criarUsuario(t, s, "operador@exemplo.com", db.PerfilUsuarioOperador)
 	criarUsuario(t, s, "leitura@exemplo.com", db.PerfilUsuarioLeitura)
@@ -153,5 +154,27 @@ func TestRotaReservas(t *testing.T) {
 	r := resp.Reservas[0]
 	if r.Situacao != "cancelada" || r.Mensagem != "enviada" || r.MensagemCancelamento == nil || *r.MensagemCancelamento != "sem_mensagem" {
 		t.Fatalf("reserva montada errada (a mensagem vale a mais recente do evento): %+v", r)
+	}
+
+	// Resumo diário: evento processado sem mensagem própria entrou no resumo (não é "sem grupo").
+	s.exec(t, `INSERT INTO checkin.eventos (chave_dedup, origem, payload, processado_em) VALUES ('nova-reserva:2', 'nova-reserva', $1::jsonb, now())`,
+		strings.Replace(payloadReservaFicticia, "00000000-0000-4000-8000-000000000001", "00000000-0000-4000-8000-000000000009", 1))
+	rec = op.req(http.MethodGet, "/reservas", nil, nil)
+	esperarStatus(t, rec, http.StatusOK, "operador")
+	resp = decodificar[respostaReservas](t, rec)
+	if len(resp.Reservas) != 2 {
+		t.Fatalf("quer 2 reservas: %+v", resp.Reservas)
+	}
+	achou := false
+	for _, r := range resp.Reservas {
+		if strings.HasSuffix(r.Chave, "000000000009") {
+			achou = true
+			if r.Mensagem != "resumo" {
+				t.Fatalf("reserva do resumo diário deveria vir com mensagem \"resumo\": %+v", r)
+			}
+		}
+	}
+	if !achou {
+		t.Fatalf("reserva do resumo diário não veio: %+v", resp.Reservas)
 	}
 }

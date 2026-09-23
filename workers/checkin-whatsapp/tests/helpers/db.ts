@@ -16,7 +16,7 @@ if (!new URL(url).pathname.includes('teste')) {
 
 /** Zera as tabelas entre testes. */
 export async function resetDb(): Promise<void> {
-  await pool.query('TRUNCATE checkin.mensagens, checkin.eventos, checkin.configuracao RESTART IDENTITY')
+  await pool.query('TRUNCATE checkin.mensagens, checkin.resumos, checkin.reservas, checkin.eventos, checkin.configuracao RESTART IDENTITY')
 }
 
 /** Cria um evento direto no banco, para testes que só precisam do id. */
@@ -48,4 +48,30 @@ export async function setNextAttempt(id: number, at: Date): Promise<void> {
 export async function contaMensagens(): Promise<number> {
   const { rows } = await pool.query<{ n: number }>('SELECT count(*) AS n FROM checkin.mensagens')
   return rows[0]!.n
+}
+
+export type ReservaRow = {
+  reserva_id: string
+  status: 'confirmada' | 'cancelada'
+  check_in: string
+  hospede: string | null
+  ultimo_evento_id: number
+}
+
+export async function listaReservas(): Promise<ReservaRow[]> {
+  const { rows } = await pool.query<ReservaRow>(
+    `SELECT reserva_id, status, check_in::text AS check_in, hospede, ultimo_evento_id
+     FROM checkin.reservas ORDER BY id`,
+  )
+  return rows
+}
+
+/** Registra um resumo como já montado, sem mensagem (o webhook passa a ver a reserva "atrasada"). */
+export async function seedResumo(tipo: 'hoje' | 'amanha', data: string): Promise<void> {
+  await pool.query(`INSERT INTO checkin.resumos (tipo, data, reservas) VALUES ($1, $2, 0)`, [tipo, data])
+}
+
+export async function listaMensagens(): Promise<OutboxRow[]> {
+  const { rows } = await pool.query<OutboxRow>('SELECT * FROM checkin.mensagens ORDER BY id')
+  return rows
 }

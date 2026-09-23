@@ -160,7 +160,7 @@ func TestVigiaContatoDoWorker(t *testing.T) {
 func TestVigiaNotificadorCheckin(t *testing.T) {
 	s := novoServidorTeste(t)
 	ctx := context.Background()
-	s.exec(t, "TRUNCATE checkin.mensagens, checkin.eventos, checkin.configuracao RESTART IDENTITY")
+	s.exec(t, "TRUNCATE checkin.mensagens, checkin.resumos, checkin.reservas, checkin.eventos, checkin.configuracao RESTART IDENTITY")
 	falso := &notificadorFalso{conectado: false}
 	srv := httptest.NewServer(falso)
 	defer srv.Close()

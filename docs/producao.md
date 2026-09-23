@@ -162,7 +162,7 @@ Depois da migração:
 
 - **Sessão caiu** (removida no celular, número trocado, conexão travada): o vigia avisa em 10 min com o link da tela; um admin escaneia o QR de novo. "Desconectar e gerar novo QR" na tela força uma sessão nova (as mensagens esperam na fila).
 - **Trocar o token do webhook**: apague a linha `CHECKIN_WEBHOOK_SECRET` do `.env` da VM, publique (o `publicar.sh` gera outro) e atualize o PMS.
-- **Backup**: eventos e fila estão no Postgres (`checkin.eventos`, `checkin.mensagens`) e entram no dump; os payloads têm nome, telefone e e-mail de hóspedes. A sessão do WhatsApp fica no volume `travus_checkin-dados` e **não** tem backup: perdida a VM, pareie de novo.
+- **Backup**: eventos, reservas, resumos e fila estão no Postgres (`checkin.eventos`, `checkin.reservas`, `checkin.resumos`, `checkin.mensagens`) e entram no dump; os payloads têm nome, telefone e e-mail de hóspedes. A sessão do WhatsApp fica no volume `travus_checkin-dados` e **não** tem backup: perdida a VM, pareie de novo.
 
 ## 10. Deploy pelo GitHub (padrão)
 

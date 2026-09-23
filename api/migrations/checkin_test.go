@@ -64,6 +64,28 @@ func TestPapelCheckinSoEnxergaOProprioSchema(t *testing.T) {
 		t.Fatalf("checkin deveria atualizar mensagem: %v", err)
 	}
 
+	// Resumo diário (00010): reservas, resumos e a mensagem do resumo, que não tem evento.
+	if _, err := tx.ExecContext(ctx,
+		`INSERT INTO checkin.reservas (reserva_id, status, check_in, ultimo_evento_id)
+		 VALUES ('R-1', 'confirmada', '2026-10-26', $1)`, eventoID,
+	); err != nil {
+		t.Fatalf("checkin deveria gravar reserva: %v", err)
+	}
+	var resumoID int64
+	if err := tx.QueryRowContext(ctx,
+		`INSERT INTO checkin.resumos (tipo, data, reservas) VALUES ('amanha', '2026-10-26', 1) RETURNING id`,
+	).Scan(&resumoID); err != nil {
+		t.Fatalf("checkin deveria gravar resumo: %v", err)
+	}
+	if _, err := tx.ExecContext(ctx,
+		`INSERT INTO checkin.mensagens (resumo_id, destino_jid, texto) VALUES ($1, '1-1@g.us', 'x')`, resumoID,
+	); err != nil {
+		t.Fatalf("checkin deveria enfileirar o resumo: %v", err)
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE checkin.eventos SET processado_em = now() WHERE id = $1`, eventoID); err != nil {
+		t.Fatalf("checkin deveria marcar o evento como processado: %v", err)
+	}
+
 	// Um SAVEPOINT por tentativa recusada: o erro aborta a transação até o ROLLBACK TO.
 	for _, consulta := range []string{
 		"SELECT count(*) FROM public.usuarios",

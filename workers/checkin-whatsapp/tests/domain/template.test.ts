@@ -1,7 +1,7 @@
 import '../helpers/setup.js'
 import { test, describe } from 'node:test'
 import assert from 'node:assert/strict'
-import { formatCheckinMessage } from '../../src/domain/template.js'
+import { formatCheckinMessage, formatResumo } from '../../src/domain/template.js'
 import { normalizeCheckin, type CheckinEvent } from '../../src/domain/checkin.js'
 
 function evento(partial: Partial<CheckinEvent> = {}): CheckinEvent {
@@ -250,5 +250,58 @@ describe('formatCheckinMessage', () => {
     // como chegar lá.
     const msg = formatCheckinMessage({ raw: undefined })
     assert.match(msg, /✅ \*Nova Reserva Realizada\*/)
+  })
+})
+
+describe('formatResumo', () => {
+  // Formato da issue #17: um título e um bloco por reserva, separados por linha em branco.
+  const reservas: CheckinEvent[] = [
+    evento({
+      imovel: 'Chalé 03',
+      checkIn: '2026-09-11',
+      checkOut: '2026-09-13',
+      hospede: 'Fulano de Tal',
+      hospedes: 2,
+      canal: 'airbnb',
+      telefone: '5511900000001',
+    }),
+    evento({
+      imovel: 'Chalé 02',
+      checkIn: '2026-09-11',
+      checkOut: '2026-09-14',
+      hospede: 'Beltrana Souza',
+      hospedes: 1,
+      canal: 'booking',
+      telefone: '5511900000002',
+    }),
+  ]
+
+  test('para amanhã', () => {
+    assert.equal(
+      formatResumo('amanha', reservas),
+      [
+        '✅ *Reservas Confirmadas para Amanhã*',
+        '',
+        '🏠 Chalé 03',
+        '📅 11/09/2026 → 13/09/2026',
+        '👤 Fulano de Tal',
+        '👥 2 hóspedes',
+        '🌐 Airbnb',
+        '☎️ 5511900000001',
+        '',
+        '🏠 Chalé 02',
+        '📅 11/09/2026 → 14/09/2026',
+        '👤 Beltrana Souza',
+        '👥 1 hóspede',
+        '🌐 Booking',
+        '☎️ 5511900000002',
+      ].join('\n'),
+    )
+  })
+
+  test('para hoje muda só o título', () => {
+    const [titulo, ...resto] = formatResumo('hoje', reservas).split('\n')
+    assert.equal(titulo, '✅ *Reservas Confirmadas para Hoje*')
+    assert.deepEqual(resto, formatResumo('amanha', reservas).split('\n').slice(1))
   })
 })

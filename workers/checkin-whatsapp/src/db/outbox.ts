@@ -1,4 +1,4 @@
-import { pool } from './index.js'
+import { pool, type Executor } from './index.js'
 
 export const MAX_ATTEMPTS = 6
 
@@ -6,7 +6,9 @@ export type OutboxStatus = 'pendente' | 'enviada' | 'falhou'
 
 export type OutboxRow = {
   id: number
-  evento_id: number
+  /** Null na mensagem de resumo, que não vem de um evento só. */
+  evento_id: number | null
+  resumo_id: number | null
   destino_jid: string
   texto: string
   status: OutboxStatus
@@ -17,17 +19,17 @@ export type OutboxRow = {
   criada_em: Date
 }
 
-export async function enqueue(input: {
-  eventId: number
-  targetJid: string
-  body: string
-}): Promise<number> {
+/** Enfileira uma mensagem de um evento (avulsa) ou de um resumo. `db`: para entrar numa transação. */
+export async function enqueue(
+  input: { eventId?: number; resumoId?: number; targetJid: string; body: string },
+  db: Executor = pool,
+): Promise<number> {
   // proxima_tentativa_em = now(): elegível imediatamente.
-  const { rows } = await pool.query<{ id: number }>(
-    `INSERT INTO checkin.mensagens (evento_id, destino_jid, texto)
-     VALUES ($1, $2, $3)
+  const { rows } = await db.query<{ id: number }>(
+    `INSERT INTO checkin.mensagens (evento_id, resumo_id, destino_jid, texto)
+     VALUES ($1, $2, $3, $4)
      RETURNING id`,
-    [input.eventId, input.targetJid, input.body],
+    [input.eventId ?? null, input.resumoId ?? null, input.targetJid, input.body],
   )
   return rows[0]!.id
 }

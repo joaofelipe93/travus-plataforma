@@ -33,6 +33,21 @@ const schema = z.object({
 
   AUTH_DIR: z.string().default('./data/auth_info'),
 
+  // Resumo diário (issue #17): "para Amanhã" às 17h e "para Hoje" às 08h, no fuso das pousadas.
+  RESUMO_FUSO: z
+    .string()
+    .default('America/Sao_Paulo')
+    .refine((fuso) => {
+      try {
+        new Intl.DateTimeFormat('pt-BR', { timeZone: fuso })
+        return true
+      } catch {
+        return false
+      }
+    }, 'RESUMO_FUSO deve ser um fuso IANA (ex.: America/Sao_Paulo)'),
+  RESUMO_HORA_HOJE: z.coerce.number().int().min(0).max(23).default(8),
+  RESUMO_HORA_AMANHA: z.coerce.number().int().min(0).max(23).default(17),
+
   // Postgres da plataforma, com o papel `checkin` (só enxerga o schema checkin).
   DATABASE_URL: z.string().regex(/^postgres(ql)?:\/\//, 'DATABASE_URL deve ser uma URL postgres://'),
 })
