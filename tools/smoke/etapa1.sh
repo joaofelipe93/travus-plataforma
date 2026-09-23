@@ -135,6 +135,8 @@ for caminho in /whatsapp/status /whatsapp/groups /events; do
   RESPOSTA=$(curl -s -w '\n%{http_code}' -H "Cookie: $ADMIN_COOKIE" "$APP/api$caminho")
   esperar "GET app.localhost/api$caminho (admin) não chega ao serviço" 404 "$(tail -1 <<<"$RESPOSTA")"
 done
+esperar "tela Reservas (operador)" 200 "$(codigo -H "Cookie: $OPERADOR_COOKIE" "$APP/api/reservas")"
+esperar "tela Reservas (leitura: dados de hóspedes)" 403 "$(codigo -H "Cookie: $LEITURA_COOKIE" "$APP/api/reservas")"
 esperar "tela WhatsApp: situação (operador)" 403 "$(codigo -H "Cookie: $OPERADOR_COOKIE" "$APP/api/integracoes/whatsapp")"
 esperar "tela WhatsApp: desconectar (operador)" 403 "$(post_json "$OPERADOR_COOKIE" "$OPERADOR_CSRF" /integracoes/whatsapp/desconectar '{"confirmar":true}')"
 esperar "tela WhatsApp: desconectar sem confirmar (admin, nada acontece)" 422 "$(post_json "$ADMIN_COOKIE" "$ADMIN_CSRF" /integracoes/whatsapp/desconectar '{}')"
