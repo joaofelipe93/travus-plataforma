@@ -34,7 +34,11 @@ export const servicos: readonly Servico[] = [
     id: "reservas",
     nome: "Reservas",
     descricao: "Avisos de reservas e cancelamentos no grupo do WhatsApp",
-    abas: [{ href: "/reservas/whatsapp", rotulo: "WhatsApp", perfis: ["admin"] }],
+    abas: [
+      // Nome e telefone de hóspedes: sem o perfil leitura.
+      { href: "/reservas/lista", rotulo: "Reservas", perfis: ["admin", "operador"] },
+      { href: "/reservas/whatsapp", rotulo: "WhatsApp", perfis: ["admin"] },
+    ],
   },
 ];
 

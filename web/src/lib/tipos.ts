@@ -316,3 +316,38 @@ export type RespostaPerfil = {
   // Sem CHAVE_CRIPTOGRAFIA na API não dá para guardar credencial: a tela avisa.
   cofre_configurado: boolean;
 };
+
+// Reservas recebidas pelo notificador de check-in (GET /reservas). A reserva e o cancelamento
+// dela vêm juntos num item. Datas da estadia em AAAA-MM-DD.
+export type MensagemReserva = "enviada" | "pendente" | "falhou" | "sem_mensagem";
+
+export type Reserva = {
+  chave: string;
+  situacao: "confirmada" | "cancelada";
+  status: string | null;
+  hospede: string | null;
+  telefone: string | null;
+  email: string | null;
+  imovel: string | null;
+  canal: string | null;
+  check_in: string | null;
+  check_out: string | null;
+  noites: number | null;
+  hospedes: number | null;
+  valor_centavos: number | null;
+  motivo_cancelamento: string | null;
+  link_precheckin: string | null;
+  recebida_em: string;
+  atualizada_em: string;
+  cancelada_em: string | null;
+  // Aviso no grupo do WhatsApp.
+  mensagem: MensagemReserva;
+  mensagem_cancelamento: MensagemReserva | null;
+  // false: nenhum campo conhecido no payload (formato novo do PMS).
+  reconhecida: boolean;
+};
+
+export type RespostaReservas = {
+  reservas: Reserva[];
+  limite_atingido: boolean;
+};
