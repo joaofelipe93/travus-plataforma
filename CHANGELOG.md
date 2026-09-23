@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.7.0](https://github.com/joaofelipe93/travus-plataforma/compare/v0.6.0...v0.7.0) (2026-09-23)
+
+
+### Novidades
+
+* **checkin-whatsapp:** resumo diário das reservas no grupo ([#34](https://github.com/joaofelipe93/travus-plataforma/issues/34)) ([6ef6c57](https://github.com/joaofelipe93/travus-plataforma/commit/6ef6c5737fe6f4c317aa36b15badce0558834225))
+
 ## [0.6.0](https://github.com/joaofelipe93/travus-plataforma/compare/v0.5.0...v0.6.0) (2026-09-23)
 
 
