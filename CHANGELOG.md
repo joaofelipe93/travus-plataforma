@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.8.0](https://github.com/joaofelipe93/travus-plataforma/compare/v0.7.0...v0.8.0) (2026-09-24)
+
+
+### Novidades
+
+* **assistente:** chat na tela inicial que responde sobre todos os serviços ([#37](https://github.com/joaofelipe93/travus-plataforma/issues/37)) ([eb84621](https://github.com/joaofelipe93/travus-plataforma/commit/eb8462186aba2621fbe30b519f89398f38215744))
+
 ## [0.7.0](https://github.com/joaofelipe93/travus-plataforma/compare/v0.6.0...v0.7.0) (2026-09-23)
 
 
