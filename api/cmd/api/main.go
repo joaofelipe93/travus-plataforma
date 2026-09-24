@@ -137,6 +137,14 @@ func serve() error {
 	if email := smtpDoAmbiente(); email.Configurado() {
 		cfg.Vigia.Email = email
 	}
+	assist, err := assistenteDoAmbiente(ctx, poolCfg)
+	if err != nil {
+		return err
+	}
+	if assist.Consultor != nil {
+		defer assist.Consultor.Pool.Close()
+	}
+	cfg.Assistente = assist
 	servidor := httpapi.NovoServidor(cfg, pool)
 	servidor.RodarTarefasDeFundo(ctx)
 
@@ -156,7 +164,8 @@ func serve() error {
 		"drive_configurado", cfg.Google.ClientID != "" && cfg.Google.PastaDrive != "",
 		"alertas_por_email", cfg.Vigia.Email != nil, "monitor_externo", cfg.Vigia.PingURL != "",
 		"vigia_backup", cfg.Vigia.BackupDir != "", "vigia_certificado", cfg.Vigia.CertificadoHost, "vigia_checkin", cfg.Vigia.Checkin,
-		"notificador_checkin", cfg.Checkin != nil)
+		"notificador_checkin", cfg.Checkin != nil,
+		"assistente", cfg.Assistente.Modelo != nil, "assistente_modelo", cfg.Assistente.NomeModelo, "assistente_consulta_livre", cfg.Assistente.Consultor != nil)
 
 	errc := make(chan error, 2)
 	for _, srv := range []*http.Server{publico, interno} {
@@ -219,6 +228,13 @@ func migrate(args []string) error {
 				return err
 			}
 			slog.Info("migrações: login do papel checkin definido")
+		}
+		// Login do papel só leitura do assistente (consulta livre).
+		if senha := os.Getenv("ASSISTENTE_DB_SENHA"); senha != "" {
+			if err := migrations.DefinirSenhaAssistente(ctx, db, senha); err != nil {
+				return err
+			}
+			slog.Info("migrações: login do papel assistente definido")
 		}
 		return nil
 	case "down":

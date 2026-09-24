@@ -13,7 +13,7 @@ import type { Sessao } from "@/lib/tipos";
 // Só caminhos locais: evita usar o login para mandar alguém para outro site.
 function destinoSeguro(proximo: string | null) {
   if (!proximo || !proximo.startsWith("/") || proximo.startsWith("//") || proximo.startsWith("/\\") || proximo.startsWith("/login")) {
-    return "/canopus/execucoes";
+    return "/";
   }
   return proximo;
 }

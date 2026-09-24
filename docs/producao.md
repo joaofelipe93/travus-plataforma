@@ -71,7 +71,7 @@ ssh travus@<ip> 'umask 077; cat > /opt/travus/compartilhado/canopus.env'
 # NEWCON_PASS=...
 ```
 
-**deploy/.env de produção**: o primeiro `make deploy` cria `/opt/travus/compartilhado/.env` a partir de `deploy/.env.producao.example`, com senha do Postgres, `WORKER_TOKEN` e `CHAVE_CRIPTOGRAFIA` novos, e para. A cada deploy, o `publicar.sh` acrescenta os segredos que faltarem sem trocar os existentes (`CHECKIN_WEBHOOK_SECRET`, `CHECKIN_ADMIN_TOKEN`, `CHECKIN_DB_SENHA`). Então:
+**deploy/.env de produção**: o primeiro `make deploy` cria `/opt/travus/compartilhado/.env` a partir de `deploy/.env.producao.example`, com senha do Postgres, `WORKER_TOKEN` e `CHAVE_CRIPTOGRAFIA` novos, e para. A cada deploy, o `publicar.sh` acrescenta os segredos que faltarem sem trocar os existentes (`CHECKIN_WEBHOOK_SECRET`, `CHECKIN_ADMIN_TOKEN`, `CHECKIN_DB_SENHA`, `ASSISTENTE_DB_SENHA`). Então:
 
 ```bash
 ssh -t travus@<ip> 'nano /opt/travus/compartilhado/.env'
@@ -113,7 +113,7 @@ docker run --rm --add-host app.<domínio>:<ip> --add-host api.<domínio>:<ip> -v
   bash -c 'apt-get update -qq >/dev/null && apt-get install -y -qq curl openssl ca-certificates >/dev/null && bash /smoke/producao.sh app.<domínio> api.<domínio>'
 ```
 
-## 6. Usuários, planilha, Drive e alertas
+## 6. Usuários, planilha, Drive, assistente e alertas
 
 Comandos na VM rodam dentro da versão atual:
 
@@ -128,6 +128,12 @@ ssh -t travus@<ip> 'cd /opt/travus/atual && make alerta-teste'
   scp workers/canopus/token.json travus@<ip>:/opt/travus/atual/workers/canopus/token.json
   ssh -t travus@<ip> 'cd /opt/travus/atual && make google-token && rm workers/canopus/token.json && make google-status'
   ```
+- **Assistente da tela inicial** (opcional): crie uma chave em console.anthropic.com (cada pergunta tem custo; acompanhe
+  o gasto lá) e ponha `ANTHROPIC_API_KEY=` em `/opt/travus/compartilhado/.env` você mesmo (a chave não passa pelo
+  Claude). O modelo padrão é `claude-haiku-4-5` (o mais barato); `ASSISTENTE_MODELO=claude-sonnet-5` ou `claude-opus-5` erra menos nas perguntas difíceis. Depois, peça um
+  deploy (o `publicar.sh` já gera `ASSISTENTE_DB_SENHA`, a senha do papel só leitura que a consulta livre usa). Sem a
+  chave, a tela inicial mostra que o assistente não está configurado e o resto funciona normal. Cada pergunta fica na
+  auditoria (`acao = 'assistente_pergunta'`, com os tokens gastos).
 
 ## 7. Monitor externo
 
