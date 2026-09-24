@@ -3,7 +3,7 @@
 import { useMutation } from "@tanstack/react-query";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { ChevronsUpDownIcon, SparklesIcon } from "lucide-react";
+import { ChevronsUpDownIcon } from "lucide-react";
 import { Marca } from "@/components/marca";
 import {
   DropdownMenu,
@@ -46,18 +46,19 @@ export function Trilho({ usuario }: { usuario: Usuario }) {
       </Link>
 
       <nav aria-label="Serviços" className="flex flex-col gap-0.5 px-2 pt-2">
+        {/* Início (assistente e, depois, os blocos que cada pessoa escolher), separado dos serviços. */}
         <Link
           href="/"
           aria-current={caminho === "/" ? "page" : undefined}
           className={cn(
-            "relative mb-2 flex items-center gap-2 rounded-md py-2 pr-3 pl-4 font-heading text-[0.95rem] text-muted-foreground transition-colors outline-none hover:bg-sidebar-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring",
+            "relative mb-1 rounded-md py-2 pr-3 pl-4 font-heading text-[0.95rem] text-muted-foreground transition-colors outline-none hover:bg-sidebar-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring",
             caminho === "/" && "bg-sidebar-accent text-foreground",
           )}
         >
           {caminho === "/" && <span aria-hidden className="absolute inset-y-1.5 left-0 w-[3px] rounded-full bg-ouro" />}
-          <SparklesIcon className="size-4" />
-          Assistente
+          Início
         </Link>
+        <p className="px-4 pt-3 pb-1 text-[0.7rem] font-medium tracking-wider text-muted-foreground/70 uppercase">Serviços</p>
         {servicosVisiveis(usuario.perfil).map((s) => {
           const ativo = caminho === `/${s.id}` || caminho.startsWith(`/${s.id}/`);
           return (
