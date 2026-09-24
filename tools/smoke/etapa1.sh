@@ -135,6 +135,12 @@ for caminho in /whatsapp/status /whatsapp/groups /events; do
   RESPOSTA=$(curl -s -w '\n%{http_code}' -H "Cookie: $ADMIN_COOKIE" "$APP/api$caminho")
   esperar "GET app.localhost/api$caminho (admin) não chega ao serviço" 404 "$(tail -1 <<<"$RESPOSTA")"
 done
+echo "== Assistente (sem mandar pergunta: cada uma chamaria o Claude)"
+esperar "GET app.localhost/api/assistente sem sessão" 401 "$(codigo "$APP/api/assistente")"
+esperar "estado do assistente (leitura)" 200 "$(codigo -H "Cookie: $LEITURA_COOKIE" "$APP/api/assistente")"
+esperar "pergunta ao assistente sem token CSRF" 403 "$(codigo -X POST -H "Cookie: $LEITURA_COOKIE" -H "Origin: $APP" -H 'Content-Type: application/json' -d '{"mensagens":[]}' "$APP/api/assistente/conversa")"
+
+echo "== Telas Reservas e WhatsApp"
 esperar "tela Reservas (operador)" 200 "$(codigo -H "Cookie: $OPERADOR_COOKIE" "$APP/api/reservas")"
 esperar "tela Reservas (leitura: dados de hóspedes)" 403 "$(codigo -H "Cookie: $LEITURA_COOKIE" "$APP/api/reservas")"
 esperar "tela WhatsApp: situação (operador)" 403 "$(codigo -H "Cookie: $OPERADOR_COOKIE" "$APP/api/integracoes/whatsapp")"

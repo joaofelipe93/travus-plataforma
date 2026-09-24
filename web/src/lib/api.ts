@@ -18,6 +18,11 @@ export function definirCsrf(token: string | null) {
   tokenCsrf = token;
 }
 
+// Para chamadas que não passam por api() (ex.: a resposta em streaming do assistente).
+export function cabecalhoCsrf(): Record<string, string> {
+  return tokenCsrf ? { "X-CSRF-Token": tokenCsrf } : {};
+}
+
 type Opcoes = {
   metodo?: "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
   json?: unknown;
@@ -65,7 +70,7 @@ export async function api<T>(caminho: string, { metodo = "GET", json, formulario
   return dados as T;
 }
 
-function mensagemPadrao(status: number): string {
+export function mensagemPadrao(status: number): string {
   if (status === 429) return "Muitas tentativas seguidas. Aguarde um minuto e tente de novo.";
   if (status === 403) return "Seu perfil não permite esta ação.";
   if (status === 401) return "Sessão expirada: entre novamente.";
