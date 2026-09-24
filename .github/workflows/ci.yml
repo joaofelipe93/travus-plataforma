@@ -167,6 +167,7 @@ jobs:
           CHECKIN_WEBHOOK_SECRET: x
           CHECKIN_ADMIN_TOKEN: x
           CHECKIN_DB_SENHA: x
+          ASSISTENTE_DB_SENHA: x
         run: |
           docker compose -f deploy/docker-compose.yml config --quiet
           DOMINIO_APP=app.exemplo.com.br DOMINIO_API=api.exemplo.com.br BACKUP_DIR=/tmp \

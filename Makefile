@@ -175,13 +175,14 @@ backup-baixar: ## Copia o último backup da VM para deploy/backups: make backup-
 	scp -p "$(VM):$$ultimo" deploy/backups/ && \
 	echo "Copiado para deploy/backups/$$(basename "$$ultimo") (tem dados de clientes: guarde com cuidado)"
 
-# Garante deploy/.env com senha do Postgres, WORKER_TOKEN, CHAVE_CRIPTOGRAFIA e os segredos do notificador
-# de check-in (acrescenta o que faltar).
+# Garante deploy/.env com senha do Postgres, WORKER_TOKEN, CHAVE_CRIPTOGRAFIA, os segredos do notificador
+# de check-in e a senha do papel do assistente (acrescenta o que faltar).
 env: deploy/.env
 	@grep -q '^WORKER_TOKEN=' deploy/.env || { umask 077; echo "WORKER_TOKEN=$$(openssl rand -hex 32)" >> deploy/.env; echo "Acrescentado WORKER_TOKEN ao deploy/.env"; }
 	@grep -q '^CHECKIN_WEBHOOK_SECRET=' deploy/.env || { umask 077; echo "CHECKIN_WEBHOOK_SECRET=$$(openssl rand -hex 32)" >> deploy/.env; echo "Acrescentado CHECKIN_WEBHOOK_SECRET ao deploy/.env"; }
 	@grep -q '^CHECKIN_ADMIN_TOKEN=' deploy/.env || { umask 077; echo "CHECKIN_ADMIN_TOKEN=$$(openssl rand -hex 32)" >> deploy/.env; echo "Acrescentado CHECKIN_ADMIN_TOKEN ao deploy/.env"; }
 	@grep -q '^CHECKIN_DB_SENHA=' deploy/.env || { umask 077; echo "CHECKIN_DB_SENHA=$$(openssl rand -hex 32)" >> deploy/.env; echo "Acrescentada CHECKIN_DB_SENHA ao deploy/.env (aplique com make migrate ou make up)"; }
+	@grep -q '^ASSISTENTE_DB_SENHA=' deploy/.env || { umask 077; echo "ASSISTENTE_DB_SENHA=$$(openssl rand -hex 32)" >> deploy/.env; echo "Acrescentada ASSISTENTE_DB_SENHA ao deploy/.env (aplique com make migrate ou make up)"; }
 	@grep -q '^CHAVE_CRIPTOGRAFIA=' deploy/.env || { umask 077; echo "CHAVE_CRIPTOGRAFIA=$$(openssl rand -hex 32)" >> deploy/.env; echo "Acrescentada CHAVE_CRIPTOGRAFIA ao deploy/.env (guarde com o backup do banco: sem ela, o token do Google não decifra)"; }
 
 deploy/.env:

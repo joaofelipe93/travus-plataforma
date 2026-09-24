@@ -71,7 +71,7 @@ ssh travus@<ip> 'umask 077; cat > /opt/travus/compartilhado/canopus.env'
 # NEWCON_PASS=...
 ```
 
-**deploy/.env de produção**: o primeiro `make deploy` cria `/opt/travus/compartilhado/.env` a partir de `deploy/.env.producao.example`, com senha do Postgres, `WORKER_TOKEN` e `CHAVE_CRIPTOGRAFIA` novos, e para. A cada deploy, o `publicar.sh` acrescenta os segredos que faltarem sem trocar os existentes (`CHECKIN_WEBHOOK_SECRET`, `CHECKIN_ADMIN_TOKEN`, `CHECKIN_DB_SENHA`). Então:
+**deploy/.env de produção**: o primeiro `make deploy` cria `/opt/travus/compartilhado/.env` a partir de `deploy/.env.producao.example`, com senha do Postgres, `WORKER_TOKEN` e `CHAVE_CRIPTOGRAFIA` novos, e para. A cada deploy, o `publicar.sh` acrescenta os segredos que faltarem sem trocar os existentes (`CHECKIN_WEBHOOK_SECRET`, `CHECKIN_ADMIN_TOKEN`, `CHECKIN_DB_SENHA`, `ASSISTENTE_DB_SENHA`). Então:
 
 ```bash
 ssh -t travus@<ip> 'nano /opt/travus/compartilhado/.env'

@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"context"
 	"encoding/json"
 	"math"
 	"net/http"
@@ -55,10 +56,19 @@ type respostaReservas struct {
 }
 
 func (s *Servidor) listarReservas(w http.ResponseWriter, r *http.Request, _ *UsuarioSessao) {
-	eventos, err := s.q.ListarEventosReserva(r.Context(), limiteEventosReserva)
+	reservas, limiteAtingido, err := s.carregarReservas(r.Context())
 	if err != nil {
 		erroInterno(w, r, err)
 		return
+	}
+	responderJSON(w, http.StatusOK, respostaReservas{Reservas: reservas, LimiteAtingido: limiteAtingido})
+}
+
+// carregarReservas lê os eventos e monta as reservas (tela Reservas e assistente).
+func (s *Servidor) carregarReservas(ctx context.Context) ([]reservaTela, bool, error) {
+	eventos, err := s.q.ListarEventosReserva(ctx, limiteEventosReserva)
+	if err != nil {
+		return nil, false, err
 	}
 	// A consulta vem do mais novo para o mais antigo; a montagem precisa da ordem de chegada.
 	lidos := make([]eventoReserva, 0, len(eventos))
@@ -69,10 +79,7 @@ func (s *Servidor) listarReservas(w http.ResponseWriter, r *http.Request, _ *Usu
 		}
 		lidos = append(lidos, eventoReserva{ID: e.ID, Payload: payload, RecebidoEm: e.RecebidoEm, Mensagem: e.MensagemStatus})
 	}
-	responderJSON(w, http.StatusOK, respostaReservas{
-		Reservas:       montarReservas(lidos),
-		LimiteAtingido: len(eventos) >= limiteEventosReserva,
-	})
+	return montarReservas(lidos), len(eventos) >= limiteEventosReserva, nil
 }
 
 type eventoReserva struct {

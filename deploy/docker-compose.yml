@@ -53,6 +53,12 @@ x-api: &api-base
     CHECKIN_ADMIN_TOKEN: ${CHECKIN_ADMIN_TOKEN:?defina CHECKIN_ADMIN_TOKEN em deploy/.env (make up gera)}
     # Senha do papel checkin no Postgres: `api migrate up` liga o login com ela.
     CHECKIN_DB_SENHA: ${CHECKIN_DB_SENHA:?defina CHECKIN_DB_SENHA em deploy/.env (make up gera)}
+    # Assistente da tela inicial. Sem ANTHROPIC_API_KEY, a tela avisa que ele não está configurado.
+    # ASSISTENTE_DB_SENHA: papel só leitura `assistente` no Postgres (`api migrate up` liga o login).
+    ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+    ASSISTENTE_MODELO: ${ASSISTENTE_MODELO:-}
+    ASSISTENTE_PERGUNTAS_POR_HORA: ${ASSISTENTE_PERGUNTAS_POR_HORA:-}
+    ASSISTENTE_DB_SENHA: ${ASSISTENTE_DB_SENHA:?defina ASSISTENTE_DB_SENHA em deploy/.env (make up gera)}
     TZ: America/Sao_Paulo
   logging: *logs
   mem_limit: 256m

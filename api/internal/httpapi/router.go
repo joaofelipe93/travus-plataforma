@@ -54,6 +54,8 @@ type Config struct {
 	Vigia ConfigVigia
 	// Notificador de check-in (tela WhatsApp). nil: as rotas respondem "indisponível".
 	Checkin *checkin.Cliente
+	// Assistente da tela inicial (assistente.go).
+	Assistente ConfigAssistente
 	// Versão publicada (version.txt) e commit, mostrados no /health.
 	Versao string
 	Commit string
@@ -90,6 +92,9 @@ type Servidor struct {
 	// goroutine do vigia mexe).
 	checkinSemRespostaDesde time.Time
 	whatsappForaDesde       time.Time
+
+	// Assistente: uma pergunta por vez e limite por hora, por pessoa.
+	limiteAssistente limitadorAssistente
 }
 
 func NovoServidor(cfg Config, pool *pgxpool.Pool) *Servidor {
@@ -205,6 +210,10 @@ func (s *Servidor) Rotas() http.Handler {
 	mux.Handle("PUT /integracoes/whatsapp/grupo", s.autenticado(exigirPerfil(s.definirGrupoWhatsapp, admins...)))
 	mux.Handle("POST /integracoes/whatsapp/teste", s.autenticado(exigirPerfil(s.testeWhatsapp, admins...)))
 	mux.Handle("POST /integracoes/whatsapp/desconectar", s.autenticado(exigirPerfil(s.desconectarWhatsapp, admins...)))
+
+	// Assistente da tela inicial (assistente.go): todo perfil pergunta; as ferramentas dependem do perfil.
+	mux.Handle("GET /assistente", s.autenticado(s.estadoAssistente))
+	mux.Handle("POST /assistente/conversa", s.autenticado(s.conversarAssistente))
 
 	return recuperar(mux)
 }
