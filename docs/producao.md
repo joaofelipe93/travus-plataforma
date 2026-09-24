@@ -130,7 +130,7 @@ ssh -t travus@<ip> 'cd /opt/travus/atual && make alerta-teste'
   ```
 - **Assistente da tela inicial** (opcional): crie uma chave em console.anthropic.com (cada pergunta tem custo; acompanhe
   o gasto lá) e ponha `ANTHROPIC_API_KEY=` em `/opt/travus/compartilhado/.env` você mesmo (a chave não passa pelo
-  Claude). O modelo padrão é `claude-opus-5`; `ASSISTENTE_MODELO=claude-sonnet-5` sai mais barato. Depois, peça um
+  Claude). O modelo padrão é `claude-haiku-4-5` (o mais barato); `ASSISTENTE_MODELO=claude-sonnet-5` ou `claude-opus-5` erra menos nas perguntas difíceis. Depois, peça um
   deploy (o `publicar.sh` já gera `ASSISTENTE_DB_SENHA`, a senha do papel só leitura que a consulta livre usa). Sem a
   chave, a tela inicial mostra que o assistente não está configurado e o resto funciona normal. Cada pergunta fica na
   auditoria (`acao = 'assistente_pergunta'`, com os tokens gastos).

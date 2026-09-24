@@ -14,7 +14,7 @@ import (
 
 // assistenteDoAmbiente liga o assistente da tela inicial:
 //   - ANTHROPIC_API_KEY: sem ela, a tela avisa que o assistente não está configurado;
-//   - ASSISTENTE_MODELO: padrão claude-opus-5;
+//   - ASSISTENTE_MODELO: padrão claude-haiku-4-5;
 //   - ASSISTENTE_DB_SENHA: senha do papel só leitura `assistente` (migração 00011). Sem ela, não
 //     há consulta livre ao banco, só as ferramentas prontas;
 //   - ASSISTENTE_PERGUNTAS_POR_HORA: limite por pessoa (padrão 60).

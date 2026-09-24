@@ -9,8 +9,10 @@ import (
 	"github.com/anthropics/anthropic-sdk-go/shared/constant"
 )
 
-// ModeloPadrao: o mais capaz para montar consultas certas. Troque com ASSISTENTE_MODELO.
-const ModeloPadrao = "claude-opus-5"
+// ModeloPadrao: o Haiku, rápido e barato (decisão do usuário, 24/09/2026; o 3.5 pedido foi
+// aposentado pela Anthropic). Troque com ASSISTENTE_MODELO (ex.: claude-sonnet-5 ou claude-opus-5
+// para perguntas mais difíceis).
+const ModeloPadrao = "claude-haiku-4-5"
 
 // ModeloAnthropic chama a API do Claude em streaming.
 type ModeloAnthropic struct {
@@ -34,10 +36,12 @@ func (m *ModeloAnthropic) Gerar(ctx context.Context, p Pedido, aoTexto func(stri
 		System:    p.Sistema,
 		Tools:     p.Ferramentas,
 		Messages:  p.Mensagens,
-		// Pensamento adaptativo com esforço médio: pergunta de chat não precisa do máximo, e a
-		// resposta começa antes.
-		Thinking:     anthropic.BetaThinkingConfigParamUnion{OfAdaptive: &anthropic.BetaThinkingConfigAdaptiveParam{}},
-		OutputConfig: anthropic.BetaOutputConfigParam{Effort: anthropic.BetaOutputConfigEffortMedium},
+	}
+	// Pensamento adaptativo com esforço médio só nos modelos que aceitam: o Haiku 4.5 recusa os
+	// dois com 400 e roda sem pensamento. Pergunta de chat não precisa do máximo.
+	if temPensamentoAdaptativo(m.nome) {
+		params.Thinking = anthropic.BetaThinkingConfigParamUnion{OfAdaptive: &anthropic.BetaThinkingConfigAdaptiveParam{}}
+		params.OutputConfig = anthropic.BetaOutputConfigParam{Effort: anthropic.BetaOutputConfigEffortMedium}
 	}
 	// Se o classificador de segurança recusar por engano, o próprio servidor tenta outro modelo
 	// (Claude Opus 5 e Fable).
@@ -61,6 +65,20 @@ func (m *ModeloAnthropic) Gerar(ctx context.Context, p Pedido, aoTexto func(stri
 		}
 	}
 	return msg, stream.Err()
+}
+
+var comPensamentoAdaptativo = []string{
+	"claude-opus-5", "claude-opus-4-6", "claude-opus-4-7", "claude-opus-4-8",
+	"claude-sonnet-5", "claude-sonnet-4-6", "claude-fable-", "claude-mythos-",
+}
+
+func temPensamentoAdaptativo(nome string) bool {
+	for _, prefixo := range comPensamentoAdaptativo {
+		if strings.HasPrefix(nome, prefixo) {
+			return true
+		}
+	}
+	return false
 }
 
 func temFallbackNoServidor(nome string) bool {
