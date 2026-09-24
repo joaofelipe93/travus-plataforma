@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.9.0](https://github.com/joaofelipe93/travus-plataforma/compare/v0.8.0...v0.9.0) (2026-09-24)
+
+
+### Novidades
+
+* **web:** página Início com o assistente como bloco ([#39](https://github.com/joaofelipe93/travus-plataforma/issues/39)) ([17c048a](https://github.com/joaofelipe93/travus-plataforma/commit/17c048a9ef1cf40fb1d39fc7979fb8a3a814f106))
+
 ## [0.8.0](https://github.com/joaofelipe93/travus-plataforma/compare/v0.7.0...v0.8.0) (2026-09-24)
 
 
