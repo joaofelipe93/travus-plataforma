@@ -24,6 +24,10 @@ export type CheckinEvent = {
   status?: string
   /** Preenchido pelo provedor quando a reserva é cancelada. */
   motivoCancelamento?: string
+  /** Nome do evento/gatilho, quando o provedor manda um (`event`, `event_type`…). */
+  evento?: string
+  /** Quando o check-in foi efetuado, se o provedor informar. */
+  checkinEm?: string
   /** Payload original, sempre preservado. */
   raw: unknown
 }
@@ -149,6 +153,14 @@ export function normalizeCheckin(raw: unknown): CheckinEvent {
       'cancelation_reason',
       'motivo_cancelamento',
     ]),
+    evento: pickString(raw, ['event', 'event_type', 'evento', 'trigger', 'action', 'tipo']),
+    checkinEm: pickString(raw, [
+      'checked_in_at',
+      'checkin_at',
+      'check_in_at',
+      'actual_check_in',
+      'checkin_realizado_em',
+    ]),
     raw,
   }
 }
@@ -165,6 +177,27 @@ export function normalizeCheckin(raw: unknown): CheckinEvent {
 export function isCancelamento(evt: CheckinEvent): boolean {
   if (evt.status?.trim().toLowerCase().startsWith('cancel')) return true
   return (evt.motivoCancelamento ?? '').trim() !== ''
+}
+
+/**
+ * True quando o evento é um **check-in efetuado** (o hóspede chegou), não uma reserva nova.
+ *
+ * O PMS manda isso para a mesma rota (automação criada em 30/09/2026), então o reconhecimento é
+ * tolerante como o resto do módulo: o nome do evento, um status de "hospedado" ou a hora do
+ * check-in. Cancelamento tem precedência: um payload que cancela nunca é check-in.
+ *
+ * Se o payload real usar outro nome, é aqui que se acrescenta — e o vigia da API avisa quando
+ * chega evento que não viramos nada.
+ */
+const STATUS_CHECKIN = ['checked_in', 'checkedin', 'checkin', 'check_in', 'in_house', 'inhouse', 'hospedado']
+
+export function isCheckinRealizado(evt: CheckinEvent): boolean {
+  if (isCancelamento(evt)) return false
+  const evento = evt.evento?.trim().toLowerCase().replace(/[\s-]/g, '_')
+  if (evento !== undefined && /check_?in/.test(evento) && !/out/.test(evento)) return true
+  const status = evt.status?.trim().toLowerCase().replace(/[\s-]/g, '_')
+  if (status !== undefined && STATUS_CHECKIN.includes(status)) return true
+  return (evt.checkinEm ?? '').trim() !== ''
 }
 
 /** True quando nenhum campo conhecido foi reconhecido no payload. */

@@ -35,9 +35,17 @@ export async function aplicarReserva(
        (reserva_id, status, check_in, check_out, imovel, hospede, hospedes, canal, telefone, ultimo_evento_id)
      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
      ON CONFLICT (reserva_id) DO UPDATE
-       SET status = excluded.status, check_in = excluded.check_in, check_out = excluded.check_out,
-           imovel = excluded.imovel, hospede = excluded.hospede, hospedes = excluded.hospedes,
-           canal = excluded.canal, telefone = excluded.telefone,
+       -- Situação e data vêm sempre do evento novo; o RESTO é coalesce de propósito: um evento
+       -- mais enxuto que o anterior (o PMS manda payloads diferentes por automação) não pode
+       -- apagar check-out, telefone, canal nem hóspede já gravados. O preço é que o provedor não
+       -- consegue esvaziar um campo mandando-o vazio — trocar um valor por outro funciona.
+       SET status = excluded.status, check_in = excluded.check_in,
+           check_out = coalesce(excluded.check_out, checkin.reservas.check_out),
+           imovel = coalesce(excluded.imovel, checkin.reservas.imovel),
+           hospede = coalesce(excluded.hospede, checkin.reservas.hospede),
+           hospedes = coalesce(excluded.hospedes, checkin.reservas.hospedes),
+           canal = coalesce(excluded.canal, checkin.reservas.canal),
+           telefone = coalesce(excluded.telefone, checkin.reservas.telefone),
            ultimo_evento_id = excluded.ultimo_evento_id, atualizada_em = now()
        WHERE checkin.reservas.ultimo_evento_id < excluded.ultimo_evento_id`,
     [

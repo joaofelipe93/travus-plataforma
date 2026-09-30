@@ -4,7 +4,7 @@ import { marcarProcessado } from '../db/events.js'
 import { comTravaDoResumo, pool, type Executor } from '../db/index.js'
 import { enqueue } from '../db/outbox.js'
 import { aplicarReserva, resumoJaMontado } from '../db/reservas.js'
-import { isCancelamento, isUnmapped, type CheckinEvent } from '../domain/checkin.js'
+import { isCancelamento, isCheckinRealizado, isUnmapped, type CheckinEvent } from '../domain/checkin.js'
 import { lerData, relogioLocal } from '../domain/datas.js'
 import { formatCheckinMessage } from '../domain/template.js'
 
@@ -18,6 +18,7 @@ import { formatCheckinMessage } from '../domain/template.js'
 export type ResultadoEvento =
   | { acao: 'resumo'; motivo: string }
   | { acao: 'avulsa'; motivo: string; outboxId: number }
+  | { acao: 'checkin'; motivo: string; outboxId: number }
   | { acao: 'ignorado'; motivo: string }
   | { acao: 'sem_destino'; motivo: string }
 
@@ -38,6 +39,10 @@ class SemDestino extends Error {
  *   grupo continuaria esperando o hóspede. Cancelamento de reserva que ainda não saiu em resumo
  *   só a tira do próximo;
  * - check-in já passado: só atualiza a reserva, sem mensagem;
+ * - **check-in efetuado** (o hóspede chegou; automação do PMS de 30/09/2026 na mesma rota):
+ *   mensagem própria no grupo ("🛎️ Check-in realizado") e **nada** é escrito em
+ *   `checkin.reservas` — o payload do check-in é mais enxuto que o da reserva e o upsert
+ *   sobrescreveria campo por campo, apagando check-out, telefone e canal já gravados;
  * - sem id da reserva E sem data de check-in: não é reserva (o PMS manda outras automações
  *   para a mesma URL). Fica gravado em `checkin.eventos` e **não** vira mensagem: anunciar
  *   "Nova Reserva" com um payload desses enche o grupo de aviso falso (decisão do usuário,
@@ -58,6 +63,15 @@ export async function tratarEvento(input: {
 }): Promise<ResultadoEvento> {
   const { eventId, reservaId, evt, destino } = input
   const checkIn = lerData(evt.checkIn)
+
+  // O hóspede chegou: evento à parte da reserva, com título próprio. Só avisa; não mexe na
+  // reserva (ver o comentário acima). Payload irreconhecível cai nas regras de baixo.
+  if (isCheckinRealizado(evt) && !isUnmapped(evt)) {
+    if (!destino) return { acao: 'sem_destino', motivo: 'check-in efetuado' }
+    const outboxId = await enqueue({ eventId, targetJid: destino.jid, body: formatCheckinMessage(evt) })
+    await marcarProcessado(eventId, pool)
+    return { acao: 'checkin', motivo: 'check-in efetuado', outboxId }
+  }
 
   // Nem id nem data: não há reserva nenhuma para anunciar nem para agendar.
   if (reservaId === undefined && checkIn === undefined) {

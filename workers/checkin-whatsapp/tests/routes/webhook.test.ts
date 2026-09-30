@@ -348,6 +348,87 @@ describe('POST /webhooks/nova-reserva — idempotência', () => {
   })
 })
 
+describe('POST /webhooks/nova-reserva — check-in efetuado', () => {
+  beforeEach(resetDb)
+
+  // Automação do PMS criada em 30/09/2026: avisa na mesma rota quando o hóspede chega.
+  function checkinRealizado(extra: Record<string, unknown> = {}): Record<string, unknown> {
+    return {
+      booking_uuid: '0a0b0c0d-0000-4000-8000-000000000001',
+      property_name: 'Chalé 01',
+      guest_name: 'Fulano de Tal',
+      status: 'checked_in',
+      checked_in_at: '2026-09-30T18:05:00.000000Z',
+      ...extra,
+    }
+  }
+
+  test('vira mensagem própria, não "Nova Reserva"', async () => {
+    const res = await post(checkinRealizado())
+
+    assert.equal(res.json().status, 'checkin')
+    const row = await getOutboxRow((res.json() as { outboxId: number }).outboxId)
+    assert.match(row.texto, /Check-in realizado/)
+    assert.doesNotMatch(row.texto, /Nova Reserva/)
+  })
+
+  test('reconhece pelo nome do evento, sem status de hospedado', async () => {
+    const res = await post({ booking_uuid: 'RES-9', property_name: 'Chalé 02', event: 'check-in.performed' })
+
+    assert.equal(res.json().status, 'checkin')
+    assert.match((await getOutboxRow((res.json() as { outboxId: number }).outboxId)).texto, /Check-in realizado/)
+  })
+
+  test('não é confundido com cancelamento nem confunde o check-out', async () => {
+    const cancel = await post(checkinRealizado({ status: 'cancelled', cancellation_reason: 'desistiu' }))
+    assert.equal(cancel.json().status, 'queued', 'cancelamento tem precedência')
+    assert.match((await getOutboxRow((cancel.json() as { outboxId: number }).outboxId)).texto, /Cancelamento/)
+
+    const saida = await post({ booking_uuid: 'RES-8', property_name: 'Chalé 03', event: 'check-out.performed' })
+    assert.notEqual(saida.json().status, 'checkin', 'check-out não é check-in')
+  })
+
+  test('não mexe na reserva já gravada: nada de apagar check-out nem telefone', async () => {
+    const reserva = await post(reservaReal())
+    assert.equal(reserva.json().status, 'scheduled')
+    const antes = (await listaReservas())[0]!
+    assert.ok(antes.check_out && antes.telefone, 'a reserva entrou com check-out e telefone')
+
+    const res = await post(checkinRealizado())
+    assert.equal(res.json().status, 'checkin')
+
+    const depois = (await listaReservas())[0]!
+    assert.deepEqual(
+      { check_out: depois.check_out, telefone: depois.telefone, canal: depois.canal },
+      { check_out: antes.check_out, telefone: antes.telefone, canal: antes.canal },
+    )
+  })
+
+  test('check-in não é engolido como duplicata da reserva, e repetido é', async () => {
+    await post(reservaReal())
+    const primeiro = await post(checkinRealizado())
+    assert.equal(primeiro.json().status, 'checkin', 'mesmo id da reserva, mas chave própria')
+
+    const repetido = await post(checkinRealizado())
+    assert.equal(repetido.json().status, 'duplicate')
+    assert.equal(await contaMensagens(), 1)
+  })
+
+  test('evento enxuto de outra automação não apaga campo da reserva', async () => {
+    await post(reservaReal())
+    const antes = (await listaReservas())[0]!
+
+    // Mesmo id e data, sem telefone, canal nem check-out: o upsert usa coalesce.
+    await post({ booking_uuid: '0a0b0c0d-0000-4000-8000-000000000001', check_in: br(AMANHA), status: 'confirmed' })
+
+    const depois = (await listaReservas())[0]!
+    assert.deepEqual(
+      { check_out: depois.check_out, telefone: depois.telefone, canal: depois.canal, hospede: depois.hospede },
+      { check_out: antes.check_out, telefone: antes.telefone, canal: antes.canal, hospede: antes.hospede },
+    )
+  })
+})
+
 describe('POST /webhooks/nova-reserva — sem grupo configurado', () => {
   beforeEach(async () => {
     await resetDb()
