@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.10.0](https://github.com/joaofelipe93/travus-plataforma/compare/v0.9.0...v0.10.0) (2026-09-30)
+
+
+### Novidades
+
+* **checkin-whatsapp:** aviso de check-in realizado e payload que não é reserva ([#46](https://github.com/joaofelipe93/travus-plataforma/issues/46)) ([0ac5d31](https://github.com/joaofelipe93/travus-plataforma/commit/0ac5d314fc60d2902cc792282832a9effaf31ca2))
+
 ## [0.9.0](https://github.com/joaofelipe93/travus-plataforma/compare/v0.8.0...v0.9.0) (2026-09-24)
 
 
