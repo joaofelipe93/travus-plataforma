@@ -144,12 +144,28 @@ describe('POST /webhooks/nova-reserva — enfileiramento', () => {
     assert.equal(evento.origem, 'nova-reserva')
   })
 
-  test('aceita payload sem nenhum campo conhecido', async () => {
+  test('payload sem nenhum campo conhecido fica no evento, sem avisar o grupo', async () => {
     const res = await post({ formato: 'desconhecido' })
 
-    assert.equal(res.json().status, 'queued')
-    const row = await getOutboxRow((res.json() as { outboxId: number }).outboxId)
-    assert.match(row.texto, /Formato não reconhecido/)
+    assert.equal(res.json().status, 'ignored')
+    assert.equal(await contaMensagens(), 0, 'nada vai para o grupo sem id nem data')
+    const eventos = await listRecentEvents(1)
+    assert.deepEqual(eventos[0]?.payload, { formato: 'desconhecido' }, 'mas o evento fica gravado')
+  })
+
+  test('payload sem id e sem data não vira aviso de reserva', async () => {
+    // Outra automação do PMS na mesma URL (workflow diário por imóvel, 29/09/2026):
+    // tem nome do imóvel, mas nem reserva nem check-in. Já chegou a anunciar "Nova Reserva".
+    const res = await post({
+      date: '29/09/2026',
+      property_name: 'Chalé 12',
+      property_uuid: '0a0b0c0d-0000-4000-8000-0000000000ff',
+      _workflow_id: 41,
+    })
+
+    assert.equal(res.json().status, 'ignored')
+    assert.equal(await contaMensagens(), 0)
+    assert.deepEqual(await listaReservas(), [])
   })
 
   test('aceita corpo vazio sem virar 500', async () => {
@@ -160,7 +176,7 @@ describe('POST /webhooks/nova-reserva — enfileiramento', () => {
     })
 
     assert.equal(res.statusCode, 200)
-    assert.equal(res.json().status, 'queued')
+    assert.equal(res.json().status, 'ignored')
     assert.deepEqual((await dedupeKeys()), ['nova-reserva:sha256:' + sha256('{}')])
   })
 })
@@ -308,16 +324,16 @@ describe('POST /webhooks/nova-reserva — idempotência', () => {
   })
 
   test('payloads idênticos sem id são deduplicados pelo hash', async () => {
-    await post({ guest_name: 'Ana' })
-    const segunda = await post({ guest_name: 'Ana' })
+    await post({ guest_name: 'Ana', check_in: br(AMANHA) })
+    const segunda = await post({ guest_name: 'Ana', check_in: br(AMANHA) })
 
     assert.equal(segunda.json().status, 'duplicate')
     assert.equal((await contaMensagens()), 1)
   })
 
   test('payloads diferentes sem id geram mensagens separadas', async () => {
-    await post({ guest_name: 'Ana' })
-    const segunda = await post({ guest_name: 'Bruno' })
+    await post({ guest_name: 'Ana', check_in: br(AMANHA) })
+    const segunda = await post({ guest_name: 'Bruno', check_in: br(AMANHA) })
 
     assert.equal(segunda.json().status, 'queued')
     assert.equal((await contaMensagens()), 2)

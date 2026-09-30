@@ -251,6 +251,21 @@ func (s *Servidor) verificarCheckin(ctx context.Context, agora time.Time, bancoO
 			Detalhe: "O envio está falhando ou travou (make logs s=checkin-whatsapp).",
 		})
 	}
+	// Payload que o notificador não entende não vai mais para o grupo (senão vira aviso de
+	// reserva falsa, 29/09/2026): o sinal de que algo mudou no PMS vem por aqui.
+	ignorados, err := s.q.VigiaCheckinIgnorados(ctxBanco)
+	if err != nil {
+		slog.Error("vigia: eventos de check-in não reconhecidos", "erro", err)
+		return out
+	}
+	if ignorados > 0 {
+		out = append(out, achado{
+			Chave:  "checkin-ignorados",
+			Titulo: fmt.Sprintf("%d evento(s) do webhook de reserva não foram reconhecidos (últimas 24 h)", ignorados),
+			Detalhe: "Chegaram sem identificador de reserva e sem data de check-in: ficaram gravados e nada foi para o grupo.\n" +
+				"Ou outra automação do PMS está apontada para o webhook, ou um campo mudou de nome (ajuste domain/checkin.ts).",
+		})
+	}
 	return out
 }
 

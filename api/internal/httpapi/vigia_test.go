@@ -232,6 +232,17 @@ func TestVigiaNotificadorCheckin(t *testing.T) {
 		}
 	}
 
+	// Evento que não virou nada (nem mensagem, nem reserva): o grupo não é avisado, o vigia é.
+	if _, ok := a["checkin-ignorados"]; ok {
+		t.Fatalf("alerta de evento não reconhecido sem evento nenhum assim: %+v", a)
+	}
+	s.exec(t, `INSERT INTO checkin.eventos (chave_dedup, origem, payload) VALUES ('teste:2', 'teste', '{"date":"29/09/2026","property_name":"Chalé Fictício"}')`)
+	a = checkinAchados()
+	if x, ok := a["checkin-ignorados"]; !ok || !strings.HasPrefix(x.Titulo, "1 evento") {
+		t.Fatalf("esperado alerta de evento não reconhecido: %+v", a)
+	}
+	s.exec(t, "DELETE FROM checkin.eventos WHERE chave_dedup = 'teste:2'")
+
 	// Desconectado com fila parada: só o alerta de desconexão (depois da tolerância), não o da fila.
 	falso.mu.Lock()
 	falso.conectado = false

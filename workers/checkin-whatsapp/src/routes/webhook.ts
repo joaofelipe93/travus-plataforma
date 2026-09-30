@@ -85,6 +85,16 @@ export async function webhookRoutes(app: FastifyInstance) {
         })
       }
 
+      // Outra automação do PMS na mesma URL: sem id e sem data não há reserva para anunciar.
+      // Fica no evento (GET /events) para auditoria; o grupo não recebe nada.
+      if (resultado.acao === 'ignorado') {
+        req.log.warn(
+          { eventId: event.id, dedupeKey, motivo: resultado.motivo, campos: Object.keys(payload as object) },
+          'evento não é reserva — guardado sem avisar o grupo',
+        )
+        return reply.code(200).send({ status: 'ignored', eventId: event.id, motivo: resultado.motivo })
+      }
+
       if (resultado.acao === 'resumo') {
         req.log.info(
           { eventId: event.id, dedupeKey, motivo: resultado.motivo },
