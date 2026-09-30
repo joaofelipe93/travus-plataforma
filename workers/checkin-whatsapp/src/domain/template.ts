@@ -1,4 +1,4 @@
-import { isCancelamento, isUnmapped, type CheckinEvent } from './checkin.js'
+import { isCancelamento, isCheckinRealizado, isUnmapped, type CheckinEvent } from './checkin.js'
 
 /** ISO ou yyyy-mm-dd → dd/mm/aaaa. Qualquer outro formato passa intacto. */
 function formatDate(value: string | undefined): string | undefined {
@@ -40,10 +40,12 @@ export function linhasReserva(evt: CheckinEvent): string[] {
 }
 
 export function formatCheckinMessage(evt: CheckinEvent): string {
-  // Mesmo webhook, dois eventos: o título é o que separa um do outro no grupo.
+  // Mesmo webhook, três eventos: o título é o que separa um do outro no grupo.
   const titulo = isCancelamento(evt)
     ? '❌ *Cancelamento de Reserva*'
-    : '✅ *Nova Reserva Realizada*'
+    : isCheckinRealizado(evt)
+      ? '🛎️ *Check-in realizado*'
+      : '✅ *Nova Reserva Realizada*'
 
   const cabecalho = [titulo, '']
   const lines = linhasReserva(evt)
