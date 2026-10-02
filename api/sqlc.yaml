@@ -15,6 +15,7 @@ sql:
         # O sqlc singulariza em inglês ("sessoes" viraria "Sesso").
         rename:
           auditorium: Auditoria
+          configuracao_canopu: ConfiguracaoCanopus
           importaco: Importacao
           integraco: Integracao
           sesso: Sessao
