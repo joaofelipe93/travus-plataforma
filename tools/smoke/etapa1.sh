@@ -108,6 +108,16 @@ esperar "rota interna do worker pelo gateway (com sessão)" 404 "$(codigo -X POS
 esperar "rota interna do worker em api.localhost" 401 "$(codigo -X POST "$API/internal/tarefas/proxima")"
 esperar "porta interna 8081 no host" 000 "$(codigo -m 3 -X POST http://localhost:8081/internal/tarefas/proxima)"
 
+echo "== Configuração do Canopus (só leituras e recusas: nada é alterado)"
+CONFIG=$(curl -s -H "Cookie: $LEITURA_COOKIE" "$APP/api/configuracao/canopus")
+if [[ "$CONFIG" == *'"dry_run_automatico":false'* ]]; then ok "dry-run automático desligado"; else falha "dry-run automático ligado ou sem resposta: $CONFIG"; fi
+if [[ "$CONFIG" == *'"pode_editar":false'* ]]; then ok "perfil leitura não edita a configuração"; else falha "pode_editar errado para leitura: $CONFIG"; fi
+CORPO_CONFIG='{"dry_run_automatico":true,"dry_run_dia":10,"dry_run_hora":8,"dry_run_minuto":0,"aviso_email":true,"validade_dry_run_minutos":120,"retencao_screenshots_dias":30}'
+CORPO_CONFIG_INVALIDO='{"dry_run_automatico":true,"dry_run_dia":40,"dry_run_hora":8,"dry_run_minuto":0,"aviso_email":true,"validade_dry_run_minutos":120,"retencao_screenshots_dias":30}'
+esperar "PUT configuração (leitura)" 403 "$(codigo -X PUT -H "Cookie: $LEITURA_COOKIE" -H "Origin: $APP" -H "X-CSRF-Token: $LEITURA_CSRF" -H 'Content-Type: application/json' -d "$CORPO_CONFIG" "$APP/api/configuracao/canopus")"
+esperar "PUT configuração com dia inválido (operador)" 422 "$(codigo -X PUT -H "Cookie: $OPERADOR_COOKIE" -H "Origin: $APP" -H "X-CSRF-Token: $OPERADOR_CSRF" -H 'Content-Type: application/json' -d "$CORPO_CONFIG_INVALIDO" "$APP/api/configuracao/canopus")"
+esperar "PUT configuração sem sessão" 401 "$(codigo -X PUT -H 'Content-Type: application/json' -d '{}' "$API/configuracao/canopus")"
+
 echo "== Lance real e reimpressão (só recusas: nenhuma execução é criada)"
 login smoke-admin@travus.local
 ADMIN_COOKIE=$COOKIE ADMIN_CSRF=$CSRF

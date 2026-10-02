@@ -27,7 +27,9 @@ type Pinger interface {
 type ConfigGoogle struct {
 	ClientID     string
 	ClientSecret string
-	PastaDrive   string
+	// Pasta inicial dos comprovantes: quem manda é a configuração do Canopus, que a tela
+	// edita (GOOGLE_DRIVE_PASTA_ID vale enquanto ninguém escolheu outra).
+	PastaDrive string
 }
 
 // Config do servidor HTTP.
@@ -41,11 +43,13 @@ type Config struct {
 	SessaoMaxima      time.Duration
 	// Token de serviço exigido nas rotas internas (worker). Mínimo 32 caracteres.
 	TokenWorker string
-	// Screenshots têm dados pessoais: são apagados depois deste prazo.
+	// Screenshots têm dados pessoais: são apagados depois deste prazo. Padrão quando a
+	// configuração do Canopus (configuracao_canopus) não pode ser lida.
 	RetencaoScreenshots time.Duration
 	// Lance real só com LANCE_REAL_HABILITADO=true. O worker tem a sua própria chave.
 	LanceRealHabilitado bool
-	// Prazo, contado do fim do dry-run, para aprová-lo como lance real.
+	// Prazo, contado do fim do dry-run, para aprová-lo como lance real. Padrão quando a
+	// configuração do Canopus não pode ser lida.
 	ValidadeDryRun time.Duration
 	// Cifra segredos de integrações (token do Google). Sem cofre, não há envio ao Drive.
 	Cofre  *cripto.Cofre
@@ -80,7 +84,9 @@ type Servidor struct {
 	driveMu       sync.Mutex
 	driveCliente  drive.Enviador
 	driveVersao   time.Time
-	avisouDrive   string
+	// Pasta do cliente em memória: muda na configuração, o cliente é remontado.
+	drivePastaEmUso string
+	avisouDrive     string
 
 	// Vigia: início da API, último contato do worker (UnixNano) e alertas já avisados.
 	inicio              time.Time
@@ -186,6 +192,11 @@ func (s *Servidor) Rotas() http.Handler {
 	// o histórico fica porque as cotas importadas apontam para ele.
 	mux.Handle("GET /importacoes", s.autenticado(s.listarImportacoes))
 	mux.Handle("GET /importacoes/{id}", s.autenticado(s.buscarImportacao))
+
+	// Configuração do serviço Canopus (configuracao.go): dry-run automático, pasta do Drive e
+	// prazos. Todo perfil vê; admin e operador editam.
+	mux.Handle("GET /configuracao/canopus", s.autenticado(s.configuracaoCanopus))
+	mux.Handle("PUT /configuracao/canopus", s.autenticado(exigirPerfil(s.atualizarConfiguracaoCanopus, editores...)))
 
 	mux.Handle("GET /execucoes", s.autenticado(s.listarExecucoes))
 	mux.Handle("POST /execucoes", s.autenticado(exigirPerfil(s.criarExecucao, editores...)))

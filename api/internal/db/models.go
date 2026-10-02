@@ -151,6 +151,20 @@ type Cliente struct {
 	AtualizadoEm    time.Time
 }
 
+type ConfiguracaoCanopus struct {
+	ID                      bool
+	DryRunAutomatico        bool
+	DryRunDia               int16
+	DryRunHora              int16
+	DryRunMinuto            int16
+	AvisoEmail              bool
+	DrivePastaID            *string
+	ValidadeDryRunMinutos   int32
+	RetencaoScreenshotsDias int32
+	AtualizadoPor           *int64
+	AtualizadoEm            time.Time
+}
+
 type Cota struct {
 	ID                int64
 	ClienteID         int64
