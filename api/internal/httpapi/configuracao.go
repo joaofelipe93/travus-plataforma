@@ -61,6 +61,8 @@ type ConfigCanopus struct {
 	DrivePastaOrigem    string
 	ValidadeDryRun      time.Duration
 	RetencaoScreenshots time.Duration
+	// Resultado do último disparo do agendamento (agendamento.go); vazio: nunca disparou.
+	UltimoDisparoResultado string
 }
 
 // padroesCanopus: o que vale enquanto ninguém mexeu na configuração (ou quando o banco não
@@ -110,6 +112,7 @@ func (s *Servidor) configDaLinha(l db.BuscarConfiguracaoCanopusRow) ConfigCanopu
 	c.AvisoEmail = l.AvisoEmail
 	c.ValidadeDryRun = time.Duration(l.ValidadeDryRunMinutos) * time.Minute
 	c.RetencaoScreenshots = time.Duration(l.RetencaoScreenshotsDias) * 24 * time.Hour
+	c.UltimoDisparoResultado = valorOuVazio(l.UltimoDisparoResultado)
 	if l.DrivePastaID != nil && *l.DrivePastaID != "" {
 		c.DrivePasta, c.DrivePastaOrigem = *l.DrivePastaID, pastaDaConfiguracao
 	}
@@ -160,6 +163,10 @@ type configuracaoCanopusJSON struct {
 	AtualizadoEm            time.Time `json:"atualizado_em"`
 	// Próxima ocorrência do dia/hora escolhidos, ligada ou não (a tela mostra como prévia).
 	ProximoDryRun time.Time `json:"proximo_dry_run"`
+	// Último disparo do agendamento e o que aconteceu (criada, sem_cotas, sem_responsavel,
+	// atrasada). Ver agendamento.go.
+	UltimoDisparoEm        *time.Time `json:"ultimo_disparo_em"`
+	UltimoDisparoResultado *string    `json:"ultimo_disparo_resultado"`
 }
 
 func (s *Servidor) respostaConfiguracao(l db.BuscarConfiguracaoCanopusRow, u *UsuarioSessao) map[string]any {
@@ -172,7 +179,9 @@ func (s *Servidor) respostaConfiguracao(l db.BuscarConfiguracaoCanopusRow, u *Us
 			DrivePastaEmVigor: emVigor.DrivePasta, DrivePastaOrigem: emVigor.DrivePastaOrigem,
 			ValidadeDryRunMinutos: int(l.ValidadeDryRunMinutos), RetencaoScreenshotsDias: int(l.RetencaoScreenshotsDias),
 			AtualizadoPorNome: l.AtualizadoPorNome, AtualizadoEm: l.AtualizadoEm,
-			ProximoDryRun: proximoDryRun(s.agora(), int(l.DryRunDia), int(l.DryRunHora), int(l.DryRunMinuto)),
+			ProximoDryRun:          proximoDryRun(s.agora(), int(l.DryRunDia), int(l.DryRunHora), int(l.DryRunMinuto)),
+			UltimoDisparoEm:        l.UltimoDisparoEm,
+			UltimoDisparoResultado: l.UltimoDisparoResultado,
 		},
 		"pode_editar": podeEditarConfiguracao(u),
 		// O resumo por e-mail depende do SMTP do servidor: a tela avisa quando falta.
@@ -329,8 +338,29 @@ func (s *Servidor) atualizarConfiguracaoCanopus(w http.ResponseWriter, r *http.R
 			s.esquecerClienteDrive()
 			s.avisarDrive()
 		}
+		// Agendamento ligado agora, ou com outro horário: a ocorrência que já passou não roda
+		// retroativo nem vira alerta do vigia (agendamento.go).
+		if depois.DryRunAutomatico && horarioMudou(alteracoes) {
+			if err := s.marcarOcorrenciaAnterior(ctx, depois); err != nil {
+				erroInterno(w, r, err)
+				return
+			}
+			if atualizada, err := s.lerConfiguracao(ctx); err == nil {
+				depois = atualizada
+			}
+		}
 	}
 	responderJSON(w, http.StatusOK, s.respostaConfiguracao(depois, u))
+}
+
+// horarioMudou: o agendamento acabou de ser ligado ou o dia/hora/minuto é outro.
+func horarioMudou(alteracoes map[string]any) bool {
+	for _, campo := range []string{"dry_run_automatico", "dry_run_dia", "dry_run_hora", "dry_run_minuto"} {
+		if _, mudou := alteracoes[campo]; mudou {
+			return true
+		}
+	}
+	return false
 }
 
 // mudancasConfiguracao: o que mudou, para a auditoria. Nada aqui é segredo — a pasta do Drive é

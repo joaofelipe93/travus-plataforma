@@ -163,6 +163,9 @@ type ConfiguracaoCanopus struct {
 	RetencaoScreenshotsDias int32
 	AtualizadoPor           *int64
 	AtualizadoEm            time.Time
+	UltimoDisparoDia        *time.Time
+	UltimoDisparoEm         *time.Time
+	UltimoDisparoResultado  *string
 }
 
 type Cota struct {
@@ -244,6 +247,8 @@ type Execuco struct {
 	IniciadaEm             *time.Time
 	FinalizadaEm           *time.Time
 	DryRunOrigemID         *int64
+	Origem                 string
+	AvisoEmailEm           *time.Time
 }
 
 type Importacao struct {

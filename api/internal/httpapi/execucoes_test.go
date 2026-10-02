@@ -59,7 +59,10 @@ func (wt *workerTeste) proxima() (tarefaJSON, int) {
 type detalheExecucao struct {
 	Execucao struct {
 		ID                     int64   `json:"id"`
+		Tipo                   string  `json:"tipo"`
 		Status                 string  `json:"status"`
+		Origem                 string  `json:"origem"`
+		CriadaPorNome          string  `json:"criada_por_nome"`
 		PosicaoFila            *int32  `json:"posicao_fila"`
 		CancelamentoSolicitado bool    `json:"cancelamento_solicitado"`
 		Erro                   *string `json:"erro"`

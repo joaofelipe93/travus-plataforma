@@ -53,7 +53,7 @@ func (q *Queries) AtualizarConfiguracaoCanopus(ctx context.Context, arg Atualiza
 }
 
 const buscarConfiguracaoCanopus = `-- name: BuscarConfiguracaoCanopus :one
-SELECT c.id, c.dry_run_automatico, c.dry_run_dia, c.dry_run_hora, c.dry_run_minuto, c.aviso_email, c.drive_pasta_id, c.validade_dry_run_minutos, c.retencao_screenshots_dias, c.atualizado_por, c.atualizado_em, u.nome AS atualizado_por_nome
+SELECT c.id, c.dry_run_automatico, c.dry_run_dia, c.dry_run_hora, c.dry_run_minuto, c.aviso_email, c.drive_pasta_id, c.validade_dry_run_minutos, c.retencao_screenshots_dias, c.atualizado_por, c.atualizado_em, c.ultimo_disparo_dia, c.ultimo_disparo_em, c.ultimo_disparo_resultado, u.nome AS atualizado_por_nome
 FROM configuracao_canopus c
 LEFT JOIN usuarios u ON u.id = c.atualizado_por
 WHERE c.id
@@ -71,6 +71,9 @@ type BuscarConfiguracaoCanopusRow struct {
 	RetencaoScreenshotsDias int32
 	AtualizadoPor           *int64
 	AtualizadoEm            time.Time
+	UltimoDisparoDia        *time.Time
+	UltimoDisparoEm         *time.Time
+	UltimoDisparoResultado  *string
 	AtualizadoPorNome       *string
 }
 
@@ -89,6 +92,9 @@ func (q *Queries) BuscarConfiguracaoCanopus(ctx context.Context) (BuscarConfigur
 		&i.RetencaoScreenshotsDias,
 		&i.AtualizadoPor,
 		&i.AtualizadoEm,
+		&i.UltimoDisparoDia,
+		&i.UltimoDisparoEm,
+		&i.UltimoDisparoResultado,
 		&i.AtualizadoPorNome,
 	)
 	return i, err
@@ -103,4 +109,49 @@ INSERT INTO configuracao_canopus (id) VALUES (true) ON CONFLICT (id) DO NOTHING
 func (q *Queries) GarantirConfiguracaoCanopus(ctx context.Context) error {
 	_, err := q.db.Exec(ctx, garantirConfiguracaoCanopus)
 	return err
+}
+
+const marcarDisparoDryRun = `-- name: MarcarDisparoDryRun :exec
+UPDATE configuracao_canopus SET
+    ultimo_disparo_dia       = $1,
+    ultimo_disparo_em        = now(),
+    ultimo_disparo_resultado = $2
+WHERE id
+`
+
+type MarcarDisparoDryRunParams struct {
+	UltimoDisparoDia       *time.Time
+	UltimoDisparoResultado *string
+}
+
+func (q *Queries) MarcarDisparoDryRun(ctx context.Context, arg MarcarDisparoDryRunParams) error {
+	_, err := q.db.Exec(ctx, marcarDisparoDryRun, arg.UltimoDisparoDia, arg.UltimoDisparoResultado)
+	return err
+}
+
+const travarConfiguracaoCanopus = `-- name: TravarConfiguracaoCanopus :one
+SELECT id, dry_run_automatico, dry_run_dia, dry_run_hora, dry_run_minuto, aviso_email, drive_pasta_id, validade_dry_run_minutos, retencao_screenshots_dias, atualizado_por, atualizado_em, ultimo_disparo_dia, ultimo_disparo_em, ultimo_disparo_resultado FROM configuracao_canopus WHERE id FOR UPDATE
+`
+
+// O laço do agendamento trava a linha para decidir sozinho se cria a execução do mês.
+func (q *Queries) TravarConfiguracaoCanopus(ctx context.Context) (ConfiguracaoCanopus, error) {
+	row := q.db.QueryRow(ctx, travarConfiguracaoCanopus)
+	var i ConfiguracaoCanopus
+	err := row.Scan(
+		&i.ID,
+		&i.DryRunAutomatico,
+		&i.DryRunDia,
+		&i.DryRunHora,
+		&i.DryRunMinuto,
+		&i.AvisoEmail,
+		&i.DrivePastaID,
+		&i.ValidadeDryRunMinutos,
+		&i.RetencaoScreenshotsDias,
+		&i.AtualizadoPor,
+		&i.AtualizadoEm,
+		&i.UltimoDisparoDia,
+		&i.UltimoDisparoEm,
+		&i.UltimoDisparoResultado,
+	)
+	return i, err
 }

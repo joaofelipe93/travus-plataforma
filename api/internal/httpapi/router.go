@@ -126,10 +126,11 @@ func (s *Servidor) Encerrar() {
 }
 
 // RodarTarefasDeFundo: escuta de eventos para o SSE, limpeza de screenshots vencidos,
-// envio de comprovantes ao Google Drive e vigia (alertas).
+// envio de comprovantes ao Google Drive, dry-run automático do Canopus e vigia (alertas).
 func (s *Servidor) RodarTarefasDeFundo(ctx context.Context) {
 	go s.hub.Rodar(ctx)
 	go s.rodarFilaDrive(ctx)
+	go s.rodarAgendador(ctx)
 	go s.rodarVigia(ctx)
 	go func() {
 		t := time.NewTicker(time.Hour)

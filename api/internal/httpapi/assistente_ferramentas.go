@@ -115,6 +115,7 @@ func (s *Servidor) ferramentaEstado() assistente.Ferramenta {
 				"proximo_dry_run":           proximoDryRun(agora, cfgCanopus.DryRunDia, cfgCanopus.DryRunHora, cfgCanopus.DryRunMinuto).Format(time.RFC3339),
 				"validade_dry_run_minutos":  int(cfgCanopus.ValidadeDryRun.Minutes()),
 				"retencao_screenshots_dias": int(cfgCanopus.RetencaoScreenshots.Hours() / 24),
+				"ultimo_disparo":            cfgCanopus.UltimoDisparoResultado,
 			}
 
 			alertas := []map[string]any{}

@@ -112,6 +112,8 @@ echo "== Configuração do Canopus (só leituras e recusas: nada é alterado)"
 CONFIG=$(curl -s -H "Cookie: $LEITURA_COOKIE" "$APP/api/configuracao/canopus")
 if [[ "$CONFIG" == *'"dry_run_automatico":false'* ]]; then ok "dry-run automático desligado"; else falha "dry-run automático ligado ou sem resposta: $CONFIG"; fi
 if [[ "$CONFIG" == *'"pode_editar":false'* ]]; then ok "perfil leitura não edita a configuração"; else falha "pode_editar errado para leitura: $CONFIG"; fi
+# Agendamento desligado: nenhum dry-run automático pode ter sido criado nesta stack.
+if [[ "$CONFIG" == *'"ultimo_disparo_resultado":null'* ]]; then ok "nenhum disparo do dry-run automático"; else falha "o agendamento disparou: $CONFIG"; fi
 CORPO_CONFIG='{"dry_run_automatico":true,"dry_run_dia":10,"dry_run_hora":8,"dry_run_minuto":0,"aviso_email":true,"validade_dry_run_minutos":120,"retencao_screenshots_dias":30}'
 CORPO_CONFIG_INVALIDO='{"dry_run_automatico":true,"dry_run_dia":40,"dry_run_hora":8,"dry_run_minuto":0,"aviso_email":true,"validade_dry_run_minutos":120,"retencao_screenshots_dias":30}'
 esperar "PUT configuração (leitura)" 403 "$(codigo -X PUT -H "Cookie: $LEITURA_COOKIE" -H "Origin: $APP" -H "X-CSRF-Token: $LEITURA_CSRF" -H 'Content-Type: application/json' -d "$CORPO_CONFIG" "$APP/api/configuracao/canopus")"
