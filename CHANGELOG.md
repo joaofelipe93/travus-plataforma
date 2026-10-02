@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.11.0](https://github.com/joaofelipe93/travus-plataforma/compare/v0.10.0...v0.11.0) (2026-10-02)
+
+
+### Novidades
+
+* **api:** configuração do Canopus no banco (agendamento, pasta do Drive e prazos) ([#49](https://github.com/joaofelipe93/travus-plataforma/issues/49)) ([861f077](https://github.com/joaofelipe93/travus-plataforma/commit/861f077cc830b974921ecaa82a2eeae6597f6069))
+
 ## [0.10.0](https://github.com/joaofelipe93/travus-plataforma/compare/v0.9.0...v0.10.0) (2026-09-30)
 
 
