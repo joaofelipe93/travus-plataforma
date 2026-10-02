@@ -54,7 +54,7 @@ func (q *Queries) BuscarArquivo(ctx context.Context, id string) (BuscarArquivoRo
 }
 
 const buscarExecucao = `-- name: BuscarExecucao :one
-SELECT e.id, e.tipo, e.status, e.criada_em, e.iniciada_em, e.finalizada_em, e.cancelamento_solicitado, e.erro,
+SELECT e.id, e.tipo, e.status, e.origem, e.criada_em, e.iniciada_em, e.finalizada_em, e.cancelamento_solicitado, e.erro,
        e.dry_run_origem_id, u.nome AS criada_por_nome, uc.nome AS cancelada_por_nome, ua.nome AS aprovada_por_nome
 FROM execucoes e
 JOIN usuarios u ON u.id = e.criada_por
@@ -67,6 +67,7 @@ type BuscarExecucaoRow struct {
 	ID                     int64
 	Tipo                   string
 	Status                 string
+	Origem                 string
 	CriadaEm               time.Time
 	IniciadaEm             *time.Time
 	FinalizadaEm           *time.Time
@@ -85,6 +86,7 @@ func (q *Queries) BuscarExecucao(ctx context.Context, id int64) (BuscarExecucaoR
 		&i.ID,
 		&i.Tipo,
 		&i.Status,
+		&i.Origem,
 		&i.CriadaEm,
 		&i.IniciadaEm,
 		&i.FinalizadaEm,
@@ -246,6 +248,37 @@ func (q *Queries) ConcluirExecucaoCota(ctx context.Context, arg ConcluirExecucao
 	return result.RowsAffected(), nil
 }
 
+const cotasAtivasIDs = `-- name: CotasAtivasIDs :many
+
+SELECT q.id
+FROM cotas q
+JOIN clientes c ON c.id = q.cliente_id
+WHERE q.ativa
+ORDER BY c.nome, q.grupo, q.cota, q.versao
+`
+
+// ===== Dry-run automático (agendamento.go) =====
+// Todas as cotas ativas, na ordem em que a execução as processa.
+func (q *Queries) CotasAtivasIDs(ctx context.Context) ([]int64, error) {
+	rows, err := q.db.Query(ctx, cotasAtivasIDs)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []int64
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const cotasVerificadasDoDryRun = `-- name: CotasVerificadasDoDryRun :many
 SELECT ec.id, ec.cota_id, ec.ordem, ec.grupo, ec.cota, ec.versao, ec.cliente_nome, ec.modalidade, ec.detalhes,
        ec.screenshot_id, ec.finalizada_em, q.ativa, q.administradora
@@ -307,14 +340,15 @@ func (q *Queries) CotasVerificadasDoDryRun(ctx context.Context, execucaoID int64
 
 const criarExecucao = `-- name: CriarExecucao :one
 
-INSERT INTO execucoes (tipo, criada_por)
-VALUES ($1, $2)
+INSERT INTO execucoes (tipo, criada_por, origem)
+VALUES ($1, $2, $3)
 RETURNING id, tipo, status, criada_em
 `
 
 type CriarExecucaoParams struct {
 	Tipo      string
 	CriadaPor int64
+	Origem    string
 }
 
 type CriarExecucaoRow struct {
@@ -326,7 +360,7 @@ type CriarExecucaoRow struct {
 
 // ===== Tela (usuário logado) =====
 func (q *Queries) CriarExecucao(ctx context.Context, arg CriarExecucaoParams) (CriarExecucaoRow, error) {
-	row := q.db.QueryRow(ctx, criarExecucao, arg.Tipo, arg.CriadaPor)
+	row := q.db.QueryRow(ctx, criarExecucao, arg.Tipo, arg.CriadaPor, arg.Origem)
 	var i CriarExecucaoRow
 	err := row.Scan(
 		&i.ID,
@@ -495,6 +529,58 @@ func (q *Queries) ExecucaoRealDoDryRun(ctx context.Context, dryRunID *int64) (Ex
 	var i ExecucaoRealDoDryRunRow
 	err := row.Scan(&i.ID, &i.Status)
 	return i, err
+}
+
+const execucoesAgendadasSemAviso = `-- name: ExecucoesAgendadasSemAviso :many
+SELECT e.id, e.status, e.finalizada_em, e.erro,
+       count(ec.id)::int                                                                              AS total,
+       (count(ec.id) FILTER (WHERE ec.status = 'verificada'))::int                                    AS sucesso,
+       (count(ec.id) FILTER (WHERE ec.status IN ('erro_antes_confirmar', 'erro_apos_confirmar')))::int AS com_erro
+FROM execucoes e
+LEFT JOIN execucao_cotas ec ON ec.execucao_id = e.id
+WHERE e.origem = 'agendada' AND e.aviso_email_em IS NULL AND e.finalizada_em IS NOT NULL
+GROUP BY e.id
+ORDER BY e.id
+LIMIT 10
+`
+
+type ExecucoesAgendadasSemAvisoRow struct {
+	ID           int64
+	Status       string
+	FinalizadaEm *time.Time
+	Erro         *string
+	Total        int32
+	Sucesso      int32
+	ComErro      int32
+}
+
+// Execuções agendadas que terminaram e ainda não foram avisadas por e-mail.
+func (q *Queries) ExecucoesAgendadasSemAviso(ctx context.Context) ([]ExecucoesAgendadasSemAvisoRow, error) {
+	rows, err := q.db.Query(ctx, execucoesAgendadasSemAviso)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ExecucoesAgendadasSemAvisoRow
+	for rows.Next() {
+		var i ExecucoesAgendadasSemAvisoRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Status,
+			&i.FinalizadaEm,
+			&i.Erro,
+			&i.Total,
+			&i.Sucesso,
+			&i.ComErro,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const finalizarExecucao = `-- name: FinalizarExecucao :exec
@@ -800,7 +886,7 @@ func (q *Queries) ListarEventos(ctx context.Context, arg ListarEventosParams) ([
 }
 
 const listarExecucoes = `-- name: ListarExecucoes :many
-SELECT e.id, e.tipo, e.status, e.criada_em, e.iniciada_em, e.finalizada_em, e.cancelamento_solicitado, e.erro,
+SELECT e.id, e.tipo, e.status, e.origem, e.criada_em, e.iniciada_em, e.finalizada_em, e.cancelamento_solicitado, e.erro,
        e.dry_run_origem_id,
        u.nome                                                                                    AS criada_por_nome,
        count(ec.id)::int                                                                         AS total,
@@ -819,6 +905,7 @@ type ListarExecucoesRow struct {
 	ID                     int64
 	Tipo                   string
 	Status                 string
+	Origem                 string
 	CriadaEm               time.Time
 	IniciadaEm             *time.Time
 	FinalizadaEm           *time.Time
@@ -845,6 +932,7 @@ func (q *Queries) ListarExecucoes(ctx context.Context) ([]ListarExecucoesRow, er
 			&i.ID,
 			&i.Tipo,
 			&i.Status,
+			&i.Origem,
 			&i.CriadaEm,
 			&i.IniciadaEm,
 			&i.FinalizadaEm,
@@ -865,6 +953,15 @@ func (q *Queries) ListarExecucoes(ctx context.Context) ([]ListarExecucoesRow, er
 		return nil, err
 	}
 	return items, nil
+}
+
+const marcarAvisoEnviado = `-- name: MarcarAvisoEnviado :exec
+UPDATE execucoes SET aviso_email_em = now() WHERE id = $1
+`
+
+func (q *Queries) MarcarAvisoEnviado(ctx context.Context, id int64) error {
+	_, err := q.db.Exec(ctx, marcarAvisoEnviado, id)
+	return err
 }
 
 const marcarConfirmacaoIniciada = `-- name: MarcarConfirmacaoIniciada :execrows

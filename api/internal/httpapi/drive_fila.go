@@ -54,17 +54,29 @@ func salvarTokenDrive(ctx context.Context, q *db.Queries, cofre *cripto.Cofre, t
 	return q.SalvarIntegracao(ctx, db.SalvarIntegracaoParams{Nome: IntegracaoGoogleDrive, DadosCifrados: cifrado})
 }
 
+// esquecerClienteDrive joga fora o cliente em memória: o próximo envio monta outro (usado
+// quando a pasta muda na configuração).
+func (s *Servidor) esquecerClienteDrive() {
+	s.driveMu.Lock()
+	defer s.driveMu.Unlock()
+	s.driveCliente = nil
+}
+
 // clienteDrive devolve o enviador, ou nil com o motivo quando o Drive não está configurado.
 func (s *Servidor) clienteDrive(ctx context.Context) (drive.Enviador, string, error) {
 	if s.enviadorDrive != nil {
 		return s.enviadorDrive, "", nil
 	}
 	g := s.cfg.Google
+	// A pasta vem da configuração do Canopus (a variável de ambiente é só o valor inicial).
+	pasta := s.configCanopus(ctx).DrivePasta
 	switch {
 	case s.cfg.Cofre == nil:
 		return nil, "CHAVE_CRIPTOGRAFIA não configurada", nil
-	case g.ClientID == "" || g.ClientSecret == "" || g.PastaDrive == "":
-		return nil, "Google Drive não configurado (GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET e GOOGLE_DRIVE_PASTA_ID)", nil
+	case g.ClientID == "" || g.ClientSecret == "":
+		return nil, "Google Drive não configurado (GOOGLE_CLIENT_ID e GOOGLE_CLIENT_SECRET)", nil
+	case pasta == "":
+		return nil, "pasta do Drive não escolhida (tela Canopus → Configurações)", nil
 	}
 	integ, err := s.q.BuscarIntegracao(ctx, IntegracaoGoogleDrive)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -76,7 +88,7 @@ func (s *Servidor) clienteDrive(ctx context.Context) (drive.Enviador, string, er
 
 	s.driveMu.Lock()
 	defer s.driveMu.Unlock()
-	if s.driveCliente != nil && s.driveVersao.Equal(integ.AtualizadoEm) {
+	if s.driveCliente != nil && s.driveVersao.Equal(integ.AtualizadoEm) && s.drivePastaEmUso == pasta {
 		return s.driveCliente, "", nil
 	}
 	bruto, err := s.cfg.Cofre.Decifrar(integ.DadosCifrados, contextoCofreDrive)
@@ -91,7 +103,7 @@ func (s *Servidor) clienteDrive(ctx context.Context) (drive.Enviador, string, er
 	if err != nil {
 		return nil, "", err
 	}
-	s.driveCliente = drive.NovoCliente(g.ClientID, g.ClientSecret, tok, g.PastaDrive, func(novo *oauth2.Token) {
+	s.driveCliente = drive.NovoCliente(g.ClientID, g.ClientSecret, tok, pasta, func(novo *oauth2.Token) {
 		atualizado := drive.TokenNode{
 			AccessToken: novo.AccessToken, RefreshToken: tn.RefreshToken, Scope: tn.Scope,
 			TokenType: novo.TokenType, ExpiryDate: novo.Expiry.UnixMilli(),
@@ -103,7 +115,7 @@ func (s *Servidor) clienteDrive(ctx context.Context) (drive.Enviador, string, er
 			slog.Warn("drive: falha ao salvar o token renovado", "erro", err)
 		}
 	})
-	s.driveVersao = integ.AtualizadoEm
+	s.driveVersao, s.drivePastaEmUso = integ.AtualizadoEm, pasta
 	return s.driveCliente, "", nil
 }
 

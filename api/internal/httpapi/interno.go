@@ -502,7 +502,8 @@ func (s *Servidor) enviarScreenshot(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	soma := sha256.Sum256(conteudo)
-	expira := s.agora().Add(s.cfg.RetencaoScreenshots)
+	// Retenção da configuração do Canopus (screenshots têm dados pessoais).
+	expira := s.agora().Add(s.configCanopus(ctx).RetencaoScreenshots)
 	arquivoID, err := qtx.InserirArquivo(ctx, db.InserirArquivoParams{
 		Tipo: "screenshot", Nome: tagDe(c) + ".png", ContentType: "image/png",
 		Tamanho: int32(len(conteudo)), Sha256: hex.EncodeToString(soma[:]), Conteudo: conteudo, ExpiraEm: &expira,

@@ -111,6 +111,9 @@ func (s *Servidor) verificarSaude(ctx context.Context) ([]achado, bool) {
 	if bancoOk {
 		out = append(out, s.verificarBanco(ctxBanco)...)
 	}
+	if bancoOk {
+		out = append(out, s.verificarAgendamento(ctxBanco, agora)...)
+	}
 	out = append(out, s.verificarCheckin(ctx, agora, bancoOk)...)
 	out = append(out, s.verificarBackup(agora)...)
 	if a := s.verificarCertificado(ctx, agora); a != nil {
@@ -427,7 +430,7 @@ func (s *Servidor) montarEmail(novos, lembretes []achado, resolvidos []*alertaAt
 	}
 	fmt.Fprintf(&b, "Plataforma: %s\n", s.cfg.AppOrigin)
 
-	ambiente := strings.TrimPrefix(strings.TrimPrefix(s.cfg.AppOrigin, "https://"), "http://")
+	ambiente := s.ambienteAlerta()
 	var assunto string
 	switch {
 	case len(novos) > 0:
@@ -447,6 +450,11 @@ func (s *Servidor) montarEmail(novos, lembretes []achado, resolvidos []*alertaAt
 		}
 	}
 	return alerta.Mensagem{Assunto: fmt.Sprintf("[Travus %s] %s", ambiente, assunto), Corpo: b.String()}
+}
+
+// ambienteAlerta: o domínio no assunto do e-mail ("app.exemplo.com.br").
+func (s *Servidor) ambienteAlerta() string {
+	return strings.TrimPrefix(strings.TrimPrefix(s.cfg.AppOrigin, "https://"), "http://")
 }
 
 func (s *Servidor) pingMonitor(ctx context.Context) {
