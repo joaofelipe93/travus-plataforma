@@ -47,6 +47,11 @@ func Abrir(t *testing.T) *pgxpool.Pool {
 	if _, err := pool.Exec(ctx, "TRUNCATE auditoria, sessoes, cotas, importacoes, clientes, usuarios RESTART IDENTITY CASCADE"); err != nil {
 		t.Fatal(err)
 	}
+	// O TRUNCATE em cascata leva a configuração do Canopus (ela aponta para usuarios): cada
+	// teste recomeça com os padrões da migração.
+	if _, err := pool.Exec(ctx, "INSERT INTO configuracao_canopus (id) VALUES (true) ON CONFLICT (id) DO NOTHING"); err != nil {
+		t.Fatal(err)
+	}
 	return pool
 }
 

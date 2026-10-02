@@ -1,8 +1,8 @@
 -- ===== Tela (usuário logado) =====
 
 -- name: CriarExecucao :one
-INSERT INTO execucoes (tipo, criada_por)
-VALUES (@tipo, @criada_por)
+INSERT INTO execucoes (tipo, criada_por, origem)
+VALUES (@tipo, @criada_por, @origem)
 RETURNING id, tipo, status, criada_em;
 
 -- Só cotas ativas entram. Ordem: cliente, grupo, cota, versão.
@@ -49,7 +49,7 @@ JOIN clientes c ON c.id = q.cliente_id
 WHERE q.id = @cota_id::bigint;
 
 -- name: ListarExecucoes :many
-SELECT e.id, e.tipo, e.status, e.criada_em, e.iniciada_em, e.finalizada_em, e.cancelamento_solicitado, e.erro,
+SELECT e.id, e.tipo, e.status, e.origem, e.criada_em, e.iniciada_em, e.finalizada_em, e.cancelamento_solicitado, e.erro,
        e.dry_run_origem_id,
        u.nome                                                                                    AS criada_por_nome,
        count(ec.id)::int                                                                         AS total,
@@ -64,7 +64,7 @@ ORDER BY e.criada_em DESC
 LIMIT 50;
 
 -- name: BuscarExecucao :one
-SELECT e.id, e.tipo, e.status, e.criada_em, e.iniciada_em, e.finalizada_em, e.cancelamento_solicitado, e.erro,
+SELECT e.id, e.tipo, e.status, e.origem, e.criada_em, e.iniciada_em, e.finalizada_em, e.cancelamento_solicitado, e.erro,
        e.dry_run_origem_id, u.nome AS criada_por_nome, uc.nome AS cancelada_por_nome, ua.nome AS aprovada_por_nome
 FROM execucoes e
 JOIN usuarios u ON u.id = e.criada_por
@@ -252,3 +252,29 @@ FROM execucoes
 WHERE dry_run_origem_id = @dry_run_id AND tipo = 'real' AND status NOT IN ('cancelada', 'falhou')
 ORDER BY id DESC
 LIMIT 1;
+
+-- ===== Dry-run automático (agendamento.go) =====
+
+-- Todas as cotas ativas, na ordem em que a execução as processa.
+-- name: CotasAtivasIDs :many
+SELECT q.id
+FROM cotas q
+JOIN clientes c ON c.id = q.cliente_id
+WHERE q.ativa
+ORDER BY c.nome, q.grupo, q.cota, q.versao;
+
+-- Execuções agendadas que terminaram e ainda não foram avisadas por e-mail.
+-- name: ExecucoesAgendadasSemAviso :many
+SELECT e.id, e.status, e.finalizada_em, e.erro,
+       count(ec.id)::int                                                                              AS total,
+       (count(ec.id) FILTER (WHERE ec.status = 'verificada'))::int                                    AS sucesso,
+       (count(ec.id) FILTER (WHERE ec.status IN ('erro_antes_confirmar', 'erro_apos_confirmar')))::int AS com_erro
+FROM execucoes e
+LEFT JOIN execucao_cotas ec ON ec.execucao_id = e.id
+WHERE e.origem = 'agendada' AND e.aviso_email_em IS NULL AND e.finalizada_em IS NOT NULL
+GROUP BY e.id
+ORDER BY e.id
+LIMIT 10;
+
+-- name: MarcarAvisoEnviado :exec
+UPDATE execucoes SET aviso_email_em = now() WHERE id = @id;

@@ -29,6 +29,7 @@ type execucaoResumoJSON struct {
 	ID                     int64      `json:"id"`
 	Tipo                   string     `json:"tipo"`
 	Status                 string     `json:"status"`
+	Origem                 string     `json:"origem"`
 	CriadaPorNome          string     `json:"criada_por_nome"`
 	CriadaEm               time.Time  `json:"criada_em"`
 	IniciadaEm             *time.Time `json:"iniciada_em"`
@@ -127,7 +128,7 @@ func (s *Servidor) criarExecucao(w http.ResponseWriter, r *http.Request, u *Usua
 	defer tx.Rollback(ctx)
 	qtx := s.q.WithTx(tx)
 
-	exec, err := qtx.CriarExecucao(ctx, db.CriarExecucaoParams{Tipo: p.Tipo, CriadaPor: u.ID})
+	exec, err := qtx.CriarExecucao(ctx, db.CriarExecucaoParams{Tipo: p.Tipo, CriadaPor: u.ID, Origem: "manual"})
 	if err != nil {
 		erroInterno(w, r, err)
 		return
@@ -169,7 +170,7 @@ func (s *Servidor) listarExecucoes(w http.ResponseWriter, r *http.Request, _ *Us
 	out := make([]execucaoResumoJSON, 0, len(rows))
 	for _, e := range rows {
 		out = append(out, execucaoResumoJSON{
-			ID: e.ID, Tipo: e.Tipo, Status: e.Status, CriadaPorNome: e.CriadaPorNome, CriadaEm: e.CriadaEm,
+			ID: e.ID, Tipo: e.Tipo, Status: e.Status, Origem: e.Origem, CriadaPorNome: e.CriadaPorNome, CriadaEm: e.CriadaEm,
 			IniciadaEm: e.IniciadaEm, FinalizadaEm: e.FinalizadaEm, CancelamentoSolicitado: e.CancelamentoSolicitado,
 			Erro: e.Erro, DryRunOrigemID: e.DryRunOrigemID, Total: e.Total, Sucesso: e.Sucesso, ComErro: e.ComErro, Restantes: e.Restantes,
 		})
@@ -224,7 +225,7 @@ func (s *Servidor) buscarExecucao(w http.ResponseWriter, r *http.Request, _ *Usu
 	}
 	responderJSON(w, http.StatusOK, map[string]any{
 		"execucao": map[string]any{
-			"id": e.ID, "tipo": e.Tipo, "status": e.Status, "criada_por_nome": e.CriadaPorNome,
+			"id": e.ID, "tipo": e.Tipo, "status": e.Status, "origem": e.Origem, "criada_por_nome": e.CriadaPorNome,
 			"aprovada_por_nome": e.AprovadaPorNome, "dry_run_origem_id": e.DryRunOrigemID,
 			"criada_em": e.CriadaEm, "iniciada_em": e.IniciadaEm, "finalizada_em": e.FinalizadaEm,
 			"cancelamento_solicitado": e.CancelamentoSolicitado, "cancelada_por_nome": e.CanceladaPorNome,

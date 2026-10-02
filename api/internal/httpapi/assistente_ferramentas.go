@@ -93,9 +93,10 @@ func (s *Servidor) ferramentaEstado() assistente.Ferramenta {
 			estado["worker_canopus"] = worker
 
 			g := s.cfg.Google
+			cfgCanopus := s.configCanopus(ctx)
 			drive := map[string]any{
 				"client_configurado": g.ClientID != "" && g.ClientSecret != "",
-				"pasta_configurada":  g.PastaDrive != "",
+				"pasta_configurada":  cfgCanopus.DrivePasta != "",
 				"token_importado":    false,
 			}
 			if integ, err := s.q.BuscarIntegracao(ctx, IntegracaoGoogleDrive); err == nil {
@@ -105,6 +106,17 @@ func (s *Servidor) ferramentaEstado() assistente.Ferramenta {
 				return "", errors.New("falha ao ler a integração do Google Drive")
 			}
 			estado["google_drive"] = drive
+
+			// Configuração do Canopus: agendamento do dry-run e prazos (tela Configurações).
+			estado["canopus_configuracao"] = map[string]any{
+				"dry_run_automatico":        cfgCanopus.DryRunAutomatico,
+				"dry_run_dia":               cfgCanopus.DryRunDia,
+				"dry_run_horario":           fmt.Sprintf("%02d:%02d", cfgCanopus.DryRunHora, cfgCanopus.DryRunMinuto),
+				"proximo_dry_run":           proximoDryRun(agora, cfgCanopus.DryRunDia, cfgCanopus.DryRunHora, cfgCanopus.DryRunMinuto).Format(time.RFC3339),
+				"validade_dry_run_minutos":  int(cfgCanopus.ValidadeDryRun.Minutes()),
+				"retencao_screenshots_dias": int(cfgCanopus.RetencaoScreenshots.Hours() / 24),
+				"ultimo_disparo":            cfgCanopus.UltimoDisparoResultado,
+			}
 
 			alertas := []map[string]any{}
 			s.vigiaMu.Lock()

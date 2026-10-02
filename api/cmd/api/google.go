@@ -41,7 +41,7 @@ func google(args []string) error {
 
 	faltando := func() []string {
 		var f []string
-		for _, nome := range []string{"GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET", "GOOGLE_DRIVE_PASTA_ID"} {
+		for _, nome := range []string{"GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET"} {
 			if os.Getenv(nome) == "" {
 				f = append(f, nome)
 			}
@@ -91,7 +91,17 @@ func google(args []string) error {
 		if f := faltando(); len(f) > 0 {
 			fmt.Printf("Faltando no ambiente: %v\n", f)
 		} else {
-			fmt.Println("Client OAuth e pasta: configurados")
+			fmt.Println("Client OAuth: configurado")
+		}
+		// A pasta vem da configuração do Canopus; a variável é só o valor inicial.
+		pasta, origem := os.Getenv("GOOGLE_DRIVE_PASTA_ID"), "GOOGLE_DRIVE_PASTA_ID"
+		if c, err := q.BuscarConfiguracaoCanopus(ctx); err == nil && c.DrivePastaID != nil && *c.DrivePastaID != "" {
+			pasta, origem = *c.DrivePastaID, "configuração do Canopus"
+		}
+		if pasta == "" {
+			fmt.Println("Pasta do Drive: não escolhida (tela Canopus → Configurações)")
+		} else {
+			fmt.Printf("Pasta do Drive: %s (%s)\n", pasta, origem)
 		}
 		fmt.Printf("LANCE_REAL_HABILITADO=%s\n", envOr("LANCE_REAL_HABILITADO", "false"))
 		return nil
