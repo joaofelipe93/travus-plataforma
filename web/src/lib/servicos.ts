@@ -28,6 +28,8 @@ export const servicos: readonly Servico[] = [
       { href: "/canopus/execucoes", rotulo: "Execuções", perfis: null },
       { href: "/canopus/cotas", rotulo: "Cotas", perfis: null },
       { href: "/canopus/clientes", rotulo: "Clientes", perfis: null },
+      // Todo perfil vê o agendamento e os prazos; admin e operador editam (a API decide).
+      { href: "/canopus/configuracao", rotulo: "Configurações", perfis: null },
     ],
   },
   {

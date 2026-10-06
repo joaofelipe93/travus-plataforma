@@ -22,3 +22,14 @@ UPDATE configuracao_canopus SET
     atualizado_por            = sqlc.narg(atualizado_por),
     atualizado_em             = now()
 WHERE id;
+
+-- O laço do agendamento trava a linha para decidir sozinho se cria a execução do mês.
+-- name: TravarConfiguracaoCanopus :one
+SELECT * FROM configuracao_canopus WHERE id FOR UPDATE;
+
+-- name: MarcarDisparoDryRun :exec
+UPDATE configuracao_canopus SET
+    ultimo_disparo_dia       = sqlc.arg(ultimo_disparo_dia),
+    ultimo_disparo_em        = now(),
+    ultimo_disparo_resultado = sqlc.arg(ultimo_disparo_resultado)
+WHERE id;

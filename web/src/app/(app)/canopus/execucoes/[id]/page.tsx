@@ -131,9 +131,15 @@ export default function PaginaExecucao() {
             <Badge variant={situacaoExecucao[execucao.status].variante}>
               {execucao.cancelamento_solicitado && !terminou ? "Cancelando" : situacaoExecucao[execucao.status].rotulo}
             </Badge>
+            {execucao.origem === "agendada" && <Badge variant="outline">Automática</Badge>}
           </div>
           <p className="text-sm text-muted-foreground">
-            {execucao.tipo === "real" && execucao.aprovada_por_nome ? `Aprovada por ${execucao.aprovada_por_nome}` : `Criada por ${execucao.criada_por_nome}`} em{" "}
+            {execucao.origem === "agendada"
+              ? `Criada pelo agendamento, no nome de ${execucao.criada_por_nome},`
+              : execucao.tipo === "real" && execucao.aprovada_por_nome
+                ? `Aprovada por ${execucao.aprovada_por_nome}`
+                : `Criada por ${execucao.criada_por_nome}`}{" "}
+            em{" "}
             {dataHora(execucao.criada_em)}
             {execucao.dry_run_origem_id && (
               <>
