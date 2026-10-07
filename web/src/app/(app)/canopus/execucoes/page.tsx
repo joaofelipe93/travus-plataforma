@@ -30,7 +30,7 @@ export default function PaginaExecucoes() {
         </div>
         {podeEditar(sessao.data?.usuario.perfil) && (
           <Link href="/canopus/execucoes/nova" className={buttonVariants()}>
-            Novo dry-run
+            Dar Lance
           </Link>
         )}
       </div>
