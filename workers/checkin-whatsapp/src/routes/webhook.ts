@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto'
 import type { FastifyInstance } from 'fastify'
 import { grupoDestino } from '../db/configuracao.js'
 import { eventoProcessado, insertEvent } from '../db/events.js'
-import { normalizeCheckin, isUnmapped } from '../domain/checkin.js'
+import { normalizeCheckin, isCheckinRealizado, isUnmapped } from '../domain/checkin.js'
 import { idReserva } from '../domain/reserva-id.js'
 import { tratarEvento } from '../resumos/evento.js'
 import { requireToken } from './auth.js'
@@ -29,7 +29,13 @@ function statusSuffix(payload: unknown): string {
 function resolveDedupeKey(payload: unknown, rawJson: string): string {
   if (payload !== null && typeof payload === 'object') {
     const id = idReserva(payload)
-    if (id !== undefined) return `${SOURCE}:${id}${statusSuffix(payload)}`
+    if (id !== undefined) {
+      // O check-in efetuado é um evento à parte da reserva, com o MESMO id. Sem um sufixo
+      // próprio, um check-in cujo payload repete `status: confirmed` seria descartado como
+      // duplicata da reserva e o grupo nunca saberia da chegada.
+      const sufixo = isCheckinRealizado(normalizeCheckin(payload)) ? ':checkin' : statusSuffix(payload)
+      return `${SOURCE}:${id}${sufixo}`
+    }
   }
   // O hash já cobre o corpo inteiro, status incluso — não precisa de sufixo.
   return `${SOURCE}:sha256:${createHash('sha256').update(rawJson).digest('hex')}`
@@ -83,6 +89,24 @@ export async function webhookRoutes(app: FastifyInstance) {
           eventId: event.id,
           hint: 'escolha o grupo na tela WhatsApp da plataforma',
         })
+      }
+
+      // Outra automação do PMS na mesma URL: sem id e sem data não há reserva para anunciar.
+      // Fica no evento (GET /events) para auditoria; o grupo não recebe nada.
+      if (resultado.acao === 'ignorado') {
+        req.log.warn(
+          { eventId: event.id, dedupeKey, motivo: resultado.motivo, campos: Object.keys(payload as object) },
+          'evento não é reserva — guardado sem avisar o grupo',
+        )
+        return reply.code(200).send({ status: 'ignored', eventId: event.id, motivo: resultado.motivo })
+      }
+
+      if (resultado.acao === 'checkin') {
+        req.log.info(
+          { eventId: event.id, outboxId: resultado.outboxId, dedupeKey },
+          'check-in efetuado avisado no grupo',
+        )
+        return reply.code(200).send({ status: 'checkin', eventId: event.id, outboxId: resultado.outboxId })
       }
 
       if (resultado.acao === 'resumo') {

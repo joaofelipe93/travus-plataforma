@@ -54,13 +54,17 @@ export type ReservaRow = {
   reserva_id: string
   status: 'confirmada' | 'cancelada'
   check_in: string
+  check_out: string | null
   hospede: string | null
+  telefone: string | null
+  canal: string | null
   ultimo_evento_id: number
 }
 
 export async function listaReservas(): Promise<ReservaRow[]> {
   const { rows } = await pool.query<ReservaRow>(
-    `SELECT reserva_id, status, check_in::text AS check_in, hospede, ultimo_evento_id
+    `SELECT reserva_id, status, check_in::text AS check_in, check_out::text AS check_out,
+            hospede, telefone, canal, ultimo_evento_id
      FROM checkin.reservas ORDER BY id`,
   )
   return rows

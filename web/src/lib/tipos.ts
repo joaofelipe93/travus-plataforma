@@ -80,6 +80,9 @@ export type TipoExecucao = "dry_run" | "real" | "reimpressao";
 
 export type StatusExecucao = "na_fila" | "em_andamento" | "concluida" | "concluida_com_erros" | "cancelada" | "falhou";
 
+// Quem pediu a execução: a tela ou o dry-run automático do mês (Canopus → Configurações).
+export type OrigemExecucao = "manual" | "agendada";
+
 export type StatusCotaExecucao =
   | "pendente"
   | "em_andamento"
@@ -95,6 +98,7 @@ export type ExecucaoResumo = {
   id: number;
   tipo: TipoExecucao;
   status: StatusExecucao;
+  origem: OrigemExecucao;
   criada_por_nome: string;
   criada_em: string;
   iniciada_em: string | null;
@@ -154,6 +158,7 @@ export type Execucao = {
   id: number;
   tipo: TipoExecucao;
   status: StatusExecucao;
+  origem: OrigemExecucao;
   criada_por_nome: string;
   aprovada_por_nome: string | null;
   dry_run_origem_id: number | null;
@@ -351,4 +356,32 @@ export type Reserva = {
 export type RespostaReservas = {
   reservas: Reserva[];
   limite_atingido: boolean;
+};
+
+// Configuração do serviço Canopus (tela Canopus → Configurações; GET/PUT /configuracao/canopus).
+// drive_pasta_id é o que está gravado; drive_pasta_em_vigor pode vir do ambiente.
+export type ConfiguracaoCanopus = {
+  dry_run_automatico: boolean;
+  dry_run_dia: number;
+  dry_run_hora: number;
+  dry_run_minuto: number;
+  aviso_email: boolean;
+  drive_pasta_id: string | null;
+  drive_pasta_em_vigor: string;
+  drive_pasta_origem: "configuracao" | "ambiente" | "nenhuma";
+  validade_dry_run_minutos: number;
+  retencao_screenshots_dias: number;
+  atualizado_por_nome: string | null;
+  atualizado_em: string;
+  proximo_dry_run: string;
+  ultimo_disparo_em: string | null;
+  ultimo_disparo_resultado: ResultadoDisparo | null;
+};
+
+export type ResultadoDisparo = "criada" | "sem_cotas" | "sem_responsavel" | "atrasada" | "antes_de_ligar";
+
+export type RespostaConfiguracaoCanopus = {
+  configuracao: ConfiguracaoCanopus;
+  pode_editar: boolean;
+  email_configurado: boolean;
 };

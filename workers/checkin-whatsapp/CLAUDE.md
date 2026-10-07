@@ -35,7 +35,7 @@ Dois tokens (header `x-webhook-token` ou `Authorization: Bearer`), de propósito
 
 | Método | Rota | Token | Descrição |
 |---|---|---|---|
-| `POST` | `/webhooks/nova-reserva` | webhook | Recebe o webhook (qualquer JSON). Responde `scheduled` (guardada para o resumo), `queued` (mensagem avulsa), `duplicate` ou `stored_no_target`. **Única rota no gateway.** |
+| `POST` | `/webhooks/nova-reserva` | webhook | Recebe o webhook (qualquer JSON). Responde `scheduled` (guardada para o resumo), `queued` (mensagem avulsa), `checkin` (check-in efetuado), `ignored` (não é reserva: sem id e sem data), `duplicate` ou `stored_no_target`. **Única rota no gateway.** |
 | `GET` | `/health` | — | Estado do serviço, da conexão e da fila. |
 | `GET` | `/whatsapp/status` | admin | Conexão, número pareado, **string do QR**, grupo de destino e fila. |
 | `GET` | `/whatsapp/groups` | admin | Grupos do número pareado e JIDs. |
@@ -50,7 +50,9 @@ O grupo de destino é o escolhido na tela (`checkin.configuracao`) ou, enquanto 
 
 ```
 webhook → grava em `checkin.eventos` → atualiza `checkin.reservas` → responde 200
-                                          └ (chegou tarde / sem data) → enfileira avulsa em `checkin.mensagens`
+                                          ├ (check-in efetuado) → "🛎️ Check-in realizado" em `checkin.mensagens`
+                                          ├ (chegou tarde / falta id ou data) → avulsa em `checkin.mensagens`
+                                          └ (sem id E sem data: não é reserva) → só o evento, nada no grupo
 agendador (1 min) → 08h "para Hoje", 17h "para Amanhã" → `checkin.resumos` + `checkin.mensagens`
 laço da fila → Baileys → grupo
 ```
@@ -68,7 +70,29 @@ O grupo recebia uma mensagem por webhook, e isso poluía a conversa. Agora receb
 - **Mensagem avulsa** (`resumos/evento.ts`, `tratarEvento`), só quando o resumo não resolve:
   - reserva cujo dia de check-in **já teve resumo** (feita depois das 17h para amanhã, ou no próprio dia): "Nova Reserva Realizada", como antes;
   - cancelamento de reserva confirmada que **já saiu** num resumo ou avulsa: "Cancelamento de Reserva";
-  - payload sem id, sem data de check-in legível (`domain/datas.ts`: `dd/mm/aaaa` ou ISO) ou em formato desconhecido: vai avulsa, como antes.
+  - payload a que falta **uma** das duas coisas — id sem data de check-in legível (`domain/datas.ts`:
+    `dd/mm/aaaa` ou ISO), ou data sem id — ou em formato desconhecido: vai avulsa, como antes.
+- **Check-in efetuado** (`checkin`): o PMS avisa na mesma rota quando o hóspede chega (automação do usuário,
+  30/09/2026). `isCheckinRealizado` (`domain/checkin.ts`) reconhece pelo nome do evento (`event`, `event_type`,
+  `trigger`…, casando `check_in`/`checkin` e descartando `check-out`), por um status de hospedado
+  (`checked_in`, `in_house`, `hospedado`…) ou pela hora do check-in (`checked_in_at`, `checkin_at`…);
+  **cancelamento tem precedência**. Vira mensagem própria, com título `🛎️ *Check-in realizado*`.
+  Dois cuidados que não são óbvios:
+  - **a chave de deduplicação leva `:checkin`**. O evento vem com o MESMO id da reserva; se o payload repetir
+    `status: confirmed`, sem esse sufixo ele seria descartado como duplicata da reserva e o grupo nunca saberia
+    da chegada. Check-in repetido do mesmo hóspede continua sendo `duplicate`, que é o certo;
+  - **não escreve em `checkin.reservas`**. O payload do check-in é mais enxuto que o da reserva, e o upsert
+    trocava campo por campo; por isso o `ON CONFLICT` agora usa `coalesce` (evento novo não apaga check-out,
+    telefone, canal nem hóspede já gravados) e o ramo do check-in nem chama `aplicarReserva`.
+  Se o payload real usar outro nome de campo, é em `isCheckinRealizado` que se acrescenta — e o vigia da API
+  avisa quando chega evento que não viramos nada.
+- **Evento ignorado** (`ignored`): sem id da reserva **e** sem data de check-in não há reserva nenhuma para
+  anunciar. Fica gravado em `checkin.eventos` (auditável em `GET /events`) e **nada** vai para o grupo.
+  Motivo: o PMS tem mais de uma automação apontada para esta URL (um workflow diário por imóvel manda só
+  `date` e `property_name`), e a regra antiga transformava cada uma num "✅ Nova Reserva Realizada" com o
+  nome do imóvel e nada mais — 54 avisos falsos no grupo em 6 dias (decisão do usuário, 29/09/2026).
+  Para o caso não virar silêncio, o vigia da API alerta quando aparecem eventos assim em 24 h
+  (`VigiaCheckinIgnorados`): é o sinal de que o PMS mudou um campo ou ligou outra automação.
   - check-in já passado: só atualiza a reserva.
 - **A trava**: o webhook e o agendador trabalham sob `comTravaDoResumo` (`pg_advisory_xact_lock`, `db/index.ts`). Sem ela, uma reserva gravada enquanto o resumo é montado ficaria fora do resumo e sem avulsa. Não tire.
 - **Agendador** (`resumos/agendador.ts`): confere a cada minuto. Serviço fora do ar na hora → o resumo sai quando ele voltar, **no mesmo dia**. Na primeira subida de um dia depois das 08h, o de hoje sai na hora. Sem grupo escolhido, não registra (sai quando houver grupo).

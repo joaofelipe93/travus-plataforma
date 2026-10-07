@@ -24,3 +24,15 @@ FROM lances;
 SELECT (count(*) FILTER (WHERE status = 'falhou' AND criada_em > now() - interval '24 hours'))::int     AS falharam,
        (count(*) FILTER (WHERE status = 'pendente' AND criada_em < now() - interval '30 minutes'))::int AS paradas
 FROM checkin.mensagens;
+
+-- Eventos que chegaram no webhook e não viraram nada: nem mensagem no grupo, nem reserva.
+-- É o sinal de que o PMS está mandando um payload que o notificador não entende (outra
+-- automação apontada para a mesma URL, ou um campo que mudou de nome). Sem isto o caso ficaria
+-- invisível: desde 29/09/2026 esses eventos são guardados sem avisar o grupo.
+-- Um reenvio de evento antigo (mais velho que a situação já gravada) também cai aqui.
+-- name: VigiaCheckinIgnorados :one
+SELECT count(*)::int AS ignorados
+FROM checkin.eventos e
+WHERE e.recebido_em > now() - interval '24 hours'
+  AND NOT EXISTS (SELECT 1 FROM checkin.mensagens m WHERE m.evento_id = e.id)
+  AND NOT EXISTS (SELECT 1 FROM checkin.reservas r WHERE r.ultimo_evento_id = e.id);

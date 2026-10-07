@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.11.0](https://github.com/joaofelipe93/travus-plataforma/compare/v0.10.0...v0.11.0) (2026-10-06)
+
+
+### Novidades
+
+* **api:** configuração do Canopus no banco (agendamento, pasta do Drive e prazos) ([#49](https://github.com/joaofelipe93/travus-plataforma/issues/49)) ([861f077](https://github.com/joaofelipe93/travus-plataforma/commit/861f077cc830b974921ecaa82a2eeae6597f6069))
+* **api:** dry-run automático do Canopus todo mês no dia marcado ([#50](https://github.com/joaofelipe93/travus-plataforma/issues/50)) ([c04e175](https://github.com/joaofelipe93/travus-plataforma/commit/c04e175c81b8420ba63eb1913cfa6c7d9c0f32fb))
+* **web:** tela Canopus → Configurações e etiqueta de execução automática ([#51](https://github.com/joaofelipe93/travus-plataforma/issues/51)) ([5db0d27](https://github.com/joaofelipe93/travus-plataforma/commit/5db0d2786f4e1a19fa0de39021a54a8abd4cec67))
+
+## [0.10.0](https://github.com/joaofelipe93/travus-plataforma/compare/v0.9.0...v0.10.0) (2026-09-30)
+
+
+### Novidades
+
+* **checkin-whatsapp:** aviso de check-in realizado e payload que não é reserva ([#46](https://github.com/joaofelipe93/travus-plataforma/issues/46)) ([0ac5d31](https://github.com/joaofelipe93/travus-plataforma/commit/0ac5d314fc60d2902cc792282832a9effaf31ca2))
+
 ## [0.9.0](https://github.com/joaofelipe93/travus-plataforma/compare/v0.8.0...v0.9.0) (2026-09-24)
 
 

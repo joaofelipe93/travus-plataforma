@@ -111,6 +111,9 @@ func (s *Servidor) verificarSaude(ctx context.Context) ([]achado, bool) {
 	if bancoOk {
 		out = append(out, s.verificarBanco(ctxBanco)...)
 	}
+	if bancoOk {
+		out = append(out, s.verificarAgendamento(ctxBanco, agora)...)
+	}
 	out = append(out, s.verificarCheckin(ctx, agora, bancoOk)...)
 	out = append(out, s.verificarBackup(agora)...)
 	if a := s.verificarCertificado(ctx, agora); a != nil {
@@ -249,6 +252,21 @@ func (s *Servidor) verificarCheckin(ctx context.Context, agora time.Time, bancoO
 			Chave:   "checkin-fila",
 			Titulo:  fmt.Sprintf("%d mensagem(ns) de reserva paradas na fila há mais de 30 min com o WhatsApp conectado", c.Paradas),
 			Detalhe: "O envio está falhando ou travou (make logs s=checkin-whatsapp).",
+		})
+	}
+	// Payload que o notificador não entende não vai mais para o grupo (senão vira aviso de
+	// reserva falsa, 29/09/2026): o sinal de que algo mudou no PMS vem por aqui.
+	ignorados, err := s.q.VigiaCheckinIgnorados(ctxBanco)
+	if err != nil {
+		slog.Error("vigia: eventos de check-in não reconhecidos", "erro", err)
+		return out
+	}
+	if ignorados > 0 {
+		out = append(out, achado{
+			Chave:  "checkin-ignorados",
+			Titulo: fmt.Sprintf("%d evento(s) do webhook de reserva não foram reconhecidos (últimas 24 h)", ignorados),
+			Detalhe: "Chegaram sem identificador de reserva e sem data de check-in: ficaram gravados e nada foi para o grupo.\n" +
+				"Ou outra automação do PMS está apontada para o webhook, ou um campo mudou de nome (ajuste domain/checkin.ts).",
 		})
 	}
 	return out
@@ -412,7 +430,7 @@ func (s *Servidor) montarEmail(novos, lembretes []achado, resolvidos []*alertaAt
 	}
 	fmt.Fprintf(&b, "Plataforma: %s\n", s.cfg.AppOrigin)
 
-	ambiente := strings.TrimPrefix(strings.TrimPrefix(s.cfg.AppOrigin, "https://"), "http://")
+	ambiente := s.ambienteAlerta()
 	var assunto string
 	switch {
 	case len(novos) > 0:
@@ -432,6 +450,11 @@ func (s *Servidor) montarEmail(novos, lembretes []achado, resolvidos []*alertaAt
 		}
 	}
 	return alerta.Mensagem{Assunto: fmt.Sprintf("[Travus %s] %s", ambiente, assunto), Corpo: b.String()}
+}
+
+// ambienteAlerta: o domínio no assunto do e-mail ("app.exemplo.com.br").
+func (s *Servidor) ambienteAlerta() string {
+	return strings.TrimPrefix(strings.TrimPrefix(s.cfg.AppOrigin, "https://"), "http://")
 }
 
 func (s *Servidor) pingMonitor(ctx context.Context) {

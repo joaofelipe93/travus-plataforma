@@ -29,6 +29,26 @@ func (q *Queries) VigiaCheckin(ctx context.Context) (VigiaCheckinRow, error) {
 	return i, err
 }
 
+const vigiaCheckinIgnorados = `-- name: VigiaCheckinIgnorados :one
+SELECT count(*)::int AS ignorados
+FROM checkin.eventos e
+WHERE e.recebido_em > now() - interval '24 hours'
+  AND NOT EXISTS (SELECT 1 FROM checkin.mensagens m WHERE m.evento_id = e.id)
+  AND NOT EXISTS (SELECT 1 FROM checkin.reservas r WHERE r.ultimo_evento_id = e.id)
+`
+
+// Eventos que chegaram no webhook e não viraram nada: nem mensagem no grupo, nem reserva.
+// É o sinal de que o PMS está mandando um payload que o notificador não entende (outra
+// automação apontada para a mesma URL, ou um campo que mudou de nome). Sem isto o caso ficaria
+// invisível: desde 29/09/2026 esses eventos são guardados sem avisar o grupo.
+// Um reenvio de evento antigo (mais velho que a situação já gravada) também cai aqui.
+func (q *Queries) VigiaCheckinIgnorados(ctx context.Context) (int32, error) {
+	row := q.db.QueryRow(ctx, vigiaCheckinIgnorados)
+	var ignorados int32
+	err := row.Scan(&ignorados)
+	return ignorados, err
+}
+
 const vigiaCotasAposConfirmar = `-- name: VigiaCotasAposConfirmar :many
 SELECT id, execucao_id, grupo, cota, versao, erro
 FROM execucao_cotas

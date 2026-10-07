@@ -104,8 +104,10 @@ func (s *Servidor) montarRevisao(ctx context.Context, q *db.Queries, id int64) (
 	}
 	rv.DryRun.ID, rv.DryRun.Status, rv.DryRun.FinalizadaEm = e.ID, e.Status, e.FinalizadaEm
 	rv.LanceRealHabilitado = s.cfg.LanceRealHabilitado
+	// O prazo é da configuração do Canopus (tela Canopus → Configurações).
+	validade := s.configCanopus(ctx).ValidadeDryRun
 	if e.FinalizadaEm != nil {
-		ate := e.FinalizadaEm.Add(s.cfg.ValidadeDryRun)
+		ate := e.FinalizadaEm.Add(validade)
 		rv.DryRun.ValidoAte, rv.DryRun.Expirado = &ate, s.agora().After(ate)
 	}
 	real, err := q.ExecucaoRealDoDryRun(ctx, &id)
@@ -121,7 +123,7 @@ func (s *Servidor) montarRevisao(ctx context.Context, q *db.Queries, id int64) (
 	case rv.DryRun.ExecucaoRealID != nil:
 		rv.Bloqueio = fmt.Sprintf("este dry-run já foi aprovado na execução nº %d", *rv.DryRun.ExecucaoRealID)
 	case rv.DryRun.Expirado:
-		rv.Bloqueio = fmt.Sprintf("o dry-run passou do prazo de %s para aprovação: faça um novo dry-run", textoDuracao(s.cfg.ValidadeDryRun))
+		rv.Bloqueio = fmt.Sprintf("o dry-run passou do prazo de %s para aprovação: faça um novo dry-run", textoDuracao(validade))
 	case !s.cfg.LanceRealHabilitado:
 		rv.Bloqueio = mensagemLanceRealDesligado
 	}
@@ -407,11 +409,13 @@ func (s *Servidor) reenviarAoDrive(w http.ResponseWriter, r *http.Request, u *Us
 
 func (s *Servidor) situacaoGoogleDrive(w http.ResponseWriter, r *http.Request, _ *UsuarioSessao) {
 	g := s.cfg.Google
+	cfgC := s.configCanopus(r.Context())
 	resp := map[string]any{
 		"lance_real_habilitado": s.cfg.LanceRealHabilitado,
 		"cofre_configurado":     s.cfg.Cofre != nil,
 		"client_configurado":    g.ClientID != "" && g.ClientSecret != "",
-		"pasta_configurada":     g.PastaDrive != "",
+		"pasta_configurada":     cfgC.DrivePasta != "",
+		"pasta_origem":          cfgC.DrivePastaOrigem,
 		"token_importado":       false,
 		"token_atualizado_em":   nil,
 	}

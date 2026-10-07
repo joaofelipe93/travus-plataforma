@@ -26,7 +26,10 @@ export default function PaginaExecucoes() {
     <div className="flex flex-col gap-4">
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
-          <p className="text-sm text-muted-foreground">Dry-runs no Newcon: vão até a tela de credenciamento e não confirmam lance.</p>
+          <p className="text-sm text-muted-foreground">
+            Dry-runs no Newcon: vão até a tela de credenciamento e não confirmam lance. As marcadas como{" "}
+            <em>Automática</em> saem do agendamento em Configurações.
+          </p>
         </div>
         {podeEditar(sessao.data?.usuario.perfil) && (
           <Link href="/canopus/execucoes/nova" className={buttonVariants()}>
@@ -80,7 +83,14 @@ export default function PaginaExecucoes() {
                       {e.cancelamento_solicitado && e.status === "em_andamento" ? "Cancelando" : situacaoExecucao[e.status].rotulo}
                     </Badge>
                   </TableCell>
-                  <TableCell>{nomeTipo(e.tipo)}</TableCell>
+                  <TableCell className="whitespace-nowrap">
+                    {nomeTipo(e.tipo)}
+                    {e.origem === "agendada" && (
+                      <Badge variant="outline" className="ml-2">
+                        Automática
+                      </Badge>
+                    )}
+                  </TableCell>
                   <TableCell className="text-muted-foreground">
                     {e.total} no total · {e.sucesso} pronta(s) · {e.com_erro} com erro
                     {e.restantes > 0 && !execucaoTerminou(e.status) ? ` · ${e.restantes} restante(s)` : ""}
