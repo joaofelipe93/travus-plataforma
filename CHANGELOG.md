@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.11.1](https://github.com/joaofelipe93/travus-plataforma/compare/v0.11.0...v0.11.1) (2026-10-14)
+
+
+### Correções
+
+* **web:** ativar e desativar cota na tela de cotas ([#61](https://github.com/joaofelipe93/travus-plataforma/issues/61)) ([712c6d8](https://github.com/joaofelipe93/travus-plataforma/commit/712c6d86bd9220c5f407c2fcfcb998ba870ec1ae))
+
 ## [0.11.0](https://github.com/joaofelipe93/travus-plataforma/compare/v0.10.0...v0.11.0) (2026-10-06)
 
 

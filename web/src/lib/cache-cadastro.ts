@@ -7,8 +7,7 @@
 import type { QueryClient } from "@tanstack/react-query";
 import type { Cota } from "@/lib/tipos";
 
-type ListaCotas = { cotas: Cota[] };
-type DetalheCliente = { cotas: Cota[] };
+type ComCotas = { cotas: Cota[] };
 
 /** Guarda o estado atual das consultas de cota para poder desfazer. */
 export type CacheCotas = [readonly unknown[], unknown][];
@@ -27,16 +26,26 @@ export function desfazer(queryClient: QueryClient, anterior: CacheCotas | undefi
   }
 }
 
+// O prefixo ["cotas"] também alcança consultas que não trazem lista de cotas (a de grupos do
+// filtro da tela de cotas, por exemplo): nessas, o cache fica como está.
+function temCotas(dados: unknown): dados is ComCotas {
+  return !!dados && Array.isArray((dados as Partial<ComCotas>).cotas);
+}
+
+/** Aplica a mudança em toda consulta cujo resultado traz uma lista de cotas. */
+function mexerNasListas(queryClient: QueryClient, mudar: (cotas: Cota[]) => Cota[]) {
+  const aplicar = (dados: unknown) => (temCotas(dados) ? { ...dados, cotas: mudar(dados.cotas) } : dados);
+  for (const chave of ["cotas", "cliente"]) {
+    queryClient.setQueriesData({ queryKey: [chave] }, aplicar);
+  }
+}
+
 /** Troca uma cota em todas as consultas que a mostram. */
 export function trocarCotaNoCache(queryClient: QueryClient, id: number, mudar: (c: Cota) => Cota) {
-  const trocar = (cotas: Cota[]) => cotas.map((c) => (c.id === id ? mudar(c) : c));
-  queryClient.setQueriesData<ListaCotas>({ queryKey: ["cotas"] }, (d) => (d ? { ...d, cotas: trocar(d.cotas) } : d));
-  queryClient.setQueriesData<DetalheCliente>({ queryKey: ["cliente"] }, (d) => (d ? { ...d, cotas: trocar(d.cotas) } : d));
+  mexerNasListas(queryClient, (cotas) => cotas.map((c) => (c.id === id ? mudar(c) : c)));
 }
 
 /** Tira uma cota de todas as consultas que a mostram. */
 export function tirarCotaDoCache(queryClient: QueryClient, id: number) {
-  const tirar = (cotas: Cota[]) => cotas.filter((c) => c.id !== id);
-  queryClient.setQueriesData<ListaCotas>({ queryKey: ["cotas"] }, (d) => (d ? { ...d, cotas: tirar(d.cotas) } : d));
-  queryClient.setQueriesData<DetalheCliente>({ queryKey: ["cliente"] }, (d) => (d ? { ...d, cotas: tirar(d.cotas) } : d));
+  mexerNasListas(queryClient, (cotas) => cotas.filter((c) => c.id !== id));
 }
