@@ -1,4 +1,3 @@
-# syntax=docker/dockerfile:1
 # Notificador de check-in: webhook de reserva → fila (Postgres, schema checkin) → grupo do
 # WhatsApp (Baileys).
 # Um processo só: não escale (duas conexões na mesma sessão do Baileys derrubam uma à outra e
@@ -12,7 +11,11 @@ RUN apt-get update \
  && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 COPY package.json package-lock.json ./
-RUN npm ci --no-audit --no-fund
+# Retentativas de rede: o registry do npm derrubou o deploy e a CI em 15/10/2026 com
+# ECONNRESET no meio do download (o padrão do npm é 2 tentativas). Não muda o que é
+# instalado — o package-lock.json continua mandando.
+RUN npm ci --no-audit --no-fund \
+    --fetch-retries=5 --fetch-retry-mintimeout=2000 --fetch-retry-maxtimeout=60000 --fetch-timeout=600000
 
 FROM deps AS build
 COPY tsconfig.json ./
