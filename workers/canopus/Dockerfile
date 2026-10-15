@@ -1,4 +1,3 @@
-# syntax=docker/dockerfile:1
 # A tag da imagem tem que ser a mesma versão do pacote "playwright" do package-lock.json;
 # senão os navegadores embutidos na imagem não batem com a biblioteca.
 FROM mcr.microsoft.com/playwright:v1.63.0-noble
@@ -11,7 +10,11 @@ ARG COMMIT=desconhecido
 ENV VERSAO=${VERSAO} COMMIT=${COMMIT}
 
 COPY package.json package-lock.json ./
-RUN npm ci --omit=dev --no-audit --no-fund
+# Retentativas de rede: o registry do npm derrubou o deploy e a CI em 15/10/2026 com
+# ECONNRESET no meio do download (o padrão do npm é 2 tentativas). Não muda o que é
+# instalado — o package-lock.json continua mandando.
+RUN npm ci --omit=dev --no-audit --no-fund \
+    --fetch-retries=5 --fetch-retry-mintimeout=2000 --fetch-retry-maxtimeout=60000 --fetch-timeout=600000
 
 COPY src ./src
 COPY docker-entrypoint.sh ./

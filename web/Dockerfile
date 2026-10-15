@@ -1,8 +1,11 @@
-# syntax=docker/dockerfile:1
 FROM node:24.21.0-alpine AS deps
 WORKDIR /app
 COPY package.json package-lock.json ./
-RUN npm ci --no-audit --no-fund
+# Retentativas de rede: o registry do npm derrubou o deploy e a CI em 15/10/2026 com
+# ECONNRESET no meio do download (o padrão do npm é 2 tentativas). Não muda o que é
+# instalado — o package-lock.json continua mandando.
+RUN npm ci --no-audit --no-fund \
+    --fetch-retries=5 --fetch-retry-mintimeout=2000 --fetch-retry-maxtimeout=60000 --fetch-timeout=600000
 
 FROM node:24.21.0-alpine AS build
 WORKDIR /app
