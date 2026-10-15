@@ -23,6 +23,19 @@ const assembleiaTeste = "15/09/2026"
 
 var pdfFalso = []byte("%PDF-1.4\nconteudo de teste\n%%EOF")
 
+// detalhesDryRunTeste: o que o worker grava numa cota verificada. lances > 0 simula cota que já
+// tem lance nesta assembleia no Histórico (a revisão passa a exigir autorização).
+func detalhesDryRunTeste(lances int) map[string]any {
+	d := map[string]any{
+		"assembleia_data": assembleiaTeste, "assembleia_numero": "0123", "percentual_segundo_fixo": "25,0000",
+		"historico_lido": true, "lances_nesta_assembleia": lances, "lances": []map[string]any{},
+	}
+	if lances > 0 {
+		d["lances"] = []map[string]any{{"protocolo": "1788714", "assembleia": assembleiaTeste}}
+	}
+	return d
+}
+
 func (wt *workerTeste) proximaDo(tipos ...string) (tarefaJSON, int) {
 	wt.t.Helper()
 	rec := wt.post("/internal/tarefas/proxima", map[string][]string{"tipos": tipos})
@@ -105,16 +118,7 @@ func dryRunRevisado(t *testing.T, n *navegador, interno http.Handler, cotas []co
 	if codigo != http.StatusOK || tarefa.Execucao.ID != id {
 		t.Fatalf("dry-run não saiu da fila: %d", codigo)
 	}
-	detalhes := func(lances int) map[string]any {
-		d := map[string]any{
-			"assembleia_data": assembleiaTeste, "assembleia_numero": "0123", "percentual_segundo_fixo": "25,0000",
-			"historico_lido": true, "lances_nesta_assembleia": lances, "lances": []map[string]any{},
-		}
-		if lances > 0 {
-			d["lances"] = []map[string]any{{"protocolo": "1788714", "assembleia": assembleiaTeste}}
-		}
-		return d
-	}
+	detalhes := detalhesDryRunTeste
 	for i, ec := range tarefa.Cotas {
 		esperarStatus(t, w.post(rotaCota(ec.ID, "iniciar"), nil), http.StatusNoContent, "iniciar")
 		switch i {

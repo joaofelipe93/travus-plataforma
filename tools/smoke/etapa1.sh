@@ -114,10 +114,17 @@ if [[ "$CONFIG" == *'"dry_run_automatico":false'* ]]; then ok "dry-run automáti
 if [[ "$CONFIG" == *'"pode_editar":false'* ]]; then ok "perfil leitura não edita a configuração"; else falha "pode_editar errado para leitura: $CONFIG"; fi
 # Agendamento desligado: nenhum dry-run automático pode ter sido criado nesta stack.
 if [[ "$CONFIG" == *'"ultimo_disparo_resultado":null'* ]]; then ok "nenhum disparo do dry-run automático"; else falha "o agendamento disparou: $CONFIG"; fi
-CORPO_CONFIG='{"dry_run_automatico":true,"dry_run_dia":10,"dry_run_hora":8,"dry_run_minuto":0,"aviso_email":true,"validade_dry_run_minutos":120,"retencao_screenshots_dias":30}'
-CORPO_CONFIG_INVALIDO='{"dry_run_automatico":true,"dry_run_dia":40,"dry_run_hora":8,"dry_run_minuto":0,"aviso_email":true,"validade_dry_run_minutos":120,"retencao_screenshots_dias":30}'
+# O lance real automático nasce desligado: nesta stack ninguém pode ter ligado.
+if [[ "$CONFIG" == *'"lance_real_automatico":false'* ]]; then ok "lance real automático desligado"; else falha "lance real automático ligado ou sem resposta: $CONFIG"; fi
+if [[ "$CONFIG" == *'"pode_editar_lance_real":false'* ]]; then ok "perfil leitura não liga o lance real automático"; else falha "pode_editar_lance_real errado para leitura: $CONFIG"; fi
+LANCE_REAL_DESLIGADO=',"lance_real_automatico":false,"lance_real_max_cotas":50,"lance_real_espera_minutos":30'
+CORPO_CONFIG='{"dry_run_automatico":true,"dry_run_dia":10,"dry_run_hora":8,"dry_run_minuto":0,"aviso_email":true,"validade_dry_run_minutos":120,"retencao_screenshots_dias":30'"$LANCE_REAL_DESLIGADO"'}'
+CORPO_CONFIG_INVALIDO='{"dry_run_automatico":true,"dry_run_dia":40,"dry_run_hora":8,"dry_run_minuto":0,"aviso_email":true,"validade_dry_run_minutos":120,"retencao_screenshots_dias":30'"$LANCE_REAL_DESLIGADO"'}'
+# Só admin liga o lance real automático: o operador leva 403 (a configuração não é porta dos fundos).
+CORPO_CONFIG_LANCE_REAL='{"dry_run_automatico":true,"dry_run_dia":10,"dry_run_hora":8,"dry_run_minuto":0,"aviso_email":true,"validade_dry_run_minutos":120,"retencao_screenshots_dias":30,"lance_real_automatico":true,"lance_real_max_cotas":50,"lance_real_espera_minutos":30}'
 esperar "PUT configuração (leitura)" 403 "$(codigo -X PUT -H "Cookie: $LEITURA_COOKIE" -H "Origin: $APP" -H "X-CSRF-Token: $LEITURA_CSRF" -H 'Content-Type: application/json' -d "$CORPO_CONFIG" "$APP/api/configuracao/canopus")"
 esperar "PUT configuração com dia inválido (operador)" 422 "$(codigo -X PUT -H "Cookie: $OPERADOR_COOKIE" -H "Origin: $APP" -H "X-CSRF-Token: $OPERADOR_CSRF" -H 'Content-Type: application/json' -d "$CORPO_CONFIG_INVALIDO" "$APP/api/configuracao/canopus")"
+esperar "PUT lance real automático (operador)" 403 "$(codigo -X PUT -H "Cookie: $OPERADOR_COOKIE" -H "Origin: $APP" -H "X-CSRF-Token: $OPERADOR_CSRF" -H 'Content-Type: application/json' -d "$CORPO_CONFIG_LANCE_REAL" "$APP/api/configuracao/canopus")"
 esperar "PUT configuração sem sessão" 401 "$(codigo -X PUT -H 'Content-Type: application/json' -d '{}' "$API/configuracao/canopus")"
 
 echo "== Lance real e reimpressão (só recusas: nenhuma execução é criada)"

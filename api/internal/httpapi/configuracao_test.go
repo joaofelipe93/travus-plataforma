@@ -99,6 +99,7 @@ func TestValidarConfiguracaoCanopus(t *testing.T) {
 		return pedidoConfiguracaoCanopus{
 			DryRunAutomatico: b(true), DryRunDia: i(10), DryRunHora: i(8), DryRunMinuto: i(0),
 			AvisoEmail: b(true), ValidadeDryRunMinutos: i(120), RetencaoScreenshotsDias: i(30),
+			LanceRealAutomatico: b(false), LanceRealMaxCotas: i(50), LanceRealEsperaMinutos: i(30),
 		}
 	}
 	if _, err := completo().validar(); err != nil {
@@ -112,14 +113,19 @@ func TestValidarConfiguracaoCanopus(t *testing.T) {
 	}
 
 	casos := map[string]func(p *pedidoConfiguracaoCanopus){
-		"dia zero":         func(p *pedidoConfiguracaoCanopus) { *p.DryRunDia = 0 },
-		"dia 32":           func(p *pedidoConfiguracaoCanopus) { *p.DryRunDia = 32 },
-		"hora 24":          func(p *pedidoConfiguracaoCanopus) { *p.DryRunHora = 24 },
-		"minuto 60":        func(p *pedidoConfiguracaoCanopus) { *p.DryRunMinuto = 60 },
-		"validade curta":   func(p *pedidoConfiguracaoCanopus) { *p.ValidadeDryRunMinutos = 10 },
-		"validade longa":   func(p *pedidoConfiguracaoCanopus) { *p.ValidadeDryRunMinutos = 2000 },
-		"retenção zero":    func(p *pedidoConfiguracaoCanopus) { *p.RetencaoScreenshotsDias = 0 },
-		"retenção de anos": func(p *pedidoConfiguracaoCanopus) { *p.RetencaoScreenshotsDias = 400 },
+		"dia zero":           func(p *pedidoConfiguracaoCanopus) { *p.DryRunDia = 0 },
+		"dia 32":             func(p *pedidoConfiguracaoCanopus) { *p.DryRunDia = 32 },
+		"hora 24":            func(p *pedidoConfiguracaoCanopus) { *p.DryRunHora = 24 },
+		"minuto 60":          func(p *pedidoConfiguracaoCanopus) { *p.DryRunMinuto = 60 },
+		"validade curta":     func(p *pedidoConfiguracaoCanopus) { *p.ValidadeDryRunMinutos = 10 },
+		"validade longa":     func(p *pedidoConfiguracaoCanopus) { *p.ValidadeDryRunMinutos = 2000 },
+		"retenção zero":      func(p *pedidoConfiguracaoCanopus) { *p.RetencaoScreenshotsDias = 0 },
+		"retenção de anos":   func(p *pedidoConfiguracaoCanopus) { *p.RetencaoScreenshotsDias = 400 },
+		"teto de cotas zero": func(p *pedidoConfiguracaoCanopus) { *p.LanceRealMaxCotas = 0 },
+		"teto de cotas alto": func(p *pedidoConfiguracaoCanopus) { *p.LanceRealMaxCotas = 501 },
+		"espera curta":       func(p *pedidoConfiguracaoCanopus) { *p.LanceRealEsperaMinutos = 1 },
+		"espera longa":       func(p *pedidoConfiguracaoCanopus) { *p.LanceRealEsperaMinutos = 2000 },
+		"sem o automático":   func(p *pedidoConfiguracaoCanopus) { p.LanceRealAutomatico = nil },
 	}
 	for nome, estragar := range casos {
 		t.Run(nome, func(t *testing.T) {
@@ -177,6 +183,7 @@ func TestConfiguracaoLeituraNaoEdita(t *testing.T) {
 	rec = n.enviarJSON(http.MethodPut, "/configuracao/canopus", map[string]any{
 		"dry_run_automatico": true, "dry_run_dia": 10, "dry_run_hora": 8, "dry_run_minuto": 0,
 		"aviso_email": true, "validade_dry_run_minutos": 120, "retencao_screenshots_dias": 30,
+		"lance_real_automatico": false, "lance_real_max_cotas": 50, "lance_real_espera_minutos": 30,
 	})
 	esperarStatus(t, rec, http.StatusForbidden, "PUT com perfil leitura")
 	if n := contarAuditoria(t, s, "configuracao_canopus_atualizada"); n != 0 {
@@ -198,6 +205,7 @@ func TestConfiguracaoOperadorEdita(t *testing.T) {
 		"dry_run_automatico": true, "dry_run_dia": 15, "dry_run_hora": 7, "dry_run_minuto": 30,
 		"aviso_email": false, "drive_pasta_id": "https://drive.google.com/drive/folders/" + pasta + "?usp=sharing",
 		"validade_dry_run_minutos": 180, "retencao_screenshots_dias": 45,
+		"lance_real_automatico": false, "lance_real_max_cotas": 50, "lance_real_espera_minutos": 30,
 	})
 	esperarStatus(t, rec, http.StatusOK, "PUT da configuração")
 	salva := decodificar[struct {
@@ -234,6 +242,7 @@ func TestConfiguracaoOperadorEdita(t *testing.T) {
 		"dry_run_automatico": true, "dry_run_dia": 15, "dry_run_hora": 7, "dry_run_minuto": 30,
 		"aviso_email": false, "drive_pasta_id": "",
 		"validade_dry_run_minutos": 180, "retencao_screenshots_dias": 45,
+		"lance_real_automatico": false, "lance_real_max_cotas": 50, "lance_real_espera_minutos": 30,
 	})
 	esperarStatus(t, rec, http.StatusOK, "apagar a pasta")
 	semPastaNaConfig := decodificar[struct {
@@ -261,6 +270,7 @@ func TestConfiguracaoSemMudancaNaoAudita(t *testing.T) {
 		"dry_run_automatico": false, "dry_run_dia": 10, "dry_run_hora": 8, "dry_run_minuto": 0,
 		"aviso_email": true, "drive_pasta_id": nil,
 		"validade_dry_run_minutos": 120, "retencao_screenshots_dias": 30,
+		"lance_real_automatico": false, "lance_real_max_cotas": 50, "lance_real_espera_minutos": 30,
 	}
 	esperarStatus(t, n.enviarJSON(http.MethodPut, "/configuracao/canopus", iguaisAosPadroes), http.StatusOK, "PUT sem mudança")
 	if n := contarAuditoria(t, s, "configuracao_canopus_atualizada"); n != 0 {
@@ -278,6 +288,7 @@ func TestConfiguracaoInvalidaRecusada(t *testing.T) {
 	rec = n.enviarJSON(http.MethodPut, "/configuracao/canopus", map[string]any{
 		"dry_run_automatico": true, "dry_run_dia": 40, "dry_run_hora": 8, "dry_run_minuto": 0,
 		"aviso_email": true, "validade_dry_run_minutos": 120, "retencao_screenshots_dias": 30,
+		"lance_real_automatico": false, "lance_real_max_cotas": 50, "lance_real_espera_minutos": 30,
 	})
 	esperarStatus(t, rec, http.StatusUnprocessableEntity, "dia inválido")
 
@@ -285,6 +296,7 @@ func TestConfiguracaoInvalidaRecusada(t *testing.T) {
 	rec = n.enviarJSON(http.MethodPut, "/configuracao/canopus", map[string]any{
 		"dry_run_automatico": true, "dry_run_dia": 10, "dry_run_hora": 8, "dry_run_minuto": 0,
 		"aviso_email": true, "validade_dry_run_minutos": 120, "retencao_screenshots_dias": 30,
+		"lance_real_automatico": false, "lance_real_max_cotas": 50, "lance_real_espera_minutos": 30,
 		"lance_real_habilitado": true,
 	})
 	esperarStatus(t, rec, http.StatusBadRequest, "campo desconhecido")

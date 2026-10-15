@@ -212,6 +212,106 @@ type pedidoAprovacao struct {
 	QuantidadeConfirmada int `json:"quantidade_confirmada"`
 }
 
+// escolhaCotaReal: uma cota do dry-run escolhida para o lance real.
+type escolhaCotaReal struct {
+	ExecucaoCotaID         int64
+	RegistrarMesmoComLance bool
+}
+
+// quemAprova: quem responde pelo lance real — o admin que aprovou na tela (origem "manual") ou
+// o agendamento (origem "agendada"), assinado pelo admin que ligou o lance real automático.
+type quemAprova struct {
+	UsuarioID int64
+	Nome      string
+	Origem    string
+}
+
+// erroConflito: o estado do dry-run não permite aprovar agora (409 na tela).
+type erroConflito string
+
+func (e erroConflito) Error() string { return string(e) }
+
+// criarExecucaoRealDoDryRun trava o dry-run, confere a revisão cota por cota e põe a execução
+// real na fila, com evento e auditoria. É o único caminho que cria execução real: serve a tela
+// (aprovarExecucaoReal) e o lance real automático (agendamento.go). Nada aqui toca no Newcon —
+// quem clica em Confirmar é o worker, e só depois de gravar confirmacao_iniciada.
+func (s *Servidor) criarExecucaoRealDoDryRun(ctx context.Context, qtx *db.Queries, r *http.Request,
+	dryRunID int64, escolhas []escolhaCotaReal, por quemAprova) (db.CriarExecucaoRealRow, error) {
+	var vazio db.CriarExecucaoRealRow
+	// Trava o dry-run: duas aprovações ao mesmo tempo não criam duas execuções reais.
+	if _, err := qtx.TravarExecucao(ctx, dryRunID); errors.Is(err, pgx.ErrNoRows) {
+		return vazio, errNaoEncontrado
+	} else if err != nil {
+		return vazio, err
+	}
+	rv, err := s.montarRevisao(ctx, qtx, dryRunID)
+	if err != nil {
+		return vazio, err
+	}
+	if rv.Bloqueio != "" {
+		return vazio, erroConflito(rv.Bloqueio)
+	}
+	porID := map[int64]cotaRevisaoJSON{}
+	for _, c := range rv.Cotas {
+		porID[c.ExecucaoCotaID] = c
+	}
+
+	real, err := qtx.CriarExecucaoReal(ctx, db.CriarExecucaoRealParams{
+		UsuarioID: por.UsuarioID, DryRunOrigemID: &dryRunID, Origem: por.Origem,
+	})
+	if err != nil {
+		return vazio, err
+	}
+	vistas := map[int64]bool{}
+	var tags, autorizadas []string
+	for i, escolha := range escolhas {
+		c, ok := porID[escolha.ExecucaoCotaID]
+		tag := c.Grupo + "-" + c.Cota + "-" + c.Versao
+		switch {
+		case !ok || vistas[escolha.ExecucaoCotaID]:
+			return vazio, erroValidacao(fmt.Sprintf("a cota %d não está pronta neste dry-run (ou foi repetida)", escolha.ExecucaoCotaID))
+		case c.Bloqueio != "":
+			return vazio, erroValidacao(fmt.Sprintf("cota %s: %s", tag, c.Bloqueio))
+		case c.ExigeAutorizacao && !escolha.RegistrarMesmoComLance:
+			return vazio, erroValidacao(fmt.Sprintf("a cota %s já tem lance nesta assembleia: marque \"registrar mesmo assim\" ou tire da lista", tag))
+		}
+		vistas[escolha.ExecucaoCotaID] = true
+		permitir := c.ExigeAutorizacao && escolha.RegistrarMesmoComLance
+		if permitir {
+			autorizadas = append(autorizadas, tag)
+		}
+		if err := qtx.InserirCotaReal(ctx, db.InserirCotaRealParams{
+			ExecucaoID: real.ID, CotaID: c.CotaID, Ordem: int32(i + 1), Grupo: c.Grupo, Cota: c.Cota, Versao: c.Versao,
+			ClienteNome: c.ClienteNome, Modalidade: c.modalidade, AssembleiaAprovada: c.AssembleiaData,
+			PermitirLanceExistente: permitir, Detalhes: c.detalhes,
+		}); err != nil {
+			return vazio, err
+		}
+		tags = append(tags, tag)
+	}
+
+	resumo := fmt.Sprintf("Lance real aprovado por %s a partir do dry-run nº %d: %d cota(s) (%s).",
+		por.Nome, dryRunID, len(tags), strings.Join(tags, ", "))
+	noDryRun := fmt.Sprintf("Aprovado para lance real na execução nº %d por %s.", real.ID, por.Nome)
+	if por.Origem == origemAgendada {
+		resumo = fmt.Sprintf("Lance real AUTOMÁTICO a partir do dry-run nº %d: %d cota(s) (%s). Ninguém aprovou na tela: o lance real automático está ligado (por %s).",
+			dryRunID, len(tags), strings.Join(tags, ", "), por.Nome)
+		noDryRun = fmt.Sprintf("Lance real automático na execução nº %d.", real.ID)
+	}
+	if err := s.evento(ctx, qtx, real.ID, nil, "aviso", resumo); err != nil {
+		return vazio, err
+	}
+	if err := s.evento(ctx, qtx, dryRunID, nil, "info", noDryRun); err != nil {
+		return vazio, err
+	}
+	if err := qtx.RegistrarAuditoria(ctx, paramsAuditoria(r, &por.UsuarioID, "execucao_real_aprovada", "execucao", idTexto(real.ID), map[string]any{
+		"dry_run": dryRunID, "cotas": tags, "autorizadas_com_lance_existente": autorizadas, "origem": por.Origem,
+	})); err != nil {
+		return vazio, err
+	}
+	return real, nil
+}
+
 // aprovarExecucaoReal cria a execução real a partir de um dry-run revisado. Só admin.
 func (s *Servidor) aprovarExecucaoReal(w http.ResponseWriter, r *http.Request, u *UsuarioSessao) {
 	var p pedidoAprovacao
@@ -231,6 +331,10 @@ func (s *Servidor) aprovarExecucaoReal(w http.ResponseWriter, r *http.Request, u
 		responderErro(w, http.StatusUnprocessableEntity, "a quantidade digitada não confere com as cotas escolhidas")
 		return
 	}
+	escolhas := make([]escolhaCotaReal, 0, len(p.Cotas))
+	for _, c := range p.Cotas {
+		escolhas = append(escolhas, escolhaCotaReal{ExecucaoCotaID: c.ExecucaoCotaID, RegistrarMesmoComLance: c.RegistrarMesmoComLance})
+	}
 
 	ctx := r.Context()
 	tx, err := s.pool.Begin(ctx)
@@ -241,77 +345,14 @@ func (s *Servidor) aprovarExecucaoReal(w http.ResponseWriter, r *http.Request, u
 	defer tx.Rollback(ctx)
 	qtx := s.q.WithTx(tx)
 
-	// Trava o dry-run: duas aprovações ao mesmo tempo não criam duas execuções reais.
-	if _, err := qtx.TravarExecucao(ctx, p.DryRunID); errors.Is(err, pgx.ErrNoRows) {
-		responderErro(w, http.StatusNotFound, "dry-run não encontrado")
-		return
-	} else if err != nil {
-		erroInterno(w, r, err)
+	real, err := s.criarExecucaoRealDoDryRun(ctx, qtx, r, p.DryRunID, escolhas,
+		quemAprova{UsuarioID: u.ID, Nome: u.Nome, Origem: origemManual})
+	var conflito erroConflito
+	if errors.As(err, &conflito) {
+		responderErro(w, http.StatusConflict, conflito.Error())
 		return
 	}
-	rv, err := s.montarRevisao(ctx, qtx, p.DryRunID)
 	if s.responderErroRevisao(w, r, err) {
-		return
-	}
-	if rv.Bloqueio != "" {
-		responderErro(w, http.StatusConflict, rv.Bloqueio)
-		return
-	}
-	porID := map[int64]cotaRevisaoJSON{}
-	for _, c := range rv.Cotas {
-		porID[c.ExecucaoCotaID] = c
-	}
-
-	real, err := qtx.CriarExecucaoReal(ctx, db.CriarExecucaoRealParams{UsuarioID: u.ID, DryRunOrigemID: &p.DryRunID})
-	if err != nil {
-		erroInterno(w, r, err)
-		return
-	}
-	vistas := map[int64]bool{}
-	var tags, autorizadas []string
-	for i, escolha := range p.Cotas {
-		c, ok := porID[escolha.ExecucaoCotaID]
-		tag := c.Grupo + "-" + c.Cota + "-" + c.Versao
-		switch {
-		case !ok || vistas[escolha.ExecucaoCotaID]:
-			responderErro(w, http.StatusUnprocessableEntity, fmt.Sprintf("a cota %d não está pronta neste dry-run (ou foi repetida)", escolha.ExecucaoCotaID))
-			return
-		case c.Bloqueio != "":
-			responderErro(w, http.StatusUnprocessableEntity, fmt.Sprintf("cota %s: %s", tag, c.Bloqueio))
-			return
-		case c.ExigeAutorizacao && !escolha.RegistrarMesmoComLance:
-			responderErro(w, http.StatusUnprocessableEntity, fmt.Sprintf("a cota %s já tem lance nesta assembleia: marque \"registrar mesmo assim\" ou tire da lista", tag))
-			return
-		}
-		vistas[escolha.ExecucaoCotaID] = true
-		permitir := c.ExigeAutorizacao && escolha.RegistrarMesmoComLance
-		if permitir {
-			autorizadas = append(autorizadas, tag)
-		}
-		if err := qtx.InserirCotaReal(ctx, db.InserirCotaRealParams{
-			ExecucaoID: real.ID, CotaID: c.CotaID, Ordem: int32(i + 1), Grupo: c.Grupo, Cota: c.Cota, Versao: c.Versao,
-			ClienteNome: c.ClienteNome, Modalidade: c.modalidade, AssembleiaAprovada: c.AssembleiaData,
-			PermitirLanceExistente: permitir, Detalhes: c.detalhes,
-		}); err != nil {
-			erroInterno(w, r, err)
-			return
-		}
-		tags = append(tags, tag)
-	}
-
-	resumo := fmt.Sprintf("Lance real aprovado por %s a partir do dry-run nº %d: %d cota(s) (%s).", u.Nome, p.DryRunID, len(tags), strings.Join(tags, ", "))
-	if err := s.evento(ctx, qtx, real.ID, nil, "aviso", resumo); err != nil {
-		erroInterno(w, r, err)
-		return
-	}
-	if err := s.evento(ctx, qtx, p.DryRunID, nil, "info", fmt.Sprintf("Aprovado para lance real na execução nº %d por %s.", real.ID, u.Nome)); err != nil {
-		erroInterno(w, r, err)
-		return
-	}
-	if err := qtx.RegistrarAuditoria(ctx, paramsAuditoria(r, &u.ID, "execucao_real_aprovada", "execucao", idTexto(real.ID), map[string]any{
-		"dry_run": p.DryRunID, "cotas": tags, "autorizadas_com_lance_existente": autorizadas,
-	})); err != nil {
-		erroInterno(w, r, err)
 		return
 	}
 	if err := tx.Commit(ctx); err != nil {

@@ -7,6 +7,11 @@ package httpapi
 //
 // O dry-run automático nasce desligado. Quem o liga está pedindo que o worker entre no Newcon no
 // dia e na hora marcados — dry-run, que nunca confirma lance.
+//
+// O **lance real automático** (migração 00014) também nasce desligado e é a única parte desta
+// tela que só admin muda: ligá-lo faz a plataforma registrar lance de verdade depois do dry-run
+// automático, sem ninguém aprovar. Ele continua debaixo da chave LANCE_REAL_HABILITADO do
+// servidor, do teto de cotas e da espera com aviso (agendamento.go).
 
 import (
 	"context"
@@ -39,6 +44,11 @@ const (
 	validadeDryRunMaxima   = 24 * time.Hour
 	retencaoScreenshotsMin = 1
 	retencaoScreenshotsMax = 365
+	// Limites do lance real automático: os mesmos CHECKs da migração 00014.
+	lanceRealMaxCotasMin  = 1
+	lanceRealMaxCotasMax  = 500
+	lanceRealEsperaMinima = 5 * time.Minute
+	lanceRealEsperaMaxima = 24 * time.Hour
 )
 
 // Origem da pasta do Drive em vigor.
@@ -61,6 +71,14 @@ type ConfigCanopus struct {
 	DrivePastaOrigem    string
 	ValidadeDryRun      time.Duration
 	RetencaoScreenshots time.Duration
+	// Lance real automático depois do dry-run agendado (agendamento.go). AtualizadoPor é quem
+	// assina a execução automática; LanceRealAutomaticoPor é o admin que ligou o automático.
+	LanceRealAutomatico        bool
+	LanceRealAutomaticoPor     *int64
+	LanceRealAutomaticoPorNome string
+	LanceRealMaxCotas          int
+	LanceRealEspera            time.Duration
+	AtualizadoPor              *int64
 	// Resultado do último disparo do agendamento (agendamento.go); vazio: nunca disparou.
 	UltimoDisparoResultado string
 }
@@ -71,7 +89,8 @@ func (s *Servidor) padroesCanopus() ConfigCanopus {
 	c := ConfigCanopus{
 		DryRunDia: 10, DryRunHora: 8, AvisoEmail: true,
 		ValidadeDryRun: s.cfg.ValidadeDryRun, RetencaoScreenshots: s.cfg.RetencaoScreenshots,
-		DrivePastaOrigem: semPasta,
+		DrivePastaOrigem:  semPasta,
+		LanceRealMaxCotas: 50, LanceRealEspera: 30 * time.Minute,
 	}
 	if p := s.cfg.Google.PastaDrive; p != "" {
 		c.DrivePasta, c.DrivePastaOrigem = p, pastaDoAmbiente
@@ -113,6 +132,11 @@ func (s *Servidor) configDaLinha(l db.BuscarConfiguracaoCanopusRow) ConfigCanopu
 	c.ValidadeDryRun = time.Duration(l.ValidadeDryRunMinutos) * time.Minute
 	c.RetencaoScreenshots = time.Duration(l.RetencaoScreenshotsDias) * 24 * time.Hour
 	c.UltimoDisparoResultado = valorOuVazio(l.UltimoDisparoResultado)
+	c.LanceRealAutomatico, c.LanceRealAutomaticoPor = l.LanceRealAutomatico, l.LanceRealAutomaticoPor
+	c.LanceRealAutomaticoPorNome = valorOuVazio(l.LanceRealAutomaticoPorNome)
+	c.LanceRealMaxCotas = int(l.LanceRealMaxCotas)
+	c.LanceRealEspera = time.Duration(l.LanceRealEsperaMinutos) * time.Minute
+	c.AtualizadoPor = l.AtualizadoPor
 	if l.DrivePastaID != nil && *l.DrivePastaID != "" {
 		c.DrivePasta, c.DrivePastaOrigem = *l.DrivePastaID, pastaDaConfiguracao
 	}
@@ -149,18 +173,23 @@ func diasNoMes(mes time.Time) int {
 }
 
 type configuracaoCanopusJSON struct {
-	DryRunAutomatico        bool      `json:"dry_run_automatico"`
-	DryRunDia               int       `json:"dry_run_dia"`
-	DryRunHora              int       `json:"dry_run_hora"`
-	DryRunMinuto            int       `json:"dry_run_minuto"`
-	AvisoEmail              bool      `json:"aviso_email"`
-	DrivePastaID            *string   `json:"drive_pasta_id"`
-	DrivePastaEmVigor       string    `json:"drive_pasta_em_vigor"`
-	DrivePastaOrigem        string    `json:"drive_pasta_origem"`
-	ValidadeDryRunMinutos   int       `json:"validade_dry_run_minutos"`
-	RetencaoScreenshotsDias int       `json:"retencao_screenshots_dias"`
-	AtualizadoPorNome       *string   `json:"atualizado_por_nome"`
-	AtualizadoEm            time.Time `json:"atualizado_em"`
+	DryRunAutomatico        bool    `json:"dry_run_automatico"`
+	DryRunDia               int     `json:"dry_run_dia"`
+	DryRunHora              int     `json:"dry_run_hora"`
+	DryRunMinuto            int     `json:"dry_run_minuto"`
+	AvisoEmail              bool    `json:"aviso_email"`
+	DrivePastaID            *string `json:"drive_pasta_id"`
+	DrivePastaEmVigor       string  `json:"drive_pasta_em_vigor"`
+	DrivePastaOrigem        string  `json:"drive_pasta_origem"`
+	ValidadeDryRunMinutos   int     `json:"validade_dry_run_minutos"`
+	RetencaoScreenshotsDias int     `json:"retencao_screenshots_dias"`
+	// Lance real automático: a tela avisa em letras grandes o que ligar isso significa.
+	LanceRealAutomatico    bool      `json:"lance_real_automatico"`
+	LanceRealMaxCotas      int       `json:"lance_real_max_cotas"`
+	LanceRealEsperaMinutos int       `json:"lance_real_espera_minutos"`
+	LanceRealAutomaticoPor *string   `json:"lance_real_automatico_por_nome"`
+	AtualizadoPorNome      *string   `json:"atualizado_por_nome"`
+	AtualizadoEm           time.Time `json:"atualizado_em"`
 	// Próxima ocorrência do dia/hora escolhidos, ligada ou não (a tela mostra como prévia).
 	ProximoDryRun time.Time `json:"proximo_dry_run"`
 	// Último disparo do agendamento e o que aconteceu (criada, sem_cotas, sem_responsavel,
@@ -178,14 +207,21 @@ func (s *Servidor) respostaConfiguracao(l db.BuscarConfiguracaoCanopusRow, u *Us
 			AvisoEmail: l.AvisoEmail, DrivePastaID: l.DrivePastaID,
 			DrivePastaEmVigor: emVigor.DrivePasta, DrivePastaOrigem: emVigor.DrivePastaOrigem,
 			ValidadeDryRunMinutos: int(l.ValidadeDryRunMinutos), RetencaoScreenshotsDias: int(l.RetencaoScreenshotsDias),
-			AtualizadoPorNome: l.AtualizadoPorNome, AtualizadoEm: l.AtualizadoEm,
+			LanceRealAutomatico: l.LanceRealAutomatico, LanceRealMaxCotas: int(l.LanceRealMaxCotas),
+			LanceRealEsperaMinutos: int(l.LanceRealEsperaMinutos),
+			LanceRealAutomaticoPor: l.LanceRealAutomaticoPorNome,
+			AtualizadoPorNome:      l.AtualizadoPorNome, AtualizadoEm: l.AtualizadoEm,
 			ProximoDryRun:          proximoDryRun(s.agora(), int(l.DryRunDia), int(l.DryRunHora), int(l.DryRunMinuto)),
 			UltimoDisparoEm:        l.UltimoDisparoEm,
 			UltimoDisparoResultado: l.UltimoDisparoResultado,
 		},
 		"pode_editar": podeEditarConfiguracao(u),
+		// Só admin liga o lance real automático (e afrouxa o teto e a espera).
+		"pode_editar_lance_real": u.Perfil == db.PerfilUsuarioAdmin,
 		// O resumo por e-mail depende do SMTP do servidor: a tela avisa quando falta.
 		"email_configurado": s.cfg.Vigia.Email != nil,
+		// Chave do servidor (LANCE_REAL_HABILITADO): desligada, o automático não registra nada.
+		"lance_real_habilitado": s.cfg.LanceRealHabilitado,
 	}
 }
 
@@ -213,6 +249,9 @@ type pedidoConfiguracaoCanopus struct {
 	DrivePastaID            *string `json:"drive_pasta_id"`
 	ValidadeDryRunMinutos   *int    `json:"validade_dry_run_minutos"`
 	RetencaoScreenshotsDias *int    `json:"retencao_screenshots_dias"`
+	LanceRealAutomatico     *bool   `json:"lance_real_automatico"`
+	LanceRealMaxCotas       *int    `json:"lance_real_max_cotas"`
+	LanceRealEsperaMinutos  *int    `json:"lance_real_espera_minutos"`
 }
 
 func (p pedidoConfiguracaoCanopus) validar() (db.AtualizarConfiguracaoCanopusParams, error) {
@@ -222,6 +261,8 @@ func (p pedidoConfiguracaoCanopus) validar() (db.AtualizarConfiguracaoCanopusPar
 		"dry_run_hora": p.DryRunHora != nil, "dry_run_minuto": p.DryRunMinuto != nil,
 		"aviso_email": p.AvisoEmail != nil, "validade_dry_run_minutos": p.ValidadeDryRunMinutos != nil,
 		"retencao_screenshots_dias": p.RetencaoScreenshotsDias != nil,
+		"lance_real_automatico":     p.LanceRealAutomatico != nil, "lance_real_max_cotas": p.LanceRealMaxCotas != nil,
+		"lance_real_espera_minutos": p.LanceRealEsperaMinutos != nil,
 	}
 	var faltando []string
 	for campo, presente := range presentes {
@@ -251,6 +292,15 @@ func (p pedidoConfiguracaoCanopus) validar() (db.AtualizarConfiguracaoCanopusPar
 		return out, erroValidacao(fmt.Sprintf("a retenção dos screenshots vai de %d a %d dias",
 			retencaoScreenshotsMin, retencaoScreenshotsMax))
 	}
+	if *p.LanceRealMaxCotas < lanceRealMaxCotasMin || *p.LanceRealMaxCotas > lanceRealMaxCotasMax {
+		return out, erroValidacao(fmt.Sprintf("o teto de cotas do lance real automático vai de %d a %d",
+			lanceRealMaxCotasMin, lanceRealMaxCotasMax))
+	}
+	espera := time.Duration(*p.LanceRealEsperaMinutos) * time.Minute
+	if espera < lanceRealEsperaMinima || espera > lanceRealEsperaMaxima {
+		return out, erroValidacao(fmt.Sprintf("a espera antes do lance real automático vai de %d a %d minutos",
+			int(lanceRealEsperaMinima.Minutes()), int(lanceRealEsperaMaxima.Minutes())))
+	}
 	pasta, err := pastaDoDrive(p.DrivePastaID)
 	if err != nil {
 		return out, err
@@ -262,6 +312,9 @@ func (p pedidoConfiguracaoCanopus) validar() (db.AtualizarConfiguracaoCanopusPar
 		DrivePastaID:            pasta,
 		ValidadeDryRunMinutos:   int32(*p.ValidadeDryRunMinutos),
 		RetencaoScreenshotsDias: int32(*p.RetencaoScreenshotsDias),
+		LanceRealAutomatico:     *p.LanceRealAutomatico,
+		LanceRealMaxCotas:       int32(*p.LanceRealMaxCotas),
+		LanceRealEsperaMinutos:  int32(*p.LanceRealEsperaMinutos),
 	}, nil
 }
 
@@ -321,6 +374,13 @@ func (s *Servidor) atualizarConfiguracaoCanopus(w http.ResponseWriter, r *http.R
 		erroInterno(w, r, err)
 		return
 	}
+	// Na tela, lance real só admin aprova: a configuração não pode ser a porta dos fundos. O
+	// operador continua salvando o resto do formulário, desde que não mexa nestas três.
+	if mudouLanceRealAutomatico(antes, params) && u.Perfil != db.PerfilUsuarioAdmin {
+		responderErro(w, http.StatusForbidden, "só admin muda o lance real automático (o teto de cotas e a espera inclusive)")
+		return
+	}
+	params.LanceRealAutomaticoPor = responsavelLanceRealAutomatico(antes, params, u)
 	if err := s.q.AtualizarConfiguracaoCanopus(ctx, params); err != nil {
 		erroInterno(w, r, err)
 		return
@@ -338,6 +398,18 @@ func (s *Servidor) atualizarConfiguracaoCanopus(w http.ResponseWriter, r *http.R
 			s.esquecerClienteDrive()
 			s.avisarDrive()
 		}
+		// Lance real automático ligado agora: dry-run agendado que já terminou não vira lance
+		// retroativo (o mesmo cuidado do agendamento).
+		if _, mudou := alteracoes["lance_real_automatico"]; mudou && depois.LanceRealAutomatico {
+			n, err := s.q.FecharDryRunsAgendadosAntesDeLigar(ctx)
+			if err != nil {
+				erroInterno(w, r, err)
+				return
+			}
+			if n > 0 {
+				slog.Info("lance real automático ligado: dry-run agendado sem decisão ficou de fora", "execucoes", n)
+			}
+		}
 		// Agendamento ligado agora, ou com outro horário: a ocorrência que já passou não roda
 		// retroativo nem vira alerta do vigia (agendamento.go).
 		if depois.DryRunAutomatico && horarioMudou(alteracoes) {
@@ -351,6 +423,26 @@ func (s *Servidor) atualizarConfiguracaoCanopus(w http.ResponseWriter, r *http.R
 		}
 	}
 	responderJSON(w, http.StatusOK, s.respostaConfiguracao(depois, u))
+}
+
+// mudouLanceRealAutomatico: o pedido mexe em alguma das três opções do lance real automático.
+func mudouLanceRealAutomatico(antes db.BuscarConfiguracaoCanopusRow, params db.AtualizarConfiguracaoCanopusParams) bool {
+	return params.LanceRealAutomatico != antes.LanceRealAutomatico ||
+		params.LanceRealMaxCotas != antes.LanceRealMaxCotas ||
+		params.LanceRealEsperaMinutos != antes.LanceRealEsperaMinutos
+}
+
+// responsavelLanceRealAutomatico: quem assina a execução real automática. Ligando agora, é o
+// admin que ligou; já ligado, continua quem ligou; desligado, ninguém.
+func responsavelLanceRealAutomatico(antes db.BuscarConfiguracaoCanopusRow, params db.AtualizarConfiguracaoCanopusParams, u *UsuarioSessao) *int64 {
+	switch {
+	case !params.LanceRealAutomatico:
+		return nil
+	case !antes.LanceRealAutomatico || antes.LanceRealAutomaticoPor == nil:
+		return &u.ID
+	default:
+		return antes.LanceRealAutomaticoPor
+	}
 }
 
 // horarioMudou: o agendamento acabou de ser ligado ou o dia/hora/minuto é outro.
@@ -380,5 +472,8 @@ func mudancasConfiguracao(antes, depois db.BuscarConfiguracaoCanopusRow) map[str
 	comparar("drive_pasta_id", valorOuVazio(antes.DrivePastaID), valorOuVazio(depois.DrivePastaID))
 	comparar("validade_dry_run_minutos", antes.ValidadeDryRunMinutos, depois.ValidadeDryRunMinutos)
 	comparar("retencao_screenshots_dias", antes.RetencaoScreenshotsDias, depois.RetencaoScreenshotsDias)
+	comparar("lance_real_automatico", antes.LanceRealAutomatico, depois.LanceRealAutomatico)
+	comparar("lance_real_max_cotas", antes.LanceRealMaxCotas, depois.LanceRealMaxCotas)
+	comparar("lance_real_espera_minutos", antes.LanceRealEsperaMinutos, depois.LanceRealEsperaMinutos)
 	return alteracoes
 }

@@ -20,7 +20,11 @@ UPDATE configuracao_canopus SET
     drive_pasta_id            = $6,
     validade_dry_run_minutos  = $7,
     retencao_screenshots_dias = $8,
-    atualizado_por            = $9,
+    lance_real_automatico     = $9,
+    lance_real_automatico_por = $10,
+    lance_real_max_cotas      = $11,
+    lance_real_espera_minutos = $12,
+    atualizado_por            = $13,
     atualizado_em             = now()
 WHERE id
 `
@@ -34,6 +38,10 @@ type AtualizarConfiguracaoCanopusParams struct {
 	DrivePastaID            *string
 	ValidadeDryRunMinutos   int32
 	RetencaoScreenshotsDias int32
+	LanceRealAutomatico     bool
+	LanceRealAutomaticoPor  *int64
+	LanceRealMaxCotas       int32
+	LanceRealEsperaMinutos  int32
 	AtualizadoPor           *int64
 }
 
@@ -47,34 +55,44 @@ func (q *Queries) AtualizarConfiguracaoCanopus(ctx context.Context, arg Atualiza
 		arg.DrivePastaID,
 		arg.ValidadeDryRunMinutos,
 		arg.RetencaoScreenshotsDias,
+		arg.LanceRealAutomatico,
+		arg.LanceRealAutomaticoPor,
+		arg.LanceRealMaxCotas,
+		arg.LanceRealEsperaMinutos,
 		arg.AtualizadoPor,
 	)
 	return err
 }
 
 const buscarConfiguracaoCanopus = `-- name: BuscarConfiguracaoCanopus :one
-SELECT c.id, c.dry_run_automatico, c.dry_run_dia, c.dry_run_hora, c.dry_run_minuto, c.aviso_email, c.drive_pasta_id, c.validade_dry_run_minutos, c.retencao_screenshots_dias, c.atualizado_por, c.atualizado_em, c.ultimo_disparo_dia, c.ultimo_disparo_em, c.ultimo_disparo_resultado, u.nome AS atualizado_por_nome
+SELECT c.id, c.dry_run_automatico, c.dry_run_dia, c.dry_run_hora, c.dry_run_minuto, c.aviso_email, c.drive_pasta_id, c.validade_dry_run_minutos, c.retencao_screenshots_dias, c.atualizado_por, c.atualizado_em, c.ultimo_disparo_dia, c.ultimo_disparo_em, c.ultimo_disparo_resultado, c.lance_real_automatico, c.lance_real_automatico_por, c.lance_real_max_cotas, c.lance_real_espera_minutos, u.nome AS atualizado_por_nome, a.nome AS lance_real_automatico_por_nome
 FROM configuracao_canopus c
 LEFT JOIN usuarios u ON u.id = c.atualizado_por
+LEFT JOIN usuarios a ON a.id = c.lance_real_automatico_por
 WHERE c.id
 `
 
 type BuscarConfiguracaoCanopusRow struct {
-	ID                      bool
-	DryRunAutomatico        bool
-	DryRunDia               int16
-	DryRunHora              int16
-	DryRunMinuto            int16
-	AvisoEmail              bool
-	DrivePastaID            *string
-	ValidadeDryRunMinutos   int32
-	RetencaoScreenshotsDias int32
-	AtualizadoPor           *int64
-	AtualizadoEm            time.Time
-	UltimoDisparoDia        *time.Time
-	UltimoDisparoEm         *time.Time
-	UltimoDisparoResultado  *string
-	AtualizadoPorNome       *string
+	ID                         bool
+	DryRunAutomatico           bool
+	DryRunDia                  int16
+	DryRunHora                 int16
+	DryRunMinuto               int16
+	AvisoEmail                 bool
+	DrivePastaID               *string
+	ValidadeDryRunMinutos      int32
+	RetencaoScreenshotsDias    int32
+	AtualizadoPor              *int64
+	AtualizadoEm               time.Time
+	UltimoDisparoDia           *time.Time
+	UltimoDisparoEm            *time.Time
+	UltimoDisparoResultado     *string
+	LanceRealAutomatico        bool
+	LanceRealAutomaticoPor     *int64
+	LanceRealMaxCotas          int32
+	LanceRealEsperaMinutos     int32
+	AtualizadoPorNome          *string
+	LanceRealAutomaticoPorNome *string
 }
 
 func (q *Queries) BuscarConfiguracaoCanopus(ctx context.Context) (BuscarConfiguracaoCanopusRow, error) {
@@ -95,7 +113,12 @@ func (q *Queries) BuscarConfiguracaoCanopus(ctx context.Context) (BuscarConfigur
 		&i.UltimoDisparoDia,
 		&i.UltimoDisparoEm,
 		&i.UltimoDisparoResultado,
+		&i.LanceRealAutomatico,
+		&i.LanceRealAutomaticoPor,
+		&i.LanceRealMaxCotas,
+		&i.LanceRealEsperaMinutos,
 		&i.AtualizadoPorNome,
+		&i.LanceRealAutomaticoPorNome,
 	)
 	return i, err
 }
@@ -130,7 +153,7 @@ func (q *Queries) MarcarDisparoDryRun(ctx context.Context, arg MarcarDisparoDryR
 }
 
 const travarConfiguracaoCanopus = `-- name: TravarConfiguracaoCanopus :one
-SELECT id, dry_run_automatico, dry_run_dia, dry_run_hora, dry_run_minuto, aviso_email, drive_pasta_id, validade_dry_run_minutos, retencao_screenshots_dias, atualizado_por, atualizado_em, ultimo_disparo_dia, ultimo_disparo_em, ultimo_disparo_resultado FROM configuracao_canopus WHERE id FOR UPDATE
+SELECT id, dry_run_automatico, dry_run_dia, dry_run_hora, dry_run_minuto, aviso_email, drive_pasta_id, validade_dry_run_minutos, retencao_screenshots_dias, atualizado_por, atualizado_em, ultimo_disparo_dia, ultimo_disparo_em, ultimo_disparo_resultado, lance_real_automatico, lance_real_automatico_por, lance_real_max_cotas, lance_real_espera_minutos FROM configuracao_canopus WHERE id FOR UPDATE
 `
 
 // O laço do agendamento trava a linha para decidir sozinho se cria a execução do mês.
@@ -152,6 +175,10 @@ func (q *Queries) TravarConfiguracaoCanopus(ctx context.Context) (ConfiguracaoCa
 		&i.UltimoDisparoDia,
 		&i.UltimoDisparoEm,
 		&i.UltimoDisparoResultado,
+		&i.LanceRealAutomatico,
+		&i.LanceRealAutomaticoPor,
+		&i.LanceRealMaxCotas,
+		&i.LanceRealEsperaMinutos,
 	)
 	return i, err
 }

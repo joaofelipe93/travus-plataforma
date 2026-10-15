@@ -15,9 +15,10 @@ import { api } from "@/lib/api";
 import { dataHora, useSessao } from "@/lib/sessao";
 import type { ConfiguracaoCanopus, RespostaConfiguracaoCanopus, ResultadoDisparo } from "@/lib/tipos";
 
-// Configuração do serviço Canopus: dry-run automático, pasta do Google Drive e prazos. Admin e
-// operador editam; todo perfil vê. Quem valida de verdade é a API — aqui só ajudamos a
-// preencher e explicamos o que cada escolha faz.
+// Configuração do serviço Canopus: dry-run automático, lance real automático, pasta do Google
+// Drive e prazos. Admin e operador editam (o lance real automático, só admin); todo perfil vê.
+// Quem valida de verdade é a API — aqui só ajudamos a preencher e explicamos o que cada escolha
+// faz, com destaque para a única que registra lance de verdade sem ninguém aprovar.
 
 // O formulário é só texto: o que o usuário digita vira número na hora de salvar.
 type Formulario = {
@@ -29,6 +30,9 @@ type Formulario = {
   pasta: string;
   validadeMinutos: string;
   retencaoDias: string;
+  lanceRealAutomatico: boolean;
+  lanceRealMaxCotas: string;
+  lanceRealEsperaMinutos: string;
 };
 
 function paraFormulario(c: ConfiguracaoCanopus): Formulario {
@@ -41,6 +45,9 @@ function paraFormulario(c: ConfiguracaoCanopus): Formulario {
     pasta: c.drive_pasta_id ?? "",
     validadeMinutos: String(c.validade_dry_run_minutos),
     retencaoDias: String(c.retencao_screenshots_dias),
+    lanceRealAutomatico: c.lance_real_automatico,
+    lanceRealMaxCotas: String(c.lance_real_max_cotas),
+    lanceRealEsperaMinutos: String(c.lance_real_espera_minutos),
   };
 }
 
@@ -82,11 +89,20 @@ export default function PaginaConfiguracao() {
       // A API manda pode_editar; o perfil da sessão só evita o pisca-pisca de um botão que
       // apareceria e sumiria.
       podeEditar={consulta.data.pode_editar && sessao.data?.usuario.perfil !== "leitura"}
+      podeEditarLanceReal={consulta.data.pode_editar_lance_real && sessao.data?.usuario.perfil === "admin"}
     />
   );
 }
 
-function Configuracao({ dados, podeEditar }: { dados: RespostaConfiguracaoCanopus; podeEditar: boolean }) {
+function Configuracao({
+  dados,
+  podeEditar,
+  podeEditarLanceReal,
+}: {
+  dados: RespostaConfiguracaoCanopus;
+  podeEditar: boolean;
+  podeEditarLanceReal: boolean;
+}) {
   const queryClient = useQueryClient();
   const c = dados.configuracao;
   const [form, setForm] = useState<Formulario>(() => paraFormulario(c));
@@ -108,6 +124,9 @@ function Configuracao({ dados, podeEditar }: { dados: RespostaConfiguracaoCanopu
           drive_pasta_id: form.pasta.trim(),
           validade_dry_run_minutos: Number(form.validadeMinutos),
           retencao_screenshots_dias: Number(form.retencaoDias),
+          lance_real_automatico: form.lanceRealAutomatico,
+          lance_real_max_cotas: Number(form.lanceRealMaxCotas),
+          lance_real_espera_minutos: Number(form.lanceRealEsperaMinutos),
         },
       }),
     onSuccess: (resposta) => {
@@ -121,7 +140,11 @@ function Configuracao({ dados, podeEditar }: { dados: RespostaConfiguracaoCanopu
     const n = Number(texto);
     return Number.isInteger(n) && n >= min && n <= max;
   };
-  const prazosValidos = numeroValido(form.validadeMinutos, 30, 1440) && numeroValido(form.retencaoDias, 1, 365);
+  const prazosValidos =
+    numeroValido(form.validadeMinutos, 30, 1440) &&
+    numeroValido(form.retencaoDias, 1, 365) &&
+    numeroValido(form.lanceRealMaxCotas, 1, 500) &&
+    numeroValido(form.lanceRealEsperaMinutos, 5, 1440);
 
   return (
     <form
@@ -203,8 +226,10 @@ function Configuracao({ dados, podeEditar }: { dados: RespostaConfiguracaoCanopu
               <AlertTitle>No dia marcado, o robô entra no Newcon sozinho</AlertTitle>
               <AlertDescription>
                 Ele abre a tela de credenciamento de <strong>todas as cotas ativas</strong>, marca 2º Fixo, tira os
-                screenshots e <strong>não confirma nada</strong>. O lance real continua passando pela revisão e por um
-                administrador.
+                screenshots e <strong>não confirma nada</strong>.{" "}
+                {form.lanceRealAutomatico
+                  ? "O lance de verdade vem depois, pelo lance real automático (abaixo)."
+                  : "O lance real continua passando pela revisão e por um administrador."}
                 {!mudou && (
                   <>
                     <br />
@@ -240,6 +265,100 @@ function Configuracao({ dados, podeEditar }: { dados: RespostaConfiguracaoCanopu
               Última vez: {dataHora(c.ultimo_disparo_em)} —{" "}
               {c.ultimo_disparo_resultado ? resultadoDisparo[c.ultimo_disparo_resultado] : "sem registro"}.
             </p>
+          )}
+        </div>
+      </Secao>
+
+      <Secao
+        titulo="Lance real automático"
+        acao={
+          <Badge variant={form.lanceRealAutomatico ? "destructive" : "outline"}>
+            {form.lanceRealAutomatico ? "ligado" : "desligado"}
+          </Badge>
+        }
+      >
+        <div className="flex flex-col gap-4">
+          <Label className="flex items-center gap-3">
+            <Switch
+              checked={form.lanceRealAutomatico}
+              disabled={!podeEditarLanceReal}
+              onCheckedChange={(v) => mudar({ lanceRealAutomatico: v })}
+              aria-label="Ligar o lance real automático"
+            />
+            Registrar o lance de verdade depois do dry-run automático, sem ninguém aprovar
+          </Label>
+
+          {form.lanceRealAutomatico ? (
+            <Alert variant="destructive">
+              <AlertTitle>A plataforma vai registrar lance de verdade sozinha</AlertTitle>
+              <AlertDescription>
+                Terminado o dry-run automático, a plataforma espera <strong>{form.lanceRealEsperaMinutos} min</strong>,
+                avisa por e-mail e então <strong>registra o lance</strong> das cotas liberadas — sem revisão e sem
+                ninguém aprovar. O Newcon aceita lance repetido na mesma assembleia:{" "}
+                <strong>lance registrado não se desfaz</strong>. Cota que já tem lance na assembleia é pulada, e nada é
+                registrado acima do teto abaixo.
+                {!dados.lance_real_habilitado && (
+                  <>
+                    <br />
+                    Hoje a chave <span className="font-mono text-xs">LANCE_REAL_HABILITADO</span> está desligada no
+                    servidor: nenhum lance será registrado até alguém ligá-la.
+                  </>
+                )}
+              </AlertDescription>
+            </Alert>
+          ) : (
+            <p className="text-sm text-muted-foreground">
+              Desligado, o dry-run automático para na revisão: um administrador abre a execução, confere as cotas e
+              aprova o lance real à mão.
+            </p>
+          )}
+
+          <div className="grid gap-4 sm:grid-cols-2">
+            <Campo
+              id="teto"
+              rotulo="Teto de cotas por execução"
+              dica="Acima disso a plataforma não registra nada e avisa: erro de cadastro não vira lance em massa (de 1 a 500)."
+            >
+              <Input
+                id="teto"
+                inputMode="numeric"
+                disabled={!podeEditarLanceReal}
+                aria-invalid={!numeroValido(form.lanceRealMaxCotas, 1, 500)}
+                value={form.lanceRealMaxCotas}
+                onChange={(e) => mudar({ lanceRealMaxCotas: e.target.value })}
+              />
+            </Campo>
+            <Campo
+              id="espera"
+              rotulo="Esperar antes de registrar (minutos)"
+              dica="Janela entre o aviso por e-mail e o lance, para dar tempo de desligar ou cancelar a execução (de 5 a 1440)."
+            >
+              <Input
+                id="espera"
+                inputMode="numeric"
+                disabled={!podeEditarLanceReal}
+                aria-invalid={!numeroValido(form.lanceRealEsperaMinutos, 5, 1440)}
+                value={form.lanceRealEsperaMinutos}
+                onChange={(e) => mudar({ lanceRealEsperaMinutos: e.target.value })}
+              />
+            </Campo>
+          </div>
+
+          {form.lanceRealAutomatico && !dados.email_configurado && (
+            <p className="text-sm text-muted-foreground">
+              Sem SMTP no servidor, o aviso que antecede o lance fica só no log: ninguém é avisado antes.
+            </p>
+          )}
+          {!podeEditarLanceReal ? (
+            <p className="text-sm text-muted-foreground">
+              Só administradores mudam esta parte — na tela, lance real também só admin aprova.
+              {c.lance_real_automatico_por_nome && ` Ligado por ${c.lance_real_automatico_por_nome}.`}
+            </p>
+          ) : (
+            c.lance_real_automatico &&
+            c.lance_real_automatico_por_nome && (
+              <p className="text-sm text-muted-foreground">Ligado por {c.lance_real_automatico_por_nome}.</p>
+            )
           )}
         </div>
       </Secao>
