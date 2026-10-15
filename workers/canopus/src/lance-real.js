@@ -26,8 +26,8 @@ class ErroAntesDeConfirmar extends Error {
   }
 }
 
-async function conferirAssembleia(leitura, newcon, cota) {
-  const dados = await leitura.lerDadosCredenciamento(newcon.page);
+async function conferirAssembleia(leitura, newcon, cota, modalidade) {
+  const dados = await leitura.lerDadosCredenciamento(newcon.page, modalidade);
   if (!dados.assembleia_data || dados.assembleia_data !== cota.assembleia_aprovada) {
     throw new ErroAntesDeConfirmar(
       `a assembleia na tela (${dados.assembleia_data || 'não lida'}) não é a aprovada na revisão (${cota.assembleia_aprovada}): nada foi confirmado`
@@ -38,10 +38,10 @@ async function conferirAssembleia(leitura, newcon, cota) {
 
 /**
  * @param {object} ctx { newcon, registro, plataforma, cota, voltarAoFiltro, config, leitura,
- *                       enviarScreenshot(cota, arquivo), concluir(cota, conclusao) }
+ *                       modalidade, enviarScreenshot(cota, arquivo), concluir(cota, conclusao) }
  */
 async function processarCotaReal(ctx) {
-  const { newcon, registro, plataforma, cota, config, leitura } = ctx;
+  const { newcon, registro, plataforma, cota, config, leitura, modalidade } = ctx;
   const tag = tagCota(cota);
   const detalhes = {};
   const dialogosAntes = registro.dialogos.length;
@@ -50,8 +50,10 @@ async function processarCotaReal(ctx) {
   try {
     // ----- Antes do clique: qualquer falha aqui é segura (nada foi confirmado) -----
     if (ctx.voltarAoFiltro) await newcon.backToFilter();
+    // A modalidade sai do cadastro da cota: não suportada falha aqui, antes de qualquer clique.
+    const m = modalidade.daCota(cota);
     await newcon.searchCota(cota);
-    Object.assign(detalhes, await conferirAssembleia(leitura, newcon, cota));
+    Object.assign(detalhes, await conferirAssembleia(leitura, newcon, cota, m));
 
     let historico;
     try {
@@ -74,8 +76,8 @@ async function processarCotaReal(ctx) {
     // (não confirmamos com o painel do Histórico aberto).
     await newcon.backToFilter();
     await newcon.searchCota(cota);
-    await conferirAssembleia(leitura, newcon, cota);
-    await newcon.selectSegundoFixo();
+    await conferirAssembleia(leitura, newcon, cota, m);
+    await modalidade.marcar(newcon, m);
     const screenshot = await newcon.captureBeforeConfirm(cota);
     await ctx.enviarScreenshot(cota, screenshot);
 
@@ -152,7 +154,8 @@ async function processarCotaReal(ctx) {
     lance_existente: jaCredenciado(dialogos),
     pdf_id: pdfId,
     assembleia_numero: detalhes.assembleia_numero || null,
-    percentual: detalhes.percentual_segundo_fixo || null,
+    // Percentual da modalidade que foi marcada (para cota de lance Fixo, não é o do 2º Fixo).
+    percentual: detalhes.percentual_lance || detalhes.percentual_segundo_fixo || null,
     detalhes,
   });
 }

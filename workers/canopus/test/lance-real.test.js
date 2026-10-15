@@ -9,6 +9,7 @@ const path = require('path');
 
 const { processarCotaReal } = require('../src/lance-real');
 const { Registro } = require('../src/registro');
+const modalidadeReal = require('../src/modalidade');
 
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'lance-real-teste-'));
 const silencio = { log() {} };
@@ -33,7 +34,6 @@ function cenario(opcoes = {}) {
     page: {},
     async backToFilter() { ordem.push('voltar'); },
     async searchCota() { ordem.push('buscar'); if (opcoes.erroBusca) throw opcoes.erroBusca; },
-    async selectSegundoFixo() { ordem.push('2º fixo'); },
     async captureBeforeConfirm() { ordem.push('screenshot'); const f = path.join(tmp, 's.png'); fs.writeFileSync(f, 'x'); return f; },
     async snapshotError() { return null; },
     async confirmAndWaitReport() {
@@ -52,7 +52,13 @@ function cenario(opcoes = {}) {
   const leitura = {
     async lerDadosCredenciamento() {
       ordem.push('dados');
-      return { assembleia_data: assembleias[Math.min(leituras++, assembleias.length - 1)], assembleia_numero: '027', percentual_segundo_fixo: '30.0000' };
+      const m = arguments[1];
+      return {
+        assembleia_data: assembleias[Math.min(leituras++, assembleias.length - 1)],
+        assembleia_numero: '027',
+        percentual_segundo_fixo: '30.0000',
+        ...(m ? { modalidade_lance: m.codigo, percentual_lance: m.codigo === 'fixo' ? '20.0000' : '30.0000' } : {}),
+      };
     },
     async lerHistorico() {
       ordem.push('histórico');
@@ -74,9 +80,19 @@ function cenario(opcoes = {}) {
       return { ok: true };
     },
   };
+  // Dublê do src/modalidade.js: a tabela é a de verdade (quem decide é o cadastro da cota), só
+  // a marcação na página é simulada.
+  const modalidade = {
+    daCota: modalidadeReal.daCota,
+    async marcar(_newcon, m) {
+      ordem.push(m.codigo === 'segundo_fixo' ? '2º fixo' : m.codigo);
+      if (opcoes.modalidadeDesabilitada) throw new NewconCotaError(`"${m.rotulo}" está desabilitado para esta cota no Newcon`);
+      return m;
+    },
+  };
   const ctx = {
-    newcon, registro, plataforma, leitura,
-    cota: { id: 5, grupo: '006650', cota: '0236', versao: '00', cliente_nome: 'CLIENTE', assembleia_aprovada: '15/09/2026', permitir_lance_existente: !!opcoes.permitir },
+    newcon, registro, plataforma, leitura, modalidade,
+    cota: { id: 5, grupo: '006650', cota: '0236', versao: '00', cliente_nome: 'CLIENTE', modalidade: opcoes.modalidade || 'segundo_fixo', assembleia_aprovada: '15/09/2026', permitir_lance_existente: !!opcoes.permitir },
     voltarAoFiltro: false,
     config: { playwright: { timeoutMs: 1000 } },
     pausasMs: [1, 1, 1],

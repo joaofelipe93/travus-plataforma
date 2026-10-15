@@ -150,6 +150,10 @@ func TestAprovacaoDeLanceReal(t *testing.T) {
 	if rv.Cotas[0].ExigeAutorizacao || !rv.Cotas[1].ExigeAutorizacao || rv.Cotas[0].AssembleiaData == nil || *rv.Cotas[0].AssembleiaData != assembleiaTeste {
 		t.Errorf("cotas da revisão: %+v", rv.Cotas)
 	}
+	// A revisão diz qual modalidade vai ser marcada: quem aprova precisa ver isso.
+	if rv.Cotas[0].Modalidade != "segundo_fixo" {
+		t.Errorf("modalidade na revisão = %q, quer segundo_fixo", rv.Cotas[0].Modalidade)
+	}
 
 	pedido := []map[string]any{escolha(c[0].ID, false), escolha(c[1].ID, true)}
 	esperarStatus(t, aprovar(operador, dryRun, 2, pedido...), http.StatusForbidden, "operador aprova lance real")
@@ -490,5 +494,22 @@ func TestTokenDoDriveCifradoNoBanco(t *testing.T) {
 	s.cfg.Cofre, s.driveCliente = outra, nil
 	if _, _, err := s.clienteDrive(ctx); err == nil || !strings.Contains(err.Error(), "não decifra") {
 		t.Errorf("chave trocada: %v", err)
+	}
+}
+
+// A modalidade gravada no lance é a CADASTRADA na cota (decisão do usuário em 15/10/2026): cota
+// de lance Fixo não pode virar "2º Lance Fixo" no comprovante nem no histórico da plataforma.
+func TestModalidadeDoLanceVemDoCadastro(t *testing.T) {
+	casos := map[string]string{
+		"segundo_fixo": "2º Lance Fixo",
+		"fixo":         "Lance Fixo",
+		// Fora do mapa não chega aqui (o worker recusa antes de clicar); se chegasse, o valor
+		// cru é melhor que um rótulo errado.
+		"livre": "livre",
+	}
+	for cadastrada, quer := range casos {
+		if got := modalidadeDoLance(cadastrada); got != quer {
+			t.Errorf("modalidadeDoLance(%q) = %q, quer %q", cadastrada, got, quer)
+		}
 	}
 }

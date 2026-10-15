@@ -15,7 +15,7 @@ O segundo serviço é o **notificador de check-in** (`workers/checkin-whatsapp`)
 ## Regras inegociáveis
 
 1. **Nunca registre lance real.** Não rode `--confirm`, `npm run real` nem nada que clique em "Confirmar" (`#ctl00_Conteudo_btnConfirma`) no Newcon, nem para testar. O Newcon **aceita lances repetidos** na mesma assembleia: um teste errado vira lance duplicado de verdade. Para testar:
-   - **dry-run pela plataforma** (tela Execuções → Novo dry-run) ou `make worker-dry-run` (script legado, 1 cota). Vai até a tela de credenciamento, marca "2º Fixo", tira screenshot e não confirma. **Criar um dry-run faz o worker entrar no Newcon**: testes automáticos (`make test`, `make smoke`) nunca criam execução;
+   - **dry-run pela plataforma** (tela Execuções → Novo dry-run) ou `make worker-dry-run` (script legado, 1 cota). Vai até a tela de credenciamento, marca **a modalidade cadastrada na cota**, tira screenshot e não confirma. **Criar um dry-run faz o worker entrar no Newcon**: testes automáticos (`make test`, `make smoke`) nunca criam execução;
    - **reimpressão pelo Histórico** para testar o PDF: na tela de credenciamento, `#ctl00_Conteudo_btnHistorico` → `input[id$="srcPrint"]` de uma linha.
 
    Execução real só com pedido explícito do usuário, na hora.
@@ -171,7 +171,7 @@ merge do PR "chore: versão X.Y.Z" → tag vX.Y.Z + release → workflow Deploy:
   - O cadastro do Canopus (CRM) tem os componentes próprios: `espaco-clientes.tsx` (lista + painel), `painel-cliente.tsx`, `cadastro-sheets.tsx` (formulários em painel lateral), `campos-cadastro.tsx`, `resumo-carteira.tsx` e `traco-cotas.tsx` (uma marca por cota, ativa ou não).
   - `page.tsx` só pode exportar o componente da página (o build do Next recusa exports extras): componentes compartilhados vão para `src/components/` (ex.: `comprovante.tsx`).
 - **Worker Canopus** (`workers/canopus/`, Node + Playwright **1.63.0 exato**; a imagem `mcr.microsoft.com/playwright:v1.63.0-noble` precisa ter a mesma versão do `package-lock.json`).
-  - `src/worker.js`: laço da fila. **Só dry-run: não há caminho para Confirmar** (um teste lê o arquivo e falha se aparecer `confirmAndWaitReport`, `downloadReportPdf` ou `btnConfirma`). Por cota: `backToFilter` (a partir da 2ª) → `searchCota` → `lerDadosCredenciamento` → `selectSegundoFixo` → `captureBeforeConfirm` → envia screenshot → `lerHistorico` (só leitura, depois do screenshot) → conclui. `NewconCotaError` → erro conhecido; outro erro → inesperado; ambos com screenshot. SIGTERM: termina a cota atual e devolve à fila (`stop_grace_period: 90s`).
+  - `src/worker.js`: laço da fila. **Só dry-run: não há caminho para Confirmar** (um teste lê o arquivo e falha se aparecer `confirmAndWaitReport`, `downloadReportPdf` ou `btnConfirma`). Por cota: `modalidade.daCota` → `backToFilter` (a partir da 2ª) → `searchCota` → `lerDadosCredenciamento` → `modalidade.marcar` → `captureBeforeConfirm` → envia screenshot → `lerHistorico` (só leitura, depois do screenshot) → conclui. `NewconCotaError` → erro conhecido; outro erro → inesperado; ambos com screenshot. SIGTERM: termina a cota atual e devolve à fila (`stop_grace_period: 90s`).
   - `src/newcon.js`, `csv.js`, `logger.js`: o código validado, **sem mudanças**. `src/index.js` é o script legado (`make worker-dry-run`).
   - `src/leitura-credenciamento.js`: seletores de assembleia e do Histórico (só leitura). `src/plataforma.js`: cliente das rotas internas. `src/registro.js`: logger que manda eventos à API. `src/config-worker.js`: só variáveis de ambiente (recusa `NEWCON_URL` com a grafia `frmCorCCCnsLogin`).
   - No container, `docker-entrypoint.sh` bloqueia `--confirm`/`real`, e o Chromium precisa de `shm_size` (ou `--ipc=host`). `legado/` é só referência.
@@ -224,6 +224,29 @@ Não há mais importação de planilha.
 - **Cota com lance ou execução é histórico**: não muda de administradora, grupo, cota, versão nem de cliente, e não se exclui (409; para tirá-la das execuções, desative). Cliente com cotas também não se exclui.
 - Só a API valida de verdade: a tela ajuda a preencher, mas quem recusa é o servidor.
 
+## Modalidade do lance
+
+**O cadastro manda** (decisão do usuário em 15/10/2026): a plataforma marca no Newcon a modalidade que está
+na cota, não mais o "2º Fixo" sempre. Antes disso, cota cadastrada como `fixo` levava 2º Fixo em silêncio —
+e as que tinham o 2º Fixo desabilitado (grupo 6620) viravam erro conhecido.
+
+- `workers/canopus/src/modalidade.js` traduz o cadastro no radio da tela: `fixo` → `rgLance_1` (LF),
+  `segundo_fixo` → `rgLance_2` (LS). Cada modalidade tem o **rótulo de percentual próprio**
+  (`lblVA_Lance_Fixo` e `lblVA_Lance_Fixo_2`): usar o do 2º Fixo num lance Fixo gravaria percentual errado.
+  O módulo fica fora do `newcon.js` de propósito (aquele arquivo não se altera) e é injetado no worker como
+  o módulo de leitura; os testes o dublam.
+- **Só Fixo e 2º Fixo.** `livre`, `limitado` e `fidelidade` dão erro conhecido **antes de abrir a cota** no
+  Newcon — nada de chutar numa ação irreversível. Modalidade vazia ou desconhecida também falha: não existe
+  mais caminho em que uma cota "cai" no 2º Fixo.
+- Modalidade cadastrada **desabilitada** no Newcon continua sendo erro conhecido da cota, com a lista do que
+  está habilitado (`"Fixo" está desabilitado para esta cota no Newcon. Modalidades disponíveis: …`).
+- `lances.modalidade` guarda o rótulo do Newcon (`modalidadeDoLance` em `interno_real.go`: `segundo_fixo` →
+  "2º Lance Fixo", `fixo` → "Lance Fixo"). A reimpressão grava o texto exato que vem da grade do Histórico e
+  corrige o rótulo se for diferente.
+- A **revisão** mostra a modalidade de cada cota e o percentual dela: é o que um admin confere antes de
+  aprovar lance real. O nome do PDF e a pasta do Drive **não** mudaram (o nome tem paridade testada com o
+  script legado; separar por modalidade seria decisão nova).
+
 ## Execuções e proteção contra lance duplicado
 
 ```
@@ -238,7 +261,7 @@ cota:  pendente → em_andamento → verificada (dry-run ok) | reimpressa (reimp
        (pendente → cancelada quando a execução é cancelada)
 
 lance real:  dry-run concluído → revisão → admin aprova (chave ligada, < 2 h) → execução real na fila
-             worker: confere a assembleia e o Histórico de novo → 2º Fixo → screenshot
+             worker: confere a assembleia e o Histórico de novo → modalidade da cota → screenshot
                      → grava confirmacao_iniciada (API) → só então clica em Confirmar
                      → protocolo do alert → PDF → concluir-confirmacao (lance + fila do Drive)
 
@@ -278,7 +301,10 @@ lance real automático (desligado por padrão; só admin liga):
 
 ## Decisões em aberto (não invente a regra)
 
-- Modalidade para cotas sem "2º Fixo" (grupo 6620: só Livre, Fixo, Limitado). Hoje é erro conhecido.
+- Modalidade **Livre, Limitado e Fidelidade**: a plataforma não dá esses lances (não se sabe que valor o
+  Newcon espera, e lance livre precisa de um valor que ninguém definiu). Cota cadastrada assim vira erro
+  conhecido, com a mensagem pedindo para ajustar o cadastro ou registrar no Newcon. Decidido o que importava
+  em 15/10/2026: **cota cadastrada como `fixo` dá Fixo mesmo** (ver "Modalidade do lance").
 - Domínio (`app.`/`api.`): o usuário define e cria depois.
 
 Decididas pelo usuário no CRM (17/09/2026): a importação por planilha sai da interface e da API, mas a tabela

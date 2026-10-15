@@ -23,7 +23,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { api } from "@/lib/api";
 import { execucaoTerminou, hora, nomeTipo, situacaoCota, situacaoExecucao } from "@/lib/execucoes";
-import { dataHora, podeEditar, tagCota, useSessao } from "@/lib/sessao";
+import { dataHora, nomeModalidade, podeEditar, tagCota, useSessao } from "@/lib/sessao";
 import type { CotaExecucao, DetalheExecucao, EventoExecucao, LanceExecucao } from "@/lib/tipos";
 import { cn } from "@/lib/utils";
 
@@ -303,7 +303,11 @@ function LinhaCota({
         {c.permitir_lance_existente && <p className="text-xs text-muted-foreground">Autorizado a registrar mesmo com lance existente.</p>}
         {c.status === "verificada" && lances === 0 && d.historico_lido && <p className="text-muted-foreground">Sem lance nesta assembleia.</p>}
         {c.status === "verificada" && d.historico_lido === false && <p className="text-muted-foreground">Histórico não pôde ser lido.</p>}
-        {d.percentual_segundo_fixo && c.status === "verificada" && <p className="text-xs text-muted-foreground">2º Lance Fixo: {d.percentual_segundo_fixo}%</p>}
+        {(d.percentual_lance ?? d.percentual_segundo_fixo) && c.status === "verificada" && (
+          <p className="text-xs text-muted-foreground">
+            {nomeModalidade[d.modalidade_lance ?? c.modalidade] ?? "Lance"}: {d.percentual_lance ?? d.percentual_segundo_fixo}%
+          </p>
+        )}
       </TableCell>
       {mostrarComprovante && (
         <TableCell>

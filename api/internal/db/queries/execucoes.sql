@@ -175,7 +175,7 @@ RETURNING cancelamento_solicitado;
 
 -- name: BuscarExecucaoCotaParaWorker :one
 SELECT ec.id, ec.execucao_id, ec.cota_id, ec.status, ec.grupo, ec.cota, ec.versao, ec.cliente_nome,
-       ec.assembleia_aprovada, ec.permitir_lance_existente, ec.protocolo, ec.detalhes, q.administradora,
+       ec.modalidade, ec.assembleia_aprovada, ec.permitir_lance_existente, ec.protocolo, ec.detalhes, q.administradora,
        e.tipo, e.status AS execucao_status, e.worker, e.cancelamento_solicitado
 FROM execucao_cotas ec
 JOIN execucoes e ON e.id = ec.execucao_id

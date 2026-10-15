@@ -29,9 +29,11 @@ type lanceHistoricoJSON struct {
 
 // Detalhes gravados pelo worker no dry-run (tela de credenciamento e Histórico).
 type detalhesDryRun struct {
-	AssembleiaData        *string              `json:"assembleia_data"`
-	AssembleiaNumero      *string              `json:"assembleia_numero"`
-	PercentualSegundoFixo *string              `json:"percentual_segundo_fixo"`
+	AssembleiaData        *string `json:"assembleia_data"`
+	AssembleiaNumero      *string `json:"assembleia_numero"`
+	PercentualSegundoFixo *string `json:"percentual_segundo_fixo"`
+	// Percentual da modalidade que o worker marcou (para cota de lance Fixo, não é o do 2º Fixo).
+	PercentualLance       *string              `json:"percentual_lance"`
 	HistoricoLido         bool                 `json:"historico_lido"`
 	LancesNestaAssembleia int                  `json:"lances_nesta_assembleia"`
 	Lances                []lanceHistoricoJSON `json:"lances"`
@@ -48,6 +50,7 @@ type cotaRevisaoJSON struct {
 	AssembleiaData        *string              `json:"assembleia_data"`
 	AssembleiaNumero      *string              `json:"assembleia_numero"`
 	PercentualSegundoFixo *string              `json:"percentual_segundo_fixo"`
+	PercentualLance       *string              `json:"percentual_lance"`
 	HistoricoLido         bool                 `json:"historico_lido"`
 	LancesNestaAssembleia int                  `json:"lances_nesta_assembleia"`
 	Lances                []lanceHistoricoJSON `json:"lances"`
@@ -55,9 +58,10 @@ type cotaRevisaoJSON struct {
 	ExigeAutorizacao      bool                 `json:"exige_autorizacao"`
 	ScreenshotID          *string              `json:"screenshot_id"`
 	Bloqueio              string               `json:"bloqueio"`
+	// Modalidade cadastrada na cota: é ela que o worker vai marcar no Newcon (Fixo dá Fixo).
+	Modalidade string `json:"modalidade"`
 
-	modalidade string
-	detalhes   []byte
+	detalhes []byte
 }
 
 type revisaoJSON struct {
@@ -140,8 +144,9 @@ func (s *Servidor) montarRevisao(ctx context.Context, q *db.Queries, id int64) (
 		cr := cotaRevisaoJSON{
 			ExecucaoCotaID: c.ID, CotaID: c.CotaID, Grupo: c.Grupo, Cota: c.Cota, Versao: c.Versao, ClienteNome: c.ClienteNome,
 			Ativa: c.Ativa, AssembleiaData: d.AssembleiaData, AssembleiaNumero: d.AssembleiaNumero,
-			PercentualSegundoFixo: d.PercentualSegundoFixo, HistoricoLido: d.HistoricoLido, LancesNestaAssembleia: d.LancesNestaAssembleia,
-			Lances: d.Lances, LancesPlataforma: []string{}, ScreenshotID: c.ScreenshotID, modalidade: c.Modalidade, detalhes: c.Detalhes,
+			PercentualSegundoFixo: d.PercentualSegundoFixo, PercentualLance: d.PercentualLance,
+			HistoricoLido: d.HistoricoLido, LancesNestaAssembleia: d.LancesNestaAssembleia,
+			Lances: d.Lances, LancesPlataforma: []string{}, ScreenshotID: c.ScreenshotID, Modalidade: c.Modalidade, detalhes: c.Detalhes,
 		}
 		if cr.Lances == nil {
 			cr.Lances = []lanceHistoricoJSON{}
@@ -282,7 +287,7 @@ func (s *Servidor) criarExecucaoRealDoDryRun(ctx context.Context, qtx *db.Querie
 		}
 		if err := qtx.InserirCotaReal(ctx, db.InserirCotaRealParams{
 			ExecucaoID: real.ID, CotaID: c.CotaID, Ordem: int32(i + 1), Grupo: c.Grupo, Cota: c.Cota, Versao: c.Versao,
-			ClienteNome: c.ClienteNome, Modalidade: c.modalidade, AssembleiaAprovada: c.AssembleiaData,
+			ClienteNome: c.ClienteNome, Modalidade: c.Modalidade, AssembleiaAprovada: c.AssembleiaData,
 			PermitirLanceExistente: permitir, Detalhes: c.detalhes,
 		}); err != nil {
 			return vazio, err

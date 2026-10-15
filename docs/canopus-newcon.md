@@ -63,8 +63,12 @@ Usado por `workers/canopus/src/leitura-credenciamento.js`. Nada disso preenche c
   - `#ctl00_Conteudo_lblVA_Lance_Fixo_2`: percentual do 2º Lance Fixo (ex.: `30.0000`). Vizinhos: `lblVA_Lance_Fixo`, `lblVA_Lance_Minimo`, `lblVA_Lance_Maximo`, `lblVA_Lance_Limitado`.
   - `#ctl00_Conteudo_lblNM_Ocorrencia`: texto vermelho "Último lance ofertado em: 13/09/2026 às 19:52:31, através da(o) Web". **Não diz de qual assembleia** é o lance.
   - Radios da modalidade: `rgLance_0` (LL, Livre), `rgLance_1` (LF, Fixo), `rgLance_2` (LS, 2º Fixo), `rgLance_3` (LM, Limitado), `rgLance_4` (LI, Fidelidade; desabilitado na 6650/0236).
+    **A plataforma marca o radio da modalidade cadastrada na cota** (`workers/canopus/src/modalidade.js`,
+    decisão do usuário em 15/10/2026): `fixo` → `rgLance_1`, `segundo_fixo` → `rgLance_2`. Livre, Limitado e
+    Fidelidade não são dados pela plataforma (erro conhecido): não se sabe que valor o Newcon espera nelas.
+    O percentual de cada modalidade tem rótulo próprio — ver `lblVA_Lance_Fixo` e `lblVA_Lance_Fixo_2`.
 - **Histórico** (`#ctl00_Conteudo_btnHistorico`, submit): abre um **painel na mesma página** (a URL continua `frmConCpCadCredenciamentoLance.aspx`), fechado por `#ctl00_Conteudo_lbkFechaHistorico`. Grade `#ctl00_Conteudo_ucHistoricoOfertaLance_grdHistLances`, colunas: Protocolo, Assembleia, Credenciamento (data e hora), Modalidade ("2º Lance Fixo"), Acesso, Tipo Oferta, Usuário (login do Newcon: não guardar), Vl. Lance, % Lance, Pc. Lance, % Embutido, Vl Embutido, Lance Automático, Vl. FGTS, Tipo Redução, Construtora, Troca de Chaves, Sequência, 2ª Via. É pela coluna **Assembleia** que se sabe se a cota já tem lance na assembleia atual (a 6650/0236 tinha 2 em 15/09/2026).
-- **Grupo 6620** (6620/1372): a tela abre, a assembleia é lida (nº 010) e o "2º Fixo" vem desabilitado; modalidades habilitadas: Livre, Fixo, Limitado.
+- **Grupo 6620** (6620/1372): a tela abre, a assembleia é lida (nº 010) e o "2º Fixo" vem desabilitado; modalidades habilitadas: Livre, Fixo, Limitado. Cota desse grupo cadastrada como `fixo` passa a ser atendida (a plataforma marca Fixo); cadastrada como `segundo_fixo` continua dando erro conhecido.
 - **6650/2068**: "Localizar" leva ao Histórico das Ofertas (sem credenciamento; último lance na assembleia de 16/06/2026).
 
 ## Descoberto na Etapa 3 (2026-09-15, sem confirmar lance)
