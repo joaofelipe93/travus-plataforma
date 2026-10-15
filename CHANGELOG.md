@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.12.0](https://github.com/joaofelipe93/travus-plataforma/compare/v0.11.1...v0.12.0) (2026-10-15)
+
+
+### Novidades
+
+* **canopus:** lance real automático depois do dry-run agendado ([#63](https://github.com/joaofelipe93/travus-plataforma/issues/63)) ([fdf14b2](https://github.com/joaofelipe93/travus-plataforma/commit/fdf14b2324df8256f92d23b55c0a7f278b030405))
+
 ## [0.11.1](https://github.com/joaofelipe93/travus-plataforma/compare/v0.11.0...v0.11.1) (2026-10-14)
 
 
