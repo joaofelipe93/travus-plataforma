@@ -113,6 +113,7 @@ func (s *Servidor) verificarSaude(ctx context.Context) ([]achado, bool) {
 	}
 	if bancoOk {
 		out = append(out, s.verificarAgendamento(ctxBanco, agora)...)
+		out = append(out, s.verificarLanceRealAutomatico(ctxBanco)...)
 	}
 	out = append(out, s.verificarCheckin(ctx, agora, bancoOk)...)
 	out = append(out, s.verificarBackup(agora)...)

@@ -372,14 +372,15 @@ func (q *Queries) CriarExecucao(ctx context.Context, arg CriarExecucaoParams) (C
 }
 
 const criarExecucaoReal = `-- name: CriarExecucaoReal :one
-INSERT INTO execucoes (tipo, criada_por, aprovada_por, dry_run_origem_id)
-VALUES ('real', $1, $1, $2)
+INSERT INTO execucoes (tipo, criada_por, aprovada_por, dry_run_origem_id, origem)
+VALUES ('real', $1, $1, $2, $3)
 RETURNING id, tipo, status, criada_em
 `
 
 type CriarExecucaoRealParams struct {
 	UsuarioID      int64
 	DryRunOrigemID *int64
+	Origem         string
 }
 
 type CriarExecucaoRealRow struct {
@@ -390,8 +391,9 @@ type CriarExecucaoRealRow struct {
 }
 
 // Execução real: sempre aprovada a partir de um dry-run.
+// origem: 'manual' (admin aprovou na tela) ou 'agendada' (lance real automático).
 func (q *Queries) CriarExecucaoReal(ctx context.Context, arg CriarExecucaoRealParams) (CriarExecucaoRealRow, error) {
-	row := q.db.QueryRow(ctx, criarExecucaoReal, arg.UsuarioID, arg.DryRunOrigemID)
+	row := q.db.QueryRow(ctx, criarExecucaoReal, arg.UsuarioID, arg.DryRunOrigemID, arg.Origem)
 	var i CriarExecucaoRealRow
 	err := row.Scan(
 		&i.ID,
@@ -510,6 +512,48 @@ func (q *Queries) DevolverExecucoesComTravaVencida(ctx context.Context) ([]Devol
 	return items, nil
 }
 
+const dryRunsAgendadosSemDecisao = `-- name: DryRunsAgendadosSemDecisao :many
+
+SELECT id, status, finalizada_em
+FROM execucoes
+WHERE tipo = 'dry_run' AND origem = 'agendada'
+  AND lance_real_auto_em IS NULL AND finalizada_em IS NOT NULL
+  AND finalizada_em <= now() - make_interval(mins => $1::int)
+ORDER BY id
+LIMIT 5
+`
+
+type DryRunsAgendadosSemDecisaoRow struct {
+	ID           int64
+	Status       string
+	FinalizadaEm *time.Time
+}
+
+// ===== Lance real automático (agendamento.go, migração 00014) =====
+// Dry-run automático que terminou, cuja espera venceu e sobre o qual o automático ainda não
+// decidiu. Status que não dá lance (cancelada, falhou) entra aqui também: a revisão recusa e a
+// decisão fica gravada. A espera é contada com o relógio do banco, o mesmo que gravou
+// finalizada_em: nada depende do relógio da API nem do desvio entre os dois.
+func (q *Queries) DryRunsAgendadosSemDecisao(ctx context.Context, esperaMinutos int32) ([]DryRunsAgendadosSemDecisaoRow, error) {
+	rows, err := q.db.Query(ctx, dryRunsAgendadosSemDecisao, esperaMinutos)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []DryRunsAgendadosSemDecisaoRow
+	for rows.Next() {
+		var i DryRunsAgendadosSemDecisaoRow
+		if err := rows.Scan(&i.ID, &i.Status, &i.FinalizadaEm); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const execucaoRealDoDryRun = `-- name: ExecucaoRealDoDryRun :one
 SELECT id, status
 FROM execucoes
@@ -532,10 +576,11 @@ func (q *Queries) ExecucaoRealDoDryRun(ctx context.Context, dryRunID *int64) (Ex
 }
 
 const execucoesAgendadasSemAviso = `-- name: ExecucoesAgendadasSemAviso :many
-SELECT e.id, e.status, e.finalizada_em, e.erro,
+SELECT e.id, e.tipo, e.status, e.finalizada_em, e.erro,
        count(ec.id)::int                                                                              AS total,
-       (count(ec.id) FILTER (WHERE ec.status = 'verificada'))::int                                    AS sucesso,
-       (count(ec.id) FILTER (WHERE ec.status IN ('erro_antes_confirmar', 'erro_apos_confirmar')))::int AS com_erro
+       (count(ec.id) FILTER (WHERE ec.status IN ('verificada', 'confirmada', 'reimpressa')))::int      AS sucesso,
+       (count(ec.id) FILTER (WHERE ec.status IN ('erro_antes_confirmar', 'erro_apos_confirmar')))::int AS com_erro,
+       (count(ec.id) FILTER (WHERE ec.status = 'erro_apos_confirmar'))::int                            AS apos_confirmar
 FROM execucoes e
 LEFT JOIN execucao_cotas ec ON ec.execucao_id = e.id
 WHERE e.origem = 'agendada' AND e.aviso_email_em IS NULL AND e.finalizada_em IS NOT NULL
@@ -545,16 +590,19 @@ LIMIT 10
 `
 
 type ExecucoesAgendadasSemAvisoRow struct {
-	ID           int64
-	Status       string
-	FinalizadaEm *time.Time
-	Erro         *string
-	Total        int32
-	Sucesso      int32
-	ComErro      int32
+	ID            int64
+	Tipo          string
+	Status        string
+	FinalizadaEm  *time.Time
+	Erro          *string
+	Total         int32
+	Sucesso       int32
+	ComErro       int32
+	AposConfirmar int32
 }
 
-// Execuções agendadas que terminaram e ainda não foram avisadas por e-mail.
+// Execuções agendadas que terminaram e ainda não foram avisadas por e-mail. Vale para o
+// dry-run automático e para a execução real que ele originou (tipo diz qual).
 func (q *Queries) ExecucoesAgendadasSemAviso(ctx context.Context) ([]ExecucoesAgendadasSemAvisoRow, error) {
 	rows, err := q.db.Query(ctx, execucoesAgendadasSemAviso)
 	if err != nil {
@@ -566,12 +614,14 @@ func (q *Queries) ExecucoesAgendadasSemAviso(ctx context.Context) ([]ExecucoesAg
 		var i ExecucoesAgendadasSemAvisoRow
 		if err := rows.Scan(
 			&i.ID,
+			&i.Tipo,
 			&i.Status,
 			&i.FinalizadaEm,
 			&i.Erro,
 			&i.Total,
 			&i.Sucesso,
 			&i.ComErro,
+			&i.AposConfirmar,
 		); err != nil {
 			return nil, err
 		}
@@ -581,6 +631,22 @@ func (q *Queries) ExecucoesAgendadasSemAviso(ctx context.Context) ([]ExecucoesAg
 		return nil, err
 	}
 	return items, nil
+}
+
+const fecharDryRunsAgendadosAntesDeLigar = `-- name: FecharDryRunsAgendadosAntesDeLigar :execrows
+UPDATE execucoes
+SET lance_real_auto_em = now(), lance_real_auto_resultado = 'antes_de_ligar'
+WHERE tipo = 'dry_run' AND origem = 'agendada' AND lance_real_auto_em IS NULL
+`
+
+// Ligar o automático não faz a plataforma correr atrás de dry-run que já terminou: o que estava
+// sem decisão fica fechado como 'antes_de_ligar'.
+func (q *Queries) FecharDryRunsAgendadosAntesDeLigar(ctx context.Context) (int64, error) {
+	result, err := q.db.Exec(ctx, fecharDryRunsAgendadosAntesDeLigar)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const finalizarExecucao = `-- name: FinalizarExecucao :exec
@@ -996,6 +1062,27 @@ func (q *Queries) MarcarConfirmacoesPendentesComoErro(ctx context.Context, execu
 	return result.RowsAffected(), nil
 }
 
+const marcarDecisaoLanceRealAutomatico = `-- name: MarcarDecisaoLanceRealAutomatico :execrows
+UPDATE execucoes
+SET lance_real_auto_em = now(), lance_real_auto_resultado = $1
+WHERE id = $2 AND lance_real_auto_em IS NULL
+`
+
+type MarcarDecisaoLanceRealAutomaticoParams struct {
+	Resultado *string
+	ID        int64
+}
+
+// A decisão se grava uma vez: duas instâncias da API decidindo ao mesmo tempo (a segunda fica
+// esperando a trava do dry-run) não trocam o resultado da primeira.
+func (q *Queries) MarcarDecisaoLanceRealAutomatico(ctx context.Context, arg MarcarDecisaoLanceRealAutomaticoParams) (int64, error) {
+	result, err := q.db.Exec(ctx, marcarDecisaoLanceRealAutomatico, arg.Resultado, arg.ID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const posicaoNaFila = `-- name: PosicaoNaFila :one
 SELECT count(*)::int
 FROM execucoes o, execucoes e
@@ -1149,5 +1236,27 @@ func (q *Queries) TravarExecucao(ctx context.Context, id int64) (TravarExecucaoR
 		&i.Worker,
 		&i.CancelamentoSolicitado,
 	)
+	return i, err
+}
+
+const ultimaDecisaoLanceRealAutomatico = `-- name: UltimaDecisaoLanceRealAutomatico :one
+SELECT id, lance_real_auto_em, lance_real_auto_resultado
+FROM execucoes
+WHERE tipo = 'dry_run' AND origem = 'agendada' AND lance_real_auto_em IS NOT NULL
+ORDER BY id DESC
+LIMIT 1
+`
+
+type UltimaDecisaoLanceRealAutomaticoRow struct {
+	ID                     int64
+	LanceRealAutoEm        *time.Time
+	LanceRealAutoResultado *string
+}
+
+// Última decisão do automático, para o vigia avisar quando o lance real não saiu.
+func (q *Queries) UltimaDecisaoLanceRealAutomatico(ctx context.Context) (UltimaDecisaoLanceRealAutomaticoRow, error) {
+	row := q.db.QueryRow(ctx, ultimaDecisaoLanceRealAutomatico)
+	var i UltimaDecisaoLanceRealAutomaticoRow
+	err := row.Scan(&i.ID, &i.LanceRealAutoEm, &i.LanceRealAutoResultado)
 	return i, err
 }

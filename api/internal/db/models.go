@@ -166,6 +166,10 @@ type ConfiguracaoCanopus struct {
 	UltimoDisparoDia        *time.Time
 	UltimoDisparoEm         *time.Time
 	UltimoDisparoResultado  *string
+	LanceRealAutomatico     bool
+	LanceRealAutomaticoPor  *int64
+	LanceRealMaxCotas       int32
+	LanceRealEsperaMinutos  int32
 }
 
 type Cota struct {
@@ -249,6 +253,8 @@ type Execuco struct {
 	DryRunOrigemID         *int64
 	Origem                 string
 	AvisoEmailEm           *time.Time
+	LanceRealAutoEm        *time.Time
+	LanceRealAutoResultado *string
 }
 
 type Importacao struct {

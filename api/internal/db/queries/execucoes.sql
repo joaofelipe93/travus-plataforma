@@ -16,9 +16,10 @@ JOIN clientes c ON c.id = q.cliente_id
 WHERE q.id = ANY(@cota_ids::bigint[]) AND q.ativa;
 
 -- Execução real: sempre aprovada a partir de um dry-run.
+-- origem: 'manual' (admin aprovou na tela) ou 'agendada' (lance real automático).
 -- name: CriarExecucaoReal :one
-INSERT INTO execucoes (tipo, criada_por, aprovada_por, dry_run_origem_id)
-VALUES ('real', @usuario_id, @usuario_id, @dry_run_origem_id)
+INSERT INTO execucoes (tipo, criada_por, aprovada_por, dry_run_origem_id, origem)
+VALUES ('real', @usuario_id, @usuario_id, @dry_run_origem_id, @origem)
 RETURNING id, tipo, status, criada_em;
 
 -- name: CriarExecucaoReimpressao :one
@@ -263,12 +264,14 @@ JOIN clientes c ON c.id = q.cliente_id
 WHERE q.ativa
 ORDER BY c.nome, q.grupo, q.cota, q.versao;
 
--- Execuções agendadas que terminaram e ainda não foram avisadas por e-mail.
+-- Execuções agendadas que terminaram e ainda não foram avisadas por e-mail. Vale para o
+-- dry-run automático e para a execução real que ele originou (tipo diz qual).
 -- name: ExecucoesAgendadasSemAviso :many
-SELECT e.id, e.status, e.finalizada_em, e.erro,
+SELECT e.id, e.tipo, e.status, e.finalizada_em, e.erro,
        count(ec.id)::int                                                                              AS total,
-       (count(ec.id) FILTER (WHERE ec.status = 'verificada'))::int                                    AS sucesso,
-       (count(ec.id) FILTER (WHERE ec.status IN ('erro_antes_confirmar', 'erro_apos_confirmar')))::int AS com_erro
+       (count(ec.id) FILTER (WHERE ec.status IN ('verificada', 'confirmada', 'reimpressa')))::int      AS sucesso,
+       (count(ec.id) FILTER (WHERE ec.status IN ('erro_antes_confirmar', 'erro_apos_confirmar')))::int AS com_erro,
+       (count(ec.id) FILTER (WHERE ec.status = 'erro_apos_confirmar'))::int                            AS apos_confirmar
 FROM execucoes e
 LEFT JOIN execucao_cotas ec ON ec.execucao_id = e.id
 WHERE e.origem = 'agendada' AND e.aviso_email_em IS NULL AND e.finalizada_em IS NOT NULL
@@ -278,3 +281,40 @@ LIMIT 10;
 
 -- name: MarcarAvisoEnviado :exec
 UPDATE execucoes SET aviso_email_em = now() WHERE id = @id;
+
+-- ===== Lance real automático (agendamento.go, migração 00014) =====
+
+-- Dry-run automático que terminou, cuja espera venceu e sobre o qual o automático ainda não
+-- decidiu. Status que não dá lance (cancelada, falhou) entra aqui também: a revisão recusa e a
+-- decisão fica gravada. A espera é contada com o relógio do banco, o mesmo que gravou
+-- finalizada_em: nada depende do relógio da API nem do desvio entre os dois.
+-- name: DryRunsAgendadosSemDecisao :many
+SELECT id, status, finalizada_em
+FROM execucoes
+WHERE tipo = 'dry_run' AND origem = 'agendada'
+  AND lance_real_auto_em IS NULL AND finalizada_em IS NOT NULL
+  AND finalizada_em <= now() - make_interval(mins => @espera_minutos::int)
+ORDER BY id
+LIMIT 5;
+
+-- A decisão se grava uma vez: duas instâncias da API decidindo ao mesmo tempo (a segunda fica
+-- esperando a trava do dry-run) não trocam o resultado da primeira.
+-- name: MarcarDecisaoLanceRealAutomatico :execrows
+UPDATE execucoes
+SET lance_real_auto_em = now(), lance_real_auto_resultado = @resultado
+WHERE id = @id AND lance_real_auto_em IS NULL;
+
+-- Ligar o automático não faz a plataforma correr atrás de dry-run que já terminou: o que estava
+-- sem decisão fica fechado como 'antes_de_ligar'.
+-- name: FecharDryRunsAgendadosAntesDeLigar :execrows
+UPDATE execucoes
+SET lance_real_auto_em = now(), lance_real_auto_resultado = 'antes_de_ligar'
+WHERE tipo = 'dry_run' AND origem = 'agendada' AND lance_real_auto_em IS NULL;
+
+-- Última decisão do automático, para o vigia avisar quando o lance real não saiu.
+-- name: UltimaDecisaoLanceRealAutomatico :one
+SELECT id, lance_real_auto_em, lance_real_auto_resultado
+FROM execucoes
+WHERE tipo = 'dry_run' AND origem = 'agendada' AND lance_real_auto_em IS NOT NULL
+ORDER BY id DESC
+LIMIT 1;

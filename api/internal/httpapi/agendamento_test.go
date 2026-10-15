@@ -46,6 +46,7 @@ func ligarAgendamento(t *testing.T, s *Servidor, n *navegador, dia, hora, minuto
 	rec := n.enviarJSON(http.MethodPut, "/configuracao/canopus", map[string]any{
 		"dry_run_automatico": true, "dry_run_dia": dia, "dry_run_hora": hora, "dry_run_minuto": minuto,
 		"aviso_email": true, "validade_dry_run_minutos": 120, "retencao_screenshots_dias": 30,
+		"lance_real_automatico": false, "lance_real_max_cotas": 50, "lance_real_espera_minutos": 30,
 	})
 	esperarStatus(t, rec, http.StatusOK, "ligar o agendamento")
 }
@@ -197,6 +198,7 @@ func TestLigarAgendamentoDepoisDaHoraNaoRodaRetroativo(t *testing.T) {
 	rec := n.enviarJSON(http.MethodPut, "/configuracao/canopus", map[string]any{
 		"dry_run_automatico": true, "dry_run_dia": 10, "dry_run_hora": 8, "dry_run_minuto": 0,
 		"aviso_email": true, "validade_dry_run_minutos": 120, "retencao_screenshots_dias": 30,
+		"lance_real_automatico": false, "lance_real_max_cotas": 50, "lance_real_espera_minutos": 30,
 	})
 	esperarStatus(t, rec, http.StatusOK, "ligar o agendamento depois da hora")
 

@@ -4,9 +4,10 @@
 INSERT INTO configuracao_canopus (id) VALUES (true) ON CONFLICT (id) DO NOTHING;
 
 -- name: BuscarConfiguracaoCanopus :one
-SELECT c.*, u.nome AS atualizado_por_nome
+SELECT c.*, u.nome AS atualizado_por_nome, a.nome AS lance_real_automatico_por_nome
 FROM configuracao_canopus c
 LEFT JOIN usuarios u ON u.id = c.atualizado_por
+LEFT JOIN usuarios a ON a.id = c.lance_real_automatico_por
 WHERE c.id;
 
 -- name: AtualizarConfiguracaoCanopus :exec
@@ -19,6 +20,10 @@ UPDATE configuracao_canopus SET
     drive_pasta_id            = sqlc.narg(drive_pasta_id),
     validade_dry_run_minutos  = sqlc.arg(validade_dry_run_minutos),
     retencao_screenshots_dias = sqlc.arg(retencao_screenshots_dias),
+    lance_real_automatico     = sqlc.arg(lance_real_automatico),
+    lance_real_automatico_por = sqlc.narg(lance_real_automatico_por),
+    lance_real_max_cotas      = sqlc.arg(lance_real_max_cotas),
+    lance_real_espera_minutos = sqlc.arg(lance_real_espera_minutos),
     atualizado_por            = sqlc.narg(atualizado_por),
     atualizado_em             = now()
 WHERE id;

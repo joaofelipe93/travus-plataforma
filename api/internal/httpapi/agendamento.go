@@ -1,9 +1,21 @@
 package httpapi
 
-// Dry-run automático do Canopus: a cada minuto a API confere se chegou a ocorrência marcada na
+// Rotina automática do Canopus. A cada minuto a API confere se chegou a ocorrência marcada na
 // configuração (dia, hora e minuto, fuso de Brasília) e, se chegou, põe na fila um **dry-run**
-// com todas as cotas ativas. Só dry-run: nada aqui cria execução real nem aprova lance — isso
-// continua passando pela revisão e por um admin.
+// com todas as cotas ativas.
+//
+// Com o **lance real automático** ligado (decisão do usuário em 15/10/2026), quando esse dry-run
+// termina a API também aprova o lance real sozinha, sem ninguém na tela — e aí os comprovantes
+// vão para o Drive pela fila de sempre. Isso só acontece com as quatro travas de pé:
+//   1. a chave LANCE_REAL_HABILITADO do servidor (API e worker);
+//   2. o teto lance_real_max_cotas (cadastro errado não vira lance em massa);
+//   3. a espera lance_real_espera_minutos entre o fim do dry-run e o lance, com aviso por
+//      e-mail, para dar tempo de desligar ou cancelar;
+//   4. cota que já tem lance na assembleia é pulada (o "registrar mesmo assim" exige gente).
+//
+// O que o automático NÃO muda: o worker continua gravando confirmacao_iniciada antes de clicar
+// em Confirmar, o trigger do banco continua impedindo reprocessar cota confirmada e nada aqui
+// repete o clique. Um dry-run origina no máximo uma execução real.
 //
 // A decisão é tomada com a linha da configuração travada (FOR UPDATE) e a ocorrência atendida
 // fica gravada (ultimo_disparo_dia): o laço roda a cada minuto, mas o mês dispara uma vez só,
@@ -15,6 +27,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -35,6 +48,18 @@ const (
 	disparoSemResponsavel = "sem_responsavel"
 	disparoAtrasada       = "atrasada"
 	disparoAntesDeLigar   = "antes_de_ligar"
+
+	// Origem da execução (coluna execucoes.origem, migração 00013).
+	origemManual   = "manual"
+	origemAgendada = "agendada"
+
+	// Decisão do lance real automático sobre um dry-run agendado (migração 00014).
+	autoCriada          = "criada"
+	autoChaveDesligada  = "chave_desligada"
+	autoAcimaDoLimite   = "acima_do_limite"
+	autoSemCotaLiberada = "sem_cota_liberada"
+	autoBloqueado       = "bloqueado"
+	autoAntesDeLigar    = "antes_de_ligar"
 )
 
 func (s *Servidor) rodarAgendador(ctx context.Context) {
@@ -54,7 +79,10 @@ func (s *Servidor) cicloAgendador(ctx context.Context) {
 	if err := s.dispararDryRunAgendado(ctx); err != nil && ctx.Err() == nil {
 		slog.Error("agendador: falha ao criar o dry-run automático", "erro", err)
 	}
+	// O aviso vai antes: quem recebe o resumo do dry-run tem a espera inteira para desligar o
+	// automático ou cancelar a execução.
 	s.avisarExecucoesAgendadas(ctx)
+	s.dispararLanceRealAgendado(ctx)
 }
 
 // ultimaOcorrencia é a ocorrência mais recente do dia/hora escolhidos que já passou (a deste
@@ -139,7 +167,7 @@ func (s *Servidor) dispararDryRunAgendado(ctx context.Context) error {
 	}
 
 	exec, err := qtx.CriarExecucao(ctx, db.CriarExecucaoParams{
-		Tipo: "dry_run", CriadaPor: *cfg.AtualizadoPor, Origem: "agendada",
+		Tipo: "dry_run", CriadaPor: *cfg.AtualizadoPor, Origem: origemAgendada,
 	})
 	if err != nil {
 		return err
@@ -185,7 +213,7 @@ func (s *Servidor) avisarExecucoesAgendadas(ctx context.Context) {
 	for _, e := range pendentes {
 		if enviar {
 			ctxEnvio, cancel := context.WithTimeout(ctx, 45*time.Second)
-			err := s.cfg.Vigia.Email.Enviar(ctxEnvio, s.resumoExecucaoAgendada(e))
+			err := s.cfg.Vigia.Email.Enviar(ctxEnvio, s.resumoExecucaoAgendada(ctx, e))
 			cancel()
 			if err != nil {
 				// Tenta de novo no próximo ciclo: a execução fica sem a marca.
@@ -200,8 +228,210 @@ func (s *Servidor) avisarExecucoesAgendadas(ctx context.Context) {
 	}
 }
 
-// resumoExecucaoAgendada: só números e o link da execução, nunca nome de cliente.
-func (s *Servidor) resumoExecucaoAgendada(e db.ExecucoesAgendadasSemAvisoRow) alerta.Mensagem {
+// dispararLanceRealAgendado: dry-run automático que terminou e cuja espera já venceu. A decisão
+// sobre cada dry-run fica gravada (execucoes.lance_real_auto_resultado): o laço roda a cada
+// minuto e decide uma vez só, mesmo que a API reinicie.
+func (s *Servidor) dispararLanceRealAgendado(ctx context.Context) {
+	cfg := s.configCanopus(ctx)
+	if !cfg.LanceRealAutomatico {
+		return
+	}
+	// A espera (janela para ler o aviso e impedir o lance) é filtrada na consulta, com o
+	// relógio do banco.
+	candidatos, err := s.q.DryRunsAgendadosSemDecisao(ctx, int32(cfg.LanceRealEspera.Minutes()))
+	if err != nil {
+		if ctx.Err() == nil {
+			slog.Error("agendador: falha ao listar dry-runs automáticos sem decisão", "erro", err)
+		}
+		return
+	}
+	for _, c := range candidatos {
+		if err := s.decidirLanceRealAgendado(ctx, c.ID, cfg); err != nil && ctx.Err() == nil {
+			// Erro de banco: a decisão não foi gravada e o próximo ciclo tenta de novo.
+			slog.Error("agendador: falha ao decidir o lance real automático", "execucao", c.ID, "erro", err)
+		}
+	}
+}
+
+// decidirLanceRealAgendado decide um dry-run: ou cria a execução real, ou fecha com o motivo.
+// Decisão e execução vão na mesma transação — ou as duas, ou nenhuma.
+func (s *Servidor) decidirLanceRealAgendado(ctx context.Context, dryRunID int64, cfg ConfigCanopus) error {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+	qtx := s.q.WithTx(tx)
+
+	// A decisão é gravada uma vez só (a consulta tem AND lance_real_auto_em IS NULL): se outra
+	// instância da API decidiu antes, este ciclo não sobrescreve nada.
+	marcar := func(resultado string) error {
+		_, err := qtx.MarcarDecisaoLanceRealAutomatico(ctx, db.MarcarDecisaoLanceRealAutomaticoParams{
+			ID: dryRunID, Resultado: &resultado,
+		})
+		return err
+	}
+	// fechar grava a decisão e o motivo no log da execução: o vigia avisa, e quem abrir a tela
+	// do dry-run entende por que não saiu lance.
+	fechar := func(resultado, motivo string) error {
+		if err := marcar(resultado); err != nil {
+			return err
+		}
+		if err := s.evento(ctx, qtx, dryRunID, nil, "aviso", motivo); err != nil {
+			return err
+		}
+		if err := tx.Commit(ctx); err != nil {
+			return err
+		}
+		slog.Warn("agendador: lance real automático não registrou lance",
+			"execucao", dryRunID, "resultado", resultado, "motivo", motivo)
+		return nil
+	}
+
+	// A chave do servidor é a última palavra.
+	if !s.cfg.LanceRealHabilitado {
+		return fechar(autoChaveDesligada, "Lance real automático ligado na configuração, mas a chave LANCE_REAL_HABILITADO do servidor está desligada: nenhum lance foi registrado.")
+	}
+	// Só por escrita direta no banco: o automático ligado sempre tem o admin que o ligou.
+	if cfg.LanceRealAutomaticoPor == nil {
+		return fechar(autoBloqueado, "Lance real automático sem o admin que o ligou (escrita direta no banco?): nenhum lance foi registrado.")
+	}
+
+	rv, err := s.montarRevisao(ctx, qtx, dryRunID)
+	if err != nil {
+		return err
+	}
+	if rv.Bloqueio != "" {
+		return fechar(autoBloqueado, "Lance real automático não registrado: "+rv.Bloqueio+".")
+	}
+
+	// Cota com lance na assembleia é pulada: "registrar mesmo assim" exige gente na revisão.
+	var escolhas []escolhaCotaReal
+	var puladas []string
+	for _, c := range rv.Cotas {
+		if c.Bloqueio != "" || c.ExigeAutorizacao {
+			puladas = append(puladas, c.Grupo+"-"+c.Cota+"-"+c.Versao)
+			continue
+		}
+		escolhas = append(escolhas, escolhaCotaReal{ExecucaoCotaID: c.ExecucaoCotaID})
+	}
+	switch {
+	case len(escolhas) == 0:
+		return fechar(autoSemCotaLiberada, "Lance real automático: nenhuma cota ficou liberada neste dry-run (todas com erro ou já com lance na assembleia).")
+	case len(escolhas) > cfg.LanceRealMaxCotas:
+		return fechar(autoAcimaDoLimite, fmt.Sprintf(
+			"Lance real automático não registrado: %d cota(s) liberadas passam do teto de %d. Confira o cadastro e aprove à mão se for o caso.",
+			len(escolhas), cfg.LanceRealMaxCotas))
+	}
+
+	real, err := s.criarExecucaoRealDoDryRun(ctx, qtx, nil, dryRunID, escolhas, quemAprova{
+		UsuarioID: *cfg.LanceRealAutomaticoPor, Nome: cfg.LanceRealAutomaticoPorNome, Origem: origemAgendada,
+	})
+	var conflito erroConflito
+	var invalido erroValidacao
+	switch {
+	case errors.As(err, &conflito):
+		return fechar(autoBloqueado, "Lance real automático não registrado: "+conflito.Error()+".")
+	case errors.As(err, &invalido):
+		return fechar(autoBloqueado, "Lance real automático não registrado: "+invalido.Error()+".")
+	case errors.Is(err, errNaoEncontrado):
+		return fechar(autoBloqueado, "Lance real automático não registrado: o dry-run não foi encontrado.")
+	case err != nil:
+		return err
+	}
+	if len(puladas) > 0 {
+		if err := s.evento(ctx, qtx, real.ID, nil, "info", fmt.Sprintf(
+			"Cotas puladas pelo automático (erro no dry-run ou lance já registrado nesta assembleia): %s.",
+			strings.Join(puladas, ", "))); err != nil {
+			return err
+		}
+	}
+	if err := marcar(autoCriada); err != nil {
+		return err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return err
+	}
+	slog.Warn("agendador: LANCE REAL automático na fila", "execucao", real.ID, "dry_run", dryRunID,
+		"cotas", len(escolhas), "puladas", len(puladas))
+	return nil
+}
+
+// avisoLanceRealAutomatico: o parágrafo que entra no e-mail do dry-run automático quando o
+// automático está ligado. É o aviso que a pessoa tem antes de o lance sair.
+func (s *Servidor) avisoLanceRealAutomatico(ctx context.Context, dryRunID int64, finalizadaEm *time.Time) string {
+	cfg := s.configCanopus(ctx)
+	if !cfg.LanceRealAutomatico || finalizadaEm == nil {
+		return ""
+	}
+	if !s.cfg.LanceRealHabilitado {
+		return "\nO lance real automático está ligado na configuração, mas a chave LANCE_REAL_HABILITADO do servidor está desligada: nenhum lance será registrado.\n"
+	}
+	rv, err := s.montarRevisao(ctx, s.q, dryRunID)
+	if err != nil {
+		return ""
+	}
+	if rv.Bloqueio != "" {
+		return "\nO lance real automático está ligado, mas a revisão deste dry-run não permite aprovar: " + rv.Bloqueio + ". Nenhum lance será registrado.\n"
+	}
+	liberadas := 0
+	for _, c := range rv.Cotas {
+		if c.Bloqueio == "" && !c.ExigeAutorizacao {
+			liberadas++
+		}
+	}
+	switch {
+	case liberadas == 0:
+		return "\nO lance real automático está ligado, mas nenhuma cota ficou liberada neste dry-run: nenhum lance será registrado.\n"
+	case liberadas > cfg.LanceRealMaxCotas:
+		return fmt.Sprintf("\nATENÇÃO: o lance real automático está ligado e %d cota(s) ficaram liberadas, acima do teto de %d: nenhum lance será registrado. Confira o cadastro e aprove à mão se for o caso.\n",
+			liberadas, cfg.LanceRealMaxCotas)
+	}
+	return fmt.Sprintf("\nATENÇÃO: o lance real automático está ligado. A partir de %s a plataforma vai registrar LANCE DE VERDADE em %d cota(s), sem ninguém aprovar.\nPara impedir: desligue em %s/canopus/configuracao, ou cancele a execução real quando ela aparecer em %s/canopus/execucoes\n",
+		finalizadaEm.Add(cfg.LanceRealEspera).In(fusoCanopus).Format("02/01/2006 15:04"), liberadas,
+		s.cfg.AppOrigin, s.cfg.AppOrigin)
+}
+
+// verificarLanceRealAutomatico: o automático está ligado e a última decisão não foi registrar
+// lance. Vira alerta do vigia (e-mail só quando muda).
+func (s *Servidor) verificarLanceRealAutomatico(ctx context.Context) []achado {
+	cfg := s.configCanopus(ctx)
+	if !cfg.LanceRealAutomatico {
+		return nil
+	}
+	ultima, err := s.q.UltimaDecisaoLanceRealAutomatico(ctx)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		slog.Error("vigia: consulta da última decisão do lance real automático", "erro", err)
+		return nil
+	}
+	resultado := valorOuVazio(ultima.LanceRealAutoResultado)
+	if resultado == autoCriada || resultado == autoAntesDeLigar || resultado == "" {
+		return nil
+	}
+	// Depois de uma semana a ocorrência é história: o alerta (com lembrete a cada 12 h) pararia
+	// de ser notícia e só incomodaria até o dry-run do mês seguinte.
+	if ultima.LanceRealAutoEm != nil && s.agora().Sub(*ultima.LanceRealAutoEm) > 7*24*time.Hour {
+		return nil
+	}
+	detalhe := map[string]string{
+		autoChaveDesligada:  "A chave LANCE_REAL_HABILITADO do servidor está desligada: o automático não registra lance nenhum.",
+		autoAcimaDoLimite:   "Mais cotas liberadas que o teto configurado: confira o cadastro e aprove à mão se ainda dá tempo da assembleia.",
+		autoSemCotaLiberada: "Nenhuma cota ficou liberada no dry-run (todas com erro ou já com lance na assembleia).",
+		autoBloqueado:       "A revisão não permitiu aprovar: o dry-run foi cancelado ou falhou, passou do prazo, já tinha sido aprovado, ou o automático está sem o admin que o ligou.",
+	}[resultado]
+	return []achado{{
+		Chave:   fmt.Sprintf("lance-real-automatico:%d", ultima.ID),
+		Titulo:  fmt.Sprintf("O lance real automático do dry-run nº %d não registrou lance", ultima.ID),
+		Detalhe: detalhe + " Log da execução: " + s.cfg.AppOrigin + "/canopus/execucoes/" + idTexto(ultima.ID),
+	}}
+}
+
+// resumoExecucaoAgendada: só números e o link da execução, nunca nome de cliente. Serve o
+// dry-run automático e a execução real que ele originou (e.Tipo diz qual).
+func (s *Servidor) resumoExecucaoAgendada(ctx context.Context, e db.ExecucoesAgendadasSemAvisoRow) alerta.Mensagem {
 	situacao := map[string]string{
 		"concluida":           "terminou sem erros",
 		"concluida_com_erros": "terminou com erros",
@@ -215,6 +445,27 @@ func (s *Servidor) resumoExecucaoAgendada(e db.ExecucoesAgendadasSemAvisoRow) al
 	if e.FinalizadaEm != nil {
 		quando = e.FinalizadaEm.In(fusoCanopus).Format("02/01/2006 15:04")
 	}
+
+	if e.Tipo == "real" {
+		corpo := fmt.Sprintf("O lance real automático nº %d %s em %s.\n\n", e.ID, situacao, quando)
+		corpo += fmt.Sprintf("Cotas: %d no total, %d com lance registrado, %d com erro.\n", e.Total, e.Sucesso, e.ComErro)
+		if e.Erro != nil && *e.Erro != "" {
+			corpo += "Erro da execução: " + *e.Erro + "\n"
+		}
+		if e.AposConfirmar > 0 {
+			corpo += fmt.Sprintf("\nATENÇÃO: %d cota(s) pararam depois do clique em Confirmar: o lance pode ter sido registrado no Newcon. Confira no Histórico da cota antes de tentar de novo — a plataforma não repete esse passo.\n", e.AposConfirmar)
+		}
+		corpo += fmt.Sprintf("\nProtocolos, comprovantes e situação no Google Drive: %s/canopus/execucoes/%d\n", s.cfg.AppOrigin, e.ID)
+		resumo := fmt.Sprintf("%d lance(s)", e.Sucesso)
+		if e.ComErro > 0 {
+			resumo += fmt.Sprintf(", %d com erro", e.ComErro)
+		}
+		return alerta.Mensagem{
+			Assunto: fmt.Sprintf("[Travus %s] Lance real automático nº %d: %s", s.ambienteAlerta(), e.ID, resumo),
+			Corpo:   corpo,
+		}
+	}
+
 	corpo := fmt.Sprintf("O dry-run automático nº %d %s em %s.\n\n", e.ID, situacao, quando)
 	corpo += fmt.Sprintf("Cotas: %d no total, %d verificadas, %d com erro.\n", e.Total, e.Sucesso, e.ComErro)
 	if e.Erro != nil && *e.Erro != "" {
@@ -222,6 +473,7 @@ func (s *Servidor) resumoExecucaoAgendada(e db.ExecucoesAgendadasSemAvisoRow) al
 	}
 	corpo += fmt.Sprintf("\nDetalhes, screenshots e log: %s/canopus/execucoes/%d\n", s.cfg.AppOrigin, e.ID)
 	corpo += "Nenhum lance foi confirmado: um dry-run só confere as telas do Newcon.\n"
+	corpo += s.avisoLanceRealAutomatico(ctx, e.ID, e.FinalizadaEm)
 
 	resumo := fmt.Sprintf("%d ok", e.Sucesso)
 	if e.ComErro > 0 {

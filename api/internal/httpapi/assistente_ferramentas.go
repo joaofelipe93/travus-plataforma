@@ -116,6 +116,12 @@ func (s *Servidor) ferramentaEstado() assistente.Ferramenta {
 				"validade_dry_run_minutos":  int(cfgCanopus.ValidadeDryRun.Minutes()),
 				"retencao_screenshots_dias": int(cfgCanopus.RetencaoScreenshots.Hours() / 24),
 				"ultimo_disparo":            cfgCanopus.UltimoDisparoResultado,
+				// Lance real automático: ligado, o dry-run do mês vira lance de verdade.
+				"lance_real_automatico":     cfgCanopus.LanceRealAutomatico,
+				"lance_real_automatico_por": cfgCanopus.LanceRealAutomaticoPorNome,
+				"lance_real_max_cotas":      cfgCanopus.LanceRealMaxCotas,
+				"lance_real_espera_minutos": int(cfgCanopus.LanceRealEspera.Minutes()),
+				"lance_real_habilitado":     s.cfg.LanceRealHabilitado,
 			}
 
 			alertas := []map[string]any{}

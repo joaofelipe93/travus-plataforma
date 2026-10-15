@@ -371,6 +371,11 @@ export type ConfiguracaoCanopus = {
   drive_pasta_origem: "configuracao" | "ambiente" | "nenhuma";
   validade_dry_run_minutos: number;
   retencao_screenshots_dias: number;
+  // Lance real automático: ligado, o dry-run automático vira lance de verdade sem aprovação.
+  lance_real_automatico: boolean;
+  lance_real_max_cotas: number;
+  lance_real_espera_minutos: number;
+  lance_real_automatico_por_nome: string | null;
   atualizado_por_nome: string | null;
   atualizado_em: string;
   proximo_dry_run: string;
@@ -383,5 +388,9 @@ export type ResultadoDisparo = "criada" | "sem_cotas" | "sem_responsavel" | "atr
 export type RespostaConfiguracaoCanopus = {
   configuracao: ConfiguracaoCanopus;
   pode_editar: boolean;
+  // Só admin liga o lance real automático (e muda o teto e a espera).
+  pode_editar_lance_real: boolean;
   email_configurado: boolean;
+  // Chave LANCE_REAL_HABILITADO do servidor: desligada, nenhum lance real acontece.
+  lance_real_habilitado: boolean;
 };
