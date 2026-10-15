@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.12.1](https://github.com/joaofelipe93/travus-plataforma/compare/v0.12.0...v0.12.1) (2026-10-15)
+
+
+### Correções
+
+* **canopus:** dar o lance na modalidade cadastrada na cota ([#65](https://github.com/joaofelipe93/travus-plataforma/issues/65)) ([7de2bf6](https://github.com/joaofelipe93/travus-plataforma/commit/7de2bf611dadf52e86e2711880ff9fef3efd7aac))
+
 ## [0.12.0](https://github.com/joaofelipe93/travus-plataforma/compare/v0.11.1...v0.12.0) (2026-10-15)
 
 
