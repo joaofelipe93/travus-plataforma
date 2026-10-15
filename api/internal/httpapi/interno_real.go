@@ -240,7 +240,8 @@ func (s *Servidor) concluirConfirmacao(w http.ResponseWriter, r *http.Request) {
 		agora := s.agora()
 		_, err := qtx.InserirLancePlataforma(ctx, db.InserirLancePlataformaParams{
 			CotaID: c.CotaID, ExecucaoCotaID: &c.ID, Administradora: c.Administradora, Protocolo: *p.Protocolo,
-			AssembleiaData: dataNewcon(c.AssembleiaAprovada), AssembleiaNumero: p.AssembleiaNumero, Modalidade: "2º Lance Fixo",
+			AssembleiaData: dataNewcon(c.AssembleiaAprovada), AssembleiaNumero: p.AssembleiaNumero,
+			Modalidade: modalidadeDoLance(c.Modalidade),
 			Percentual: p.Percentual, TextoProtocolo: p.TextoProtocolo, ParcelasEmAtraso: p.ParcelasEmAtraso,
 			LanceExistenteAutorizado: c.PermitirLanceExistente, PdfID: p.PdfID, DriveStatus: driveStatus, RegistradoEm: &agora,
 		})
@@ -401,4 +402,24 @@ func (s *Servidor) concluirReimpressao(w http.ResponseWriter, r *http.Request) {
 		s.avisarDrive()
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// modalidadeDoLance traduz a modalidade do cadastro no rótulo com que o Newcon nomeia o lance.
+// A coluna lances.modalidade guarda esse rótulo: a reimpressão grava o texto que vem da grade do
+// Histórico, e é com ele que a tela mostra o lance. O rótulo do Fixo é o nosso; se a reimpressão
+// do mesmo protocolo rodar depois, ela sobrescreve com o texto exato do Newcon.
+//
+// O worker só registra lance na modalidade cadastrada na cota (workers/canopus/src/modalidade.js),
+// e só Fixo e 2º Fixo são suportados: por isso o mapa tem dois rótulos. Modalidade fora dele não
+// chega aqui — vira erro conhecido antes de qualquer clique —, mas, se chegasse, o valor cru é
+// melhor que um rótulo errado.
+func modalidadeDoLance(cadastrada string) string {
+	switch cadastrada {
+	case "segundo_fixo":
+		return "2º Lance Fixo"
+	case "fixo":
+		return "Lance Fixo"
+	default:
+		return cadastrada
+	}
 }

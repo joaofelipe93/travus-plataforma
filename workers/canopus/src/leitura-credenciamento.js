@@ -14,15 +14,24 @@ async function texto(page, seletor) {
 /**
  * Dados da assembleia na tela de credenciamento (antes de marcar a modalidade).
  * edtDT_Assembleia é um campo editável: só lemos o valor, nunca preenchemos.
+ *
+ * Com a modalidade da cota (src/modalidade.js), lê também o percentual DELA: para uma cota de
+ * lance Fixo, o percentual do 2º Fixo não é o que vale. percentual_segundo_fixo continua sendo
+ * lido sempre, porque a tela de revisão o mostra desde a Etapa 3.
  */
-async function lerDadosCredenciamento(page) {
+async function lerDadosCredenciamento(page, modalidade) {
   const data = await page.locator('#ctl00_Conteudo_edtDT_Assembleia').first().inputValue({ timeout: 2000 }).catch(() => null);
-  return {
+  const dados = {
     assembleia_data: data && data.trim() ? data.trim() : null,
     assembleia_numero: await texto(page, '#ctl00_Conteudo_lblNO_Assembleia'),
     percentual_segundo_fixo: await texto(page, '#ctl00_Conteudo_lblVA_Lance_Fixo_2'),
     ultimo_lance: await texto(page, '#ctl00_Conteudo_lblNM_Ocorrencia'),
   };
+  if (modalidade) {
+    dados.modalidade_lance = modalidade.codigo;
+    dados.percentual_lance = await texto(page, modalidade.percentual);
+  }
+  return dados;
 }
 
 /** Abre o painel do Histórico na tela de credenciamento (#ctl00_Conteudo_btnHistorico). */

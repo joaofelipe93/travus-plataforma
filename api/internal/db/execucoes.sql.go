@@ -102,7 +102,7 @@ func (q *Queries) BuscarExecucao(ctx context.Context, id int64) (BuscarExecucaoR
 
 const buscarExecucaoCotaParaWorker = `-- name: BuscarExecucaoCotaParaWorker :one
 SELECT ec.id, ec.execucao_id, ec.cota_id, ec.status, ec.grupo, ec.cota, ec.versao, ec.cliente_nome,
-       ec.assembleia_aprovada, ec.permitir_lance_existente, ec.protocolo, ec.detalhes, q.administradora,
+       ec.modalidade, ec.assembleia_aprovada, ec.permitir_lance_existente, ec.protocolo, ec.detalhes, q.administradora,
        e.tipo, e.status AS execucao_status, e.worker, e.cancelamento_solicitado
 FROM execucao_cotas ec
 JOIN execucoes e ON e.id = ec.execucao_id
@@ -120,6 +120,7 @@ type BuscarExecucaoCotaParaWorkerRow struct {
 	Cota                   string
 	Versao                 string
 	ClienteNome            string
+	Modalidade             string
 	AssembleiaAprovada     *string
 	PermitirLanceExistente bool
 	Protocolo              *string
@@ -143,6 +144,7 @@ func (q *Queries) BuscarExecucaoCotaParaWorker(ctx context.Context, id int64) (B
 		&i.Cota,
 		&i.Versao,
 		&i.ClienteNome,
+		&i.Modalidade,
 		&i.AssembleiaAprovada,
 		&i.PermitirLanceExistente,
 		&i.Protocolo,

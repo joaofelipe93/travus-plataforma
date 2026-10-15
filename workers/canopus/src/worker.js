@@ -6,7 +6,8 @@
  * informa o andamento de cada cota.
  *
  * Tipos:
- *   - dry_run: filtro → dados da assembleia → "2º Fixo" → screenshot → Histórico (só leitura).
+ *   - dry_run: filtro → dados da assembleia → modalidade da cota → screenshot → Histórico
+ *     (só leitura). A modalidade é a CADASTRADA na cota (src/modalidade.js): Fixo dá Fixo.
  *     Este arquivo não tem nenhum caminho que clique em Confirmar (um teste garante isso).
  *   - reimpressao: comprovante de um protocolo pelo Histórico (src/reimpressao.js).
  *   - real: só com LANCE_REAL_HABILITADO=true; o fluxo fica em src/lance-real.js, que nem é
@@ -16,6 +17,7 @@
 const fs = require('fs');
 const { NewconClient } = require('./newcon');
 const leituraPadrao = require('./leitura-credenciamento');
+const modalidadePadrao = require('./modalidade');
 const { prazoEncerrado } = require('./avisos-newcon');
 const { Plataforma } = require('./plataforma');
 const { Registro } = require('./registro');
@@ -35,6 +37,7 @@ class Worker {
     plataforma,
     criarNewcon,
     leitura = leituraPadrao,
+    modalidade = modalidadePadrao,
     modulos = { lanceReal: () => require('./lance-real'), reimpressao: () => require('./reimpressao') },
     saida = console,
   }) {
@@ -42,6 +45,7 @@ class Worker {
     this.plataforma = plataforma;
     this.criarNewcon = criarNewcon;
     this.leitura = leitura;
+    this.modalidade = modalidade;
     this.modulos = modulos;
     this.saida = saida;
     this.parando = false;
@@ -192,6 +196,7 @@ class Worker {
       config: this.config,
       plataforma: this.plataforma,
       leitura: this.leitura,
+      modalidade: this.modalidade,
       enviarScreenshot: (c, arquivo) => this._enviarScreenshot(c, arquivo, registro),
       concluir: (c, conclusao) => this._concluir(c, conclusao, registro),
     };
@@ -205,9 +210,11 @@ class Worker {
     try {
       // Como o script legado: a partir da 2ª cota volta ao filtro, mesmo depois de erro.
       if (voltarAoFiltro) await newcon.backToFilter();
+      // A modalidade sai do cadastro da cota; não suportada falha antes de abrir a cota.
+      const m = this.modalidade.daCota(cota);
       await newcon.searchCota(cota);
-      Object.assign(detalhes, await this.leitura.lerDadosCredenciamento(newcon.page));
-      await newcon.selectSegundoFixo();
+      Object.assign(detalhes, await this.leitura.lerDadosCredenciamento(newcon.page, m));
+      await this.modalidade.marcar(newcon, m);
       const arquivo = await newcon.captureBeforeConfirm(cota);
       await this._enviarScreenshot(cota, arquivo, registro);
 

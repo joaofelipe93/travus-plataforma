@@ -125,6 +125,9 @@ export type DetalhesCota = {
   assembleia_data?: string | null;
   assembleia_numero?: string | null;
   percentual_segundo_fixo?: string | null;
+  // Modalidade marcada no Newcon e o percentual dela (cota de lance Fixo não usa o do 2º Fixo).
+  modalidade_lance?: string | null;
+  percentual_lance?: string | null;
   ultimo_lance?: string | null;
   historico_lido?: boolean;
   lances_no_historico?: number;
@@ -233,6 +236,9 @@ export type CotaRevisao = {
   assembleia_data: string | null;
   assembleia_numero: string | null;
   percentual_segundo_fixo: string | null;
+  percentual_lance: string | null;
+  // Modalidade cadastrada na cota: é a que o worker vai marcar.
+  modalidade: string;
   historico_lido: boolean;
   lances_nesta_assembleia: number;
   lances: LanceHistorico[];

@@ -8,6 +8,7 @@ const os = require('os');
 const path = require('path');
 
 const { Worker } = require('../src/worker');
+const modalidadeReal = require('../src/modalidade');
 const { Registro } = require('../src/registro');
 const { resumirHistorico } = require('../src/leitura-credenciamento');
 const { carregarConfig } = require('../src/config-worker');
@@ -48,10 +49,14 @@ function newconFalso(comportamento, chamadas, { falharLogin = false, aoBuscar } 
         throw new NewconCotaError('Newcon não abriu a cota após "Localizar" (ficou em frmConCpCadCredenciamentoLance_Filtro.aspx). Confira grupo, cota e versão.');
       }
     },
-    // Como no Newcon real (grupo 6620): a tela abre, mas o "2º Fixo" está desabilitado.
-    async selectSegundoFixo() {
-      chamadas.push('2º fixo');
-      if (comportamento[atual] === 'conhecido') throw new NewconCotaError('"2º Fixo" está desabilitado para esta cota no Newcon');
+    // A plataforma marca a modalidade CADASTRADA na cota (src/modalidade.js). Como no Newcon
+    // real (grupo 6620), o radio pode vir desabilitado.
+    async marcarModalidade(m) {
+      chamadas.push(`modalidade ${m.codigo}`);
+      if (comportamento[atual] === 'conhecido') {
+        throw new NewconCotaError(`"${m.rotulo}" está desabilitado para esta cota no Newcon`);
+      }
+      return m;
     },
     async captureBeforeConfirm(c) {
       const arquivo = path.join(tmp, `${c.grupo}-${c.cota}.png`);
@@ -70,9 +75,20 @@ function newconFalso(comportamento, chamadas, { falharLogin = false, aoBuscar } 
   });
 }
 
+// Dublê do src/modalidade.js: a tabela que traduz o cadastro é a de verdade (é ela que decide
+// Fixo x 2º Fixo); só a marcação na página é simulada, pelo Newcon falso.
+const modalidadeFalsa = {
+  daCota: modalidadeReal.daCota,
+  async marcar(newcon, m) { return newcon.marcarModalidade(m); },
+};
+
 const leituraFalsa = {
-  async lerDadosCredenciamento() {
-    return { assembleia_data: '15/09/2026', assembleia_numero: '027', percentual_segundo_fixo: '30.0000', ultimo_lance: 'Último lance ofertado em: 13/09/2026' };
+  async lerDadosCredenciamento(_page, m) {
+    return {
+      assembleia_data: '15/09/2026', assembleia_numero: '027', percentual_segundo_fixo: '30.0000',
+      ultimo_lance: 'Último lance ofertado em: 13/09/2026',
+      ...(m ? { modalidade_lance: m.codigo, percentual_lance: m.codigo === 'fixo' ? '20.0000' : '30.0000' } : {}),
+    };
   },
   async lerHistorico() {
     return [
@@ -103,14 +119,16 @@ function plataformaFalsa({ iniciar } = {}) {
   return p;
 }
 
-const cota = (id, grupo, numero) => ({ id, grupo, cota: numero, versao: '00', status: 'pendente' });
+const cota = (id, grupo, numero, modalidade = 'segundo_fixo') => ({
+  id, grupo, cota: numero, versao: '00', status: 'pendente', modalidade,
+});
 const tarefa = (cotas, tipo = 'dry_run') => ({ execucao: { id: 7, tipo }, cotas });
 
 test('processa as cotas: verificada, erro conhecido e erro inesperado', async () => {
   const chamadas = [];
   const plataforma = plataformaFalsa();
   const comportamento = { '006650-0236-00': 'ok', '006620-1372-00': 'conhecido', '006650-2068-00': 'inesperado' };
-  const worker = new Worker({ config, plataforma, criarNewcon: newconFalso(comportamento, chamadas), leitura: leituraFalsa, saida: silencio });
+  const worker = new Worker({ config, plataforma, criarNewcon: newconFalso(comportamento, chamadas), leitura: leituraFalsa, modalidade: modalidadeFalsa, saida: silencio });
 
   await worker.processar(tarefa([cota(1, '006650', '0236'), cota(2, '006620', '1372'), cota(3, '006650', '2068')]));
 
@@ -119,7 +137,10 @@ test('processa as cotas: verificada, erro conhecido e erro inesperado', async ()
   assert.equal(plataforma.conclusoes[1].detalhes.lances_nesta_assembleia, 1);
   assert.deepEqual(plataforma.conclusoes[2], {
     status: 'erro_antes_confirmar', erro_tipo: 'conhecido', erro: '"2º Fixo" está desabilitado para esta cota no Newcon',
-    detalhes: { assembleia_data: '15/09/2026', assembleia_numero: '027', percentual_segundo_fixo: '30.0000', ultimo_lance: 'Último lance ofertado em: 13/09/2026' },
+    detalhes: {
+      assembleia_data: '15/09/2026', assembleia_numero: '027', percentual_segundo_fixo: '30.0000',
+      ultimo_lance: 'Último lance ofertado em: 13/09/2026', modalidade_lance: 'segundo_fixo', percentual_lance: '30.0000',
+    },
   });
   assert.equal(plataforma.conclusoes[3].erro_tipo, 'inesperado');
   assert.equal(plataforma.conclusoes[3].erro, 'Timeout 30000ms exceeded.');
@@ -133,7 +154,7 @@ test('processa as cotas: verificada, erro conhecido e erro inesperado', async ()
 
 test('nunca chama confirmar nem baixa PDF', async () => {
   const chamadas = [];
-  const worker = new Worker({ config, plataforma: plataformaFalsa(), criarNewcon: newconFalso({}, chamadas), leitura: leituraFalsa, saida: silencio });
+  const worker = new Worker({ config, plataforma: plataformaFalsa(), criarNewcon: newconFalso({}, chamadas), leitura: leituraFalsa, modalidade: modalidadeFalsa, saida: silencio });
   await worker.processar(tarefa([cota(1, '006650', '0236'), cota(2, '006650', '0924')]));
   assert.ok(!chamadas.includes('CONFIRMAR') && !chamadas.includes('PDF'), `chamadas: ${chamadas.join(', ')}`);
 
@@ -146,7 +167,7 @@ test('nunca chama confirmar nem baixa PDF', async () => {
 test('recusa execução real sem abrir o Newcon', async () => {
   const chamadas = [];
   const plataforma = plataformaFalsa();
-  const worker = new Worker({ config, plataforma, criarNewcon: newconFalso({}, chamadas), leitura: leituraFalsa, saida: silencio });
+  const worker = new Worker({ config, plataforma, criarNewcon: newconFalso({}, chamadas), leitura: leituraFalsa, modalidade: modalidadeFalsa, saida: silencio });
   await worker.processar(tarefa([cota(1, '006650', '0236')], 'real'));
   assert.deepEqual(chamadas, []);
   assert.match(plataforma.chamadas.join('|'), /finalizar 7: lance real desligado neste worker/);
@@ -154,14 +175,14 @@ test('recusa execução real sem abrir o Newcon', async () => {
 
 test('falha no login finaliza com erro e não inicia cotas', async () => {
   const plataforma = plataformaFalsa();
-  const worker = new Worker({ config, plataforma, criarNewcon: newconFalso({}, [], { falharLogin: true }), leitura: leituraFalsa, saida: silencio });
+  const worker = new Worker({ config, plataforma, criarNewcon: newconFalso({}, [], { falharLogin: true }), leitura: leituraFalsa, modalidade: modalidadeFalsa, saida: silencio });
   await worker.processar(tarefa([cota(1, '006650', '0236')]));
   assert.deepEqual(plataforma.chamadas, ['finalizar 7: não foi possível entrar no Newcon: usuário ou senha inválidos']);
 });
 
 test('cancelamento: para antes da próxima cota', async () => {
   const plataforma = plataformaFalsa({ iniciar: (id) => (id === 2 ? { ok: false, cancelada: true, erro: 'cancelada' } : { ok: true }) });
-  const worker = new Worker({ config, plataforma, criarNewcon: newconFalso({}, []), leitura: leituraFalsa, saida: silencio });
+  const worker = new Worker({ config, plataforma, criarNewcon: newconFalso({}, []), leitura: leituraFalsa, modalidade: modalidadeFalsa, saida: silencio });
   await worker.processar(tarefa([cota(1, '006650', '0236'), cota(2, '006650', '0924'), cota(3, '006660', '1488')]));
   assert.deepEqual(plataforma.chamadas, ['iniciar 1', 'iniciar 2', 'finalizar 7']);
 });
@@ -170,7 +191,7 @@ test('SIGTERM no meio da cota: termina a cota, não começa a próxima e devolve
   const plataforma = plataformaFalsa();
   let worker;
   const criarNewcon = newconFalso({}, [], { aoBuscar: (tag) => tag === '006650-0236-00' && worker.pedirParada('SIGTERM') });
-  worker = new Worker({ config, plataforma, criarNewcon, leitura: leituraFalsa, saida: silencio });
+  worker = new Worker({ config, plataforma, criarNewcon, leitura: leituraFalsa, modalidade: modalidadeFalsa, saida: silencio });
   await worker.processar(tarefa([cota(1, '006650', '0236'), cota(2, '006650', '0924')]));
   assert.equal(plataforma.conclusoes[1].status, 'verificada');
   assert.deepEqual(plataforma.chamadas, ['iniciar 1', 'liberar 7']);
@@ -178,14 +199,14 @@ test('SIGTERM no meio da cota: termina a cota, não começa a próxima e devolve
 
 test('trava perdida: abandona sem finalizar', async () => {
   const plataforma = plataformaFalsa({ iniciar: () => ({ ok: false, parar: true, erro: 'não é mais deste worker' }) });
-  const worker = new Worker({ config, plataforma, criarNewcon: newconFalso({}, []), leitura: leituraFalsa, saida: silencio });
+  const worker = new Worker({ config, plataforma, criarNewcon: newconFalso({}, []), leitura: leituraFalsa, modalidade: modalidadeFalsa, saida: silencio });
   await worker.processar(tarefa([cota(1, '006650', '0236')]));
   assert.deepEqual(plataforma.chamadas, ['iniciar 1']);
 });
 
 test('cotas que não estão pendentes não são iniciadas', async () => {
   const plataforma = plataformaFalsa();
-  const worker = new Worker({ config, plataforma, criarNewcon: newconFalso({}, []), leitura: leituraFalsa, saida: silencio });
+  const worker = new Worker({ config, plataforma, criarNewcon: newconFalso({}, []), leitura: leituraFalsa, modalidade: modalidadeFalsa, saida: silencio });
   await worker.processar(tarefa([{ ...cota(1, '006650', '0236'), status: 'confirmacao_iniciada' }, cota(2, '006650', '0924')]));
   assert.deepEqual(plataforma.chamadas, ['iniciar 2', 'finalizar 7']);
 });
@@ -225,7 +246,7 @@ test('configuração recusa URL do Newcon com a grafia derrubada e token curto',
 
 test('prazo de oferta encerrado vira erro conhecido com o término', async () => {
   const plataforma = plataformaFalsa();
-  const worker = new Worker({ config, plataforma, criarNewcon: newconFalso({ '006650-0236-00': 'prazo' }, []), leitura: leituraFalsa, saida: silencio });
+  const worker = new Worker({ config, plataforma, criarNewcon: newconFalso({ '006650-0236-00': 'prazo' }, []), leitura: leituraFalsa, modalidade: modalidadeFalsa, saida: silencio });
   await worker.processar(tarefa([cota(1, '006650', '0236')]));
   assert.deepEqual(
     { status: plataforma.conclusoes[1].status, erro_tipo: plataforma.conclusoes[1].erro_tipo, erro: plataforma.conclusoes[1].erro },
@@ -238,7 +259,7 @@ test('lance real desligado: recusa a execução sem carregar lance-real.js', asy
   const plataforma = plataformaFalsa();
   let carregou = false;
   const modulos = { lanceReal: () => { carregou = true; return require('../src/lance-real'); }, reimpressao: () => require('../src/reimpressao') };
-  const worker = new Worker({ config: { ...config, lanceRealHabilitado: false }, plataforma, criarNewcon: newconFalso({}, chamadas), leitura: leituraFalsa, modulos, saida: silencio });
+  const worker = new Worker({ config: { ...config, lanceRealHabilitado: false }, plataforma, criarNewcon: newconFalso({}, chamadas), leitura: leituraFalsa, modalidade: modalidadeFalsa, modulos, saida: silencio });
   await worker.processar(tarefa([cota(1, '006650', '0236')], 'real'));
   assert.equal(carregou, false);
   assert.deepEqual(chamadas, []);
@@ -252,4 +273,40 @@ test('reimpressão e dry-run não usam o botão Confirmar', () => {
     assert.ok(!semComentarios('reimpressao.js').includes(proibido), `reimpressao.js não pode usar ${proibido}`);
     assert.ok(!semComentarios('leitura-credenciamento.js').includes(proibido), `leitura-credenciamento.js não pode usar ${proibido}`);
   }
+});
+
+// Decisão do usuário em 15/10/2026: cota cadastrada como fixo dá Fixo mesmo. Antes desta
+// mudança qualquer cota levava 2º Fixo, inclusive as de lance Fixo.
+test('marca a modalidade cadastrada: cota fixo dá Fixo, não 2º Fixo', async () => {
+  const chamadas = [];
+  const plataforma = plataformaFalsa();
+  const worker = new Worker({ config, plataforma, criarNewcon: newconFalso({}, chamadas), leitura: leituraFalsa, modalidade: modalidadeFalsa, saida: silencio });
+
+  await worker.processar(tarefa([cota(1, '006650', '0236', 'fixo'), cota(2, '006650', '0924')]));
+
+  assert.deepEqual(
+    chamadas.filter((c) => c.startsWith('modalidade')),
+    ['modalidade fixo', 'modalidade segundo_fixo']
+  );
+  assert.equal(plataforma.conclusoes[1].status, 'verificada');
+  assert.equal(plataforma.conclusoes[1].detalhes.modalidade_lance, 'fixo');
+  // O percentual gravado é o do rótulo da modalidade marcada, não o do 2º Fixo.
+  assert.equal(plataforma.conclusoes[1].detalhes.percentual_lance, '20.0000');
+  assert.equal(plataforma.conclusoes[2].detalhes.modalidade_lance, 'segundo_fixo');
+});
+
+test('modalidade que a plataforma não dá vira erro conhecido sem abrir a cota no Newcon', async () => {
+  const chamadas = [];
+  const plataforma = plataformaFalsa();
+  const worker = new Worker({ config, plataforma, criarNewcon: newconFalso({}, chamadas), leitura: leituraFalsa, modalidade: modalidadeFalsa, saida: silencio });
+
+  await worker.processar(tarefa([cota(1, '006620', '1372', 'livre')]));
+
+  const c = plataforma.conclusoes[1];
+  assert.equal(c.status, 'erro_antes_confirmar');
+  assert.equal(c.erro_tipo, 'conhecido');
+  assert.match(c.erro, /modalidade Livre/);
+  // Falha antes de qualquer passo no Newcon: nem busca a cota, nem marca radio.
+  assert.ok(!chamadas.some((x) => x.startsWith('buscar')), `chamadas: ${chamadas.join(', ')}`);
+  assert.ok(!chamadas.some((x) => x.startsWith('modalidade')), `chamadas: ${chamadas.join(', ')}`);
 });

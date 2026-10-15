@@ -20,7 +20,7 @@ import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { api } from "@/lib/api";
-import { dataHora, tagCota, useSessao } from "@/lib/sessao";
+import { dataHora, nomeModalidade, tagCota, useSessao } from "@/lib/sessao";
 import type { CotaRevisao, Revisao } from "@/lib/tipos";
 import { cn } from "@/lib/utils";
 
@@ -125,7 +125,7 @@ export default function PaginaRevisao() {
               <TableHead>Cliente</TableHead>
               <TableHead>Cota</TableHead>
               <TableHead>Assembleia</TableHead>
-              <TableHead>2º Fixo</TableHead>
+              <TableHead>Modalidade</TableHead>
               <TableHead>Lances nesta assembleia</TableHead>
               <TableHead className="text-right">Screenshot</TableHead>
             </TableRow>
@@ -156,7 +156,12 @@ export default function PaginaRevisao() {
                   {c.assembleia_data ?? "—"}
                   {c.assembleia_numero && ` (nº ${c.assembleia_numero})`}
                 </TableCell>
-                <TableCell className="tabular-nums">{c.percentual_segundo_fixo ? `${c.percentual_segundo_fixo}%` : "—"}</TableCell>
+                <TableCell className="whitespace-nowrap">
+                  {nomeModalidade[c.modalidade] ?? c.modalidade}
+                  {(c.percentual_lance ?? c.percentual_segundo_fixo) && (
+                    <span className="tabular-nums text-muted-foreground"> · {c.percentual_lance ?? c.percentual_segundo_fixo}%</span>
+                  )}
+                </TableCell>
                 <TableCell className="max-w-sm whitespace-normal">
                   {c.bloqueio && <p className="text-destructive">{c.bloqueio}</p>}
                   {!c.historico_lido && <p className="text-muted-foreground">Histórico não lido no dry-run (o worker confere de novo antes de confirmar).</p>}
