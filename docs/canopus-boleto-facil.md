@@ -8,8 +8,10 @@ dias depois, cobra quem não pagou.
 **Leia este arquivo inteiro antes de mexer no serviço de boletos.** É o equivalente do
 [`canopus-newcon.md`](canopus-newcon.md) para este site, e nada aqui foi adivinhado: tudo veio da
 leitura do front (`/extensions/boleto-facil-rolledback/public/dist/dist.js` e `templates.js`) e de
-chamadas de leitura feitas à mão em 16/10/2026. O que **não** foi verificado está marcado como
-tal — não transforme suposição em código silenciosamente.
+chamadas feitas à mão em 16/10/2026: `find-cota` com um CPF fictício (lista vazia) e
+**`generate-bill` + impressão num grupo/cota de verdade, até o PDF na mão**. A resposta do
+`find-cota` com cotas nunca foi vista: os nomes dos campos vêm do template do próprio site. O que
+**não** foi verificado está marcado como tal — não transforme suposição em código silenciosamente.
 
 ## O site, por baixo
 
@@ -35,14 +37,19 @@ por fluxo e siga a ordem das três chamadas**: achar as cotas → gerar o boleto
 
 ```
 GET /find-cota/{documento}        documento = CPF (11) ou CNPJ (14), só dígitos
-→ 200 {"cotas":[{"CD_Grupo":"006650","CD_Cota":"3419","ID_Cota":"468379"}, …]}
+→ 200 {"cotas":[{"CD_Grupo":"006650","CD_Cota":"0924","ID_Cota":…}, …]}
 ```
+
+Os três nomes de campo saem do template `cotas` do site (`dist/templates.js`), que lê exatamente
+`CD_Grupo`, `CD_Cota` e `ID_Cota`; **uma resposta com cotas ainda não foi vista de perto**, então
+pode haver mais campos (e o tipo de `ID_Cota`, texto ou número, está em aberto).
 
 - O front exige `^(\d{11}|\d{14})$` antes de chamar — **nada de pontuação**.
 - **Um cliente costuma ter vários grupos/cotas**: a lista vem toda de uma vez, e é ela que diz
   quais cotas aquele documento tem na Canopus. O `CD_Grupo` vem com os zeros à esquerda, no mesmo
-  formato do cadastro da plataforma (`cotas.grupo`), e o `CD_Cota` sem eles (`"3419"`, enquanto a
-  plataforma guarda `"3419"` com 4 dígitos — compare normalizando os dois lados).
+  formato do cadastro da plataforma (`cotas.grupo`). Já a cota só foi vista com 4 dígitos, e
+  *não se sabe* se uma cota de 3 dígitos vem com o zero (`"0924"`) ou sem (`"924"`): **compare os
+  dois lados normalizados** (zeros à esquerda até 6/4), nunca por igualdade de texto.
 - **Documento desconhecido não dá erro**: responde `200 {"cotas":[]}` (verificado com um CPF
   fictício válido). Por isso o CPF é validado na plataforma (`internal/cadastro.CpfCnpj`): sem
   isso um dígito errado no cadastro viraria "cliente sem cotas" para sempre, em silêncio.
@@ -55,19 +62,35 @@ GET /find-cota/{documento}        documento = CPF (11) ou CNPJ (14), só dígito
 
 ```
 GET /generate-bill/{CD_Grupo}/{CD_Cota}/{ID_Cota}
-→ 200 {"bills":[{"parcelNumber":…, "date":"AAAA-MM-DD", "price":…,
-                 "type":"duplicate"|…, "id":…, "group":…, "cota":…, "transactionId":…}, …]}
+→ 200 {"bills":[{"id":<int>, "parcelNumber":"018", "date":"AAAA-MM-DD", "price":<float>,
+                 "emitBillet":<bool>, "type":"overdue", "group":"006650", "cota":"0924",
+                 "transactionId":<int>}, …]}
 ```
 
-- O front **só mostra parcela com `price > 0`** e, em erro, diz "Não foram identificados valores
-  válidos para geração de boletos. Entrar em contato com a administração do Consórcio Canopus
-  (65) 2123-6000." Erro aqui é o caso normal de cota sem nada em aberto — não é falha do serviço.
-- `price` é número (reais, com centavos) e `date` é ISO; o front formata (`brMoney`, `brDate`).
-- **`type` decide a rota da impressão** (passo 3). O único valor conhecido é `duplicate`; o resto
-  cai no ramo de boleto em atraso. *Não verificado* que valores aparecem de fato.
-- O nome "generate" assusta, mas é o que o próprio consorciado dispara ao clicar no grupo/cota no
-  site. Ainda assim: **não chame isto em teste automático nem em exploração**. Nenhum teste da
-  plataforma fala com o site de verdade; os testes usam dublê de HTTP.
+Resposta conferida numa cota real em 16/10/2026. Cuidados, em ordem de quem já me enganou:
+
+- **`Content-Type` é `text/html`, o corpo é JSON.** Não decida pelo cabeçalho; interprete o corpo
+  (o front usa `$.getJSON`, que ignora o tipo declarado).
+- **`transactionId` é novo a cada chamada.** Duas chamadas seguidas na mesma cota devolveram
+  transações diferentes, e é esse número que entra na URL de impressão. Ou seja: `generate-bill`
+  **cria uma transação** no site, e o link do PDF não é estável. Consequência de projeto: busque o
+  PDF **logo depois** do `generate-bill`, na mesma sessão (mesmo cookie jar), e **não guarde a URL
+  de impressão** como se fosse um link durável — guarde os dados da parcela.
+- **`parcelNumber` não é número.** Vem como texto com zeros à esquerda (`"018"`) e existe uma linha
+  `"DIF"` (diferença/reajuste). Guarde como texto.
+- **O front só mostra parcela com `price > 0`** — a linha `DIF` costuma vir com `price: 0`. Faça o
+  mesmo filtro, ou o cliente recebe um boleto de R$ 0,00.
+- **`type` foi `overdue`, não `duplicate`**, numa parcela que vence *no futuro*. Então `type` não
+  significa "está atrasado": o ramo `duplicate` (→ `print-bill/{id}`) é a exceção, e o caminho
+  normal é o de atraso. *Não verificado* quando `duplicate` aparece — trate os dois ramos.
+- `emitBillet` não existe no template do site e veio `false` numa cota que **imprimiu PDF**:
+  *significado desconhecido*. Não use como condição sem descobrir o que é.
+- Em erro, o front diz "Não foram identificados valores válidos para geração de boletos. Entrar em
+  contato com a administração do Consórcio Canopus (65) 2123-6000." Isso é o caso normal de cota
+  sem nada em aberto — não é falha do serviço.
+- O nome "generate" assusta menos do que parecia (nada é cobrado nem baixado), mas ele **registra
+  uma transação**: **não chame em teste automático**. Nenhum teste da plataforma fala com o site de
+  verdade; os testes usam dublê de HTTP. Exploração à mão, só com pedido do usuário.
 
 ### 3. O PDF
 
@@ -76,12 +99,15 @@ type == "duplicate" → GET /print-bill/{id}
 senão               → GET /print-overdue-bill/{group}/{cota}/{id}/{transactionId}
 ```
 
-- **Tem limite de taxa.** Uma única chamada à rota de atraso, com ids de um exemplo real,
-  respondeu `429 Too Many Requests` (16/10/2026). Não se sabe se o limite é por IP, por sessão ou
-  por boleto: o serviço precisa de espaçamento entre clientes, retentativa com espera e um teto de
-  tentativas por rodada. A VM de produção sai por um IP só.
-- *Não verificado*: o `Content-Type` e o corpo da resposta bem-sucedida (presume-se
-  `application/pdf`). Confirme antes de confiar — se vier HTML, o fluxo tem mais um passo.
+- **Funciona e devolve o PDF**: `200`, `Content-Type: application/pdf`, ~56 KB na cota testada
+  (16/10/2026), com os ids saídos do `generate-bill` da mesma sessão.
+- **Id velho dá `429 Too Many Requests`.** A mesma rota, chamada antes com o `transactionId` de um
+  exemplo antigo, respondeu 429; com os ids recém-gerados, 200. Não está provado se é limite de
+  taxa ou recusa de imprimir uma transação que não é a da sessão (o cookie guarda
+  `last_charge_id`/`last_transaction_id`) — **as duas leituras levam à mesma regra**: imprima na
+  sequência do `generate-bill`, com o mesmo cookie jar, e trate 429 como "recue e tente mais
+  tarde", nunca como "tente de novo agora". A VM de produção sai por um IP só, então o serviço
+  ainda precisa de espaçamento entre clientes e teto de tentativas por rodada.
 
 ## Como o serviço usa isso
 
@@ -98,6 +124,11 @@ dias depois:
 **O site não diz "pago".** A única leitura de pagamento que ele permite é a ausência: a parcela
 deixa de aparecer entre as em aberto. Qualquer outra interpretação (status, baixa, data de
 pagamento) não existe nesta API — não invente campo.
+
+Por isso a comparação é **por parcela (`parcelNumber` + `date`), não por "a cota tem boleto"**: a
+cota testada devolveu a parcela do mês seguinte, ou seja, a lista mostra o que está em aberto
+agora, e uma parcela paga some dando lugar à próxima. Quem olhar só "ainda vem boleto?" vai cobrar
+cliente em dia.
 
 ## Regras
 
