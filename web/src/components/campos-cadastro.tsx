@@ -9,10 +9,19 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { nomeModalidade } from "@/lib/sessao";
-import type { ClienteFormulario, Cota, CotaFormulario } from "@/lib/tipos";
+import type { Cliente, ClienteFormulario, Cota, CotaFormulario } from "@/lib/tipos";
 
 export function clienteVazio(): ClienteFormulario {
-  return { nome: "", telefone: "", email: "" };
+  return { nome: "", telefone: "", email: "", cpf_cnpj: "" };
+}
+
+export function clienteParaFormulario(c: Cliente): ClienteFormulario {
+  return {
+    nome: c.nome,
+    telefone: c.telefone ?? "",
+    email: c.email ?? "",
+    cpf_cnpj: c.cpf_cnpj ?? "",
+  };
 }
 
 export function cotaVazia(): CotaFormulario {
@@ -79,7 +88,7 @@ export function CamposCliente({
   colunas?: 1 | 3;
 }) {
   return (
-    <div className={colunas === 1 ? "grid gap-4" : "grid gap-4 sm:grid-cols-3"}>
+    <div className={colunas === 1 ? "grid gap-4" : "grid gap-4 sm:grid-cols-2 lg:grid-cols-4"}>
       <Campo id={`${prefixo}-nome`} rotulo="Nome">
         <Input
           id={`${prefixo}-nome`}
@@ -105,6 +114,20 @@ export function CamposCliente({
           autoComplete="off"
           value={valor.email}
           onChange={(e) => aoMudar({ ...valor, email: e.target.value })}
+        />
+      </Campo>
+      <Campo
+        id={`${prefixo}-documento`}
+        rotulo="CPF/CNPJ"
+        dica="Precisa do boleto do mês. Com ou sem pontuação."
+      >
+        <Input
+          id={`${prefixo}-documento`}
+          autoComplete="off"
+          inputMode="numeric"
+          placeholder="000.000.000-00"
+          value={valor.cpf_cnpj}
+          onChange={(e) => aoMudar({ ...valor, cpf_cnpj: e.target.value })}
         />
       </Campo>
     </div>

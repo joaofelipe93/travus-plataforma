@@ -20,6 +20,7 @@ func TestPapelAssistenteSoLeOPermitido(t *testing.T) {
 
 	for _, consulta := range []string{
 		"SELECT count(*) FROM clientes",
+		"SELECT id, nome, telefone, email FROM clientes",
 		"SELECT count(*) FROM cotas",
 		"SELECT count(*) FROM execucoes",
 		"SELECT count(*) FROM execucao_cotas",
@@ -44,6 +45,8 @@ func TestPapelAssistenteSoLeOPermitido(t *testing.T) {
 	for _, consulta := range []string{
 		"SELECT senha_hash FROM usuarios",
 		"SELECT * FROM usuarios",
+		"SELECT cpf_cnpj FROM clientes", // documento do cliente: fora do alcance do assistente
+		"SELECT * FROM clientes",
 		"SELECT count(*) FROM sessoes",
 		"SELECT dados_cifrados FROM integracoes",
 		"SELECT dados_cifrados FROM credenciais_usuario",

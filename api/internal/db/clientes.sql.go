@@ -16,9 +16,10 @@ SET nome             = $1,
     nome_normalizado = $2,
     telefone         = $3,
     email            = $4,
+    cpf_cnpj         = $5,
     atualizado_em    = now()
-WHERE id = $5
-RETURNING id, nome, telefone, email, origem, criado_em, atualizado_em
+WHERE id = $6
+RETURNING id, nome, telefone, email, cpf_cnpj, origem, criado_em, atualizado_em
 `
 
 type AtualizarClienteParams struct {
@@ -26,6 +27,7 @@ type AtualizarClienteParams struct {
 	NomeNormalizado string
 	Telefone        *string
 	Email           *string
+	CpfCnpj         *string
 	ID              int64
 }
 
@@ -34,6 +36,7 @@ type AtualizarClienteRow struct {
 	Nome         string
 	Telefone     *string
 	Email        *string
+	CpfCnpj      *string
 	Origem       string
 	CriadoEm     time.Time
 	AtualizadoEm time.Time
@@ -45,6 +48,7 @@ func (q *Queries) AtualizarCliente(ctx context.Context, arg AtualizarClientePara
 		arg.NomeNormalizado,
 		arg.Telefone,
 		arg.Email,
+		arg.CpfCnpj,
 		arg.ID,
 	)
 	var i AtualizarClienteRow
@@ -53,6 +57,7 @@ func (q *Queries) AtualizarCliente(ctx context.Context, arg AtualizarClientePara
 		&i.Nome,
 		&i.Telefone,
 		&i.Email,
+		&i.CpfCnpj,
 		&i.Origem,
 		&i.CriadoEm,
 		&i.AtualizadoEm,
@@ -81,7 +86,7 @@ func (q *Queries) AtualizarContatoCliente(ctx context.Context, arg AtualizarCont
 }
 
 const buscarCliente = `-- name: BuscarCliente :one
-SELECT id, nome, telefone, email, origem, criado_em, atualizado_em
+SELECT id, nome, telefone, email, cpf_cnpj, origem, criado_em, atualizado_em
 FROM clientes
 WHERE id = $1
 `
@@ -91,6 +96,7 @@ type BuscarClienteRow struct {
 	Nome         string
 	Telefone     *string
 	Email        *string
+	CpfCnpj      *string
 	Origem       string
 	CriadoEm     time.Time
 	AtualizadoEm time.Time
@@ -104,6 +110,7 @@ func (q *Queries) BuscarCliente(ctx context.Context, id int64) (BuscarClienteRow
 		&i.Nome,
 		&i.Telefone,
 		&i.Email,
+		&i.CpfCnpj,
 		&i.Origem,
 		&i.CriadoEm,
 		&i.AtualizadoEm,
@@ -150,9 +157,9 @@ func (q *Queries) CriarCliente(ctx context.Context, arg CriarClienteParams) (int
 }
 
 const criarClienteCadastro = `-- name: CriarClienteCadastro :one
-INSERT INTO clientes (nome, nome_normalizado, telefone, email, origem)
-VALUES ($1, $2, $3, $4, 'cadastro')
-RETURNING id, nome, telefone, email, origem, criado_em, atualizado_em
+INSERT INTO clientes (nome, nome_normalizado, telefone, email, cpf_cnpj, origem)
+VALUES ($1, $2, $3, $4, $5, 'cadastro')
+RETURNING id, nome, telefone, email, cpf_cnpj, origem, criado_em, atualizado_em
 `
 
 type CriarClienteCadastroParams struct {
@@ -160,6 +167,7 @@ type CriarClienteCadastroParams struct {
 	NomeNormalizado string
 	Telefone        *string
 	Email           *string
+	CpfCnpj         *string
 }
 
 type CriarClienteCadastroRow struct {
@@ -167,6 +175,7 @@ type CriarClienteCadastroRow struct {
 	Nome         string
 	Telefone     *string
 	Email        *string
+	CpfCnpj      *string
 	Origem       string
 	CriadoEm     time.Time
 	AtualizadoEm time.Time
@@ -180,6 +189,7 @@ func (q *Queries) CriarClienteCadastro(ctx context.Context, arg CriarClienteCada
 		arg.NomeNormalizado,
 		arg.Telefone,
 		arg.Email,
+		arg.CpfCnpj,
 	)
 	var i CriarClienteCadastroRow
 	err := row.Scan(
@@ -187,6 +197,7 @@ func (q *Queries) CriarClienteCadastro(ctx context.Context, arg CriarClienteCada
 		&i.Nome,
 		&i.Telefone,
 		&i.Email,
+		&i.CpfCnpj,
 		&i.Origem,
 		&i.CriadoEm,
 		&i.AtualizadoEm,
@@ -207,7 +218,7 @@ func (q *Queries) ExcluirCliente(ctx context.Context, id int64) (int64, error) {
 }
 
 const listarClientes = `-- name: ListarClientes :many
-SELECT c.id, c.nome, c.telefone, c.email,
+SELECT c.id, c.nome, c.telefone, c.email, c.cpf_cnpj,
        count(q.id)::int                          AS total_cotas,
        (count(q.id) FILTER (WHERE q.ativa))::int AS cotas_ativas
 FROM clientes c
@@ -223,6 +234,7 @@ type ListarClientesRow struct {
 	Nome        string
 	Telefone    *string
 	Email       *string
+	CpfCnpj     *string
 	TotalCotas  int32
 	CotasAtivas int32
 }
@@ -241,6 +253,7 @@ func (q *Queries) ListarClientes(ctx context.Context, busca *string) ([]ListarCl
 			&i.Nome,
 			&i.Telefone,
 			&i.Email,
+			&i.CpfCnpj,
 			&i.TotalCotas,
 			&i.CotasAtivas,
 		); err != nil {

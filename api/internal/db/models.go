@@ -149,6 +149,7 @@ type Cliente struct {
 	Origem          string
 	CriadoEm        time.Time
 	AtualizadoEm    time.Time
+	CpfCnpj         *string
 }
 
 type ConfiguracaoCanopus struct {

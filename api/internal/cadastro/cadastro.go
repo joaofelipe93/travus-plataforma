@@ -162,6 +162,81 @@ func Administradora(bruto string) (string, error) {
 	return *v, nil
 }
 
+// CpfCnpj aceita vazio (nulo) ou o documento com 11 (CPF) ou 14 (CNPJ) dígitos, guardado só
+// com dígitos — o formato que o Boleto Fácil do Canopus exige em /find-cota/{documento}.
+// Os dígitos verificadores são conferidos aqui porque documento errado não dá erro no site:
+// ele devolve uma lista vazia de cotas e, depois de três consultas sem resultado, pede captcha.
+func CpfCnpj(bruto string) (*string, error) {
+	if strings.TrimSpace(bruto) == "" {
+		return nil, nil
+	}
+	d := digitos(bruto)
+	switch len(d) {
+	case 11:
+		if !cpfValido(d) {
+			return nil, erro("CPF inválido: %q", bruto)
+		}
+	case 14:
+		if !cnpjValido(d) {
+			return nil, erro("CNPJ inválido: %q", bruto)
+		}
+	default:
+		return nil, erro("CPF/CNPJ precisa ter 11 ou 14 dígitos (recebido %d em %q)", len(d), bruto)
+	}
+	return &d, nil
+}
+
+// cpfValido confere os dois dígitos verificadores. Documento de dígitos todos iguais
+// (00000000000, 11111111111…) passa na conta e é recusado à parte, como manda a Receita.
+func cpfValido(d string) bool {
+	if todosIguais(d) {
+		return false
+	}
+	for _, c := range [2]struct{ ate, peso int }{{9, 10}, {10, 11}} {
+		soma := 0
+		for i := 0; i < c.ate; i++ {
+			soma += int(d[i]-'0') * (c.peso - i)
+		}
+		if int(d[c.ate]-'0') != verificador(soma) {
+			return false
+		}
+	}
+	return true
+}
+
+// cnpjValido confere os dois dígitos verificadores (pesos de 2 a 9, da direita para a esquerda).
+func cnpjValido(d string) bool {
+	if todosIguais(d) {
+		return false
+	}
+	pesos := [2][]int{
+		{5, 4, 3, 2, 9, 8, 7, 6, 5, 4, 3, 2},
+		{6, 5, 4, 3, 2, 9, 8, 7, 6, 5, 4, 3, 2},
+	}
+	for i, p := range pesos {
+		soma := 0
+		for j, peso := range p {
+			soma += int(d[j]-'0') * peso
+		}
+		if int(d[12+i]-'0') != verificador(soma) {
+			return false
+		}
+	}
+	return true
+}
+
+func verificador(soma int) int {
+	resto := soma % 11
+	if resto < 2 {
+		return 0
+	}
+	return 11 - resto
+}
+
+func todosIguais(d string) bool {
+	return strings.Trim(d, d[:1]) == ""
+}
+
 func digitos(s string) string {
 	var b strings.Builder
 	for _, r := range s {

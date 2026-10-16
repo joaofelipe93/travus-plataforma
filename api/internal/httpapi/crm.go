@@ -26,6 +26,7 @@ type pedidoCliente struct {
 	Nome     string               `json:"nome"`
 	Telefone string               `json:"telefone"`
 	Email    string               `json:"email"`
+	CpfCnpj  string               `json:"cpf_cnpj"`
 	Cotas    []pedidoCotaCadastro `json:"cotas"`
 }
 
@@ -116,6 +117,8 @@ func responderErroCadastro(w http.ResponseWriter, r *http.Request, err error) {
 		switch pgErr.ConstraintName {
 		case "clientes_nome_normalizado_key":
 			mensagem = "já existe um cliente com esse nome"
+		case "clientes_cpf_cnpj_key":
+			mensagem = "já existe um cliente com esse CPF/CNPJ"
 		case "cotas_administradora_grupo_cota_versao_key":
 			mensagem = "essa cota já está cadastrada (administradora, grupo, cota e versão se repetem)"
 		}
@@ -142,6 +145,11 @@ func (s *Servidor) criarCliente(w http.ResponseWriter, r *http.Request, u *Usuar
 		return
 	}
 	email, err := cadastro.Email(p.Email)
+	if err != nil {
+		responderErroCadastro(w, r, err)
+		return
+	}
+	cpfCnpj, err := cadastro.CpfCnpj(p.CpfCnpj)
 	if err != nil {
 		responderErroCadastro(w, r, err)
 		return
@@ -177,7 +185,7 @@ func (s *Servidor) criarCliente(w http.ResponseWriter, r *http.Request, u *Usuar
 	qtx := s.q.WithTx(tx)
 
 	cliente, err := qtx.CriarClienteCadastro(ctx, db.CriarClienteCadastroParams{
-		Nome: nome, NomeNormalizado: normalizado, Telefone: telefone, Email: email,
+		Nome: nome, NomeNormalizado: normalizado, Telefone: telefone, Email: email, CpfCnpj: cpfCnpj,
 	})
 	if err != nil {
 		responderErroCadastro(w, r, err)
@@ -232,8 +240,14 @@ func (s *Servidor) atualizarCliente(w http.ResponseWriter, r *http.Request, u *U
 		responderErroCadastro(w, r, err)
 		return
 	}
+	cpfCnpj, err := cadastro.CpfCnpj(p.CpfCnpj)
+	if err != nil {
+		responderErroCadastro(w, r, err)
+		return
+	}
 	c, err := s.q.AtualizarCliente(r.Context(), db.AtualizarClienteParams{
 		ID: id, Nome: nome, NomeNormalizado: normalizado, Telefone: telefone, Email: email,
+		CpfCnpj: cpfCnpj,
 	})
 	if errors.Is(err, pgx.ErrNoRows) {
 		responderErro(w, http.StatusNotFound, "cliente não encontrado")
@@ -451,7 +465,7 @@ func (s *Servidor) responderCliente(w http.ResponseWriter, r *http.Request, id i
 		return
 	}
 	responderJSON(w, status, map[string]any{
-		"cliente": clienteJSON{c.ID, c.Nome, c.Telefone, c.Email, c.Origem, c.CriadoEm, c.AtualizadoEm},
+		"cliente": clienteJSON{c.ID, c.Nome, c.Telefone, c.Email, c.CpfCnpj, c.Origem, c.CriadoEm, c.AtualizadoEm},
 		"cotas":   cotasParaJSON(cotas),
 	})
 }

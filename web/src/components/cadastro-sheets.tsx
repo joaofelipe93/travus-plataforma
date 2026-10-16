@@ -6,7 +6,15 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { toast } from "sonner";
-import { CamposCliente, CamposCota, clienteVazio, cotaParaFormulario, cotaPreenchida, cotaVazia } from "@/components/campos-cadastro";
+import {
+  CamposCliente,
+  CamposCota,
+  clienteParaFormulario,
+  clienteVazio,
+  cotaParaFormulario,
+  cotaPreenchida,
+  cotaVazia,
+} from "@/components/campos-cadastro";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
@@ -125,11 +133,7 @@ export function SheetNovoCliente({
 
 export function SheetEditarCliente({ cliente, aberto, aoFechar }: { cliente: Cliente; aberto: boolean; aoFechar: () => void }) {
   const invalidar = useInvalidarCadastro();
-  const [valor, setValor] = useState<ClienteFormulario>({
-    nome: cliente.nome,
-    telefone: cliente.telefone ?? "",
-    email: cliente.email ?? "",
-  });
+  const [valor, setValor] = useState<ClienteFormulario>(() => clienteParaFormulario(cliente));
 
   const salvar = useMutation({
     mutationFn: (v: ClienteFormulario) => api<RespostaCliente>(`/clientes/${cliente.id}`, { metodo: "PATCH", json: v }),
@@ -152,7 +156,7 @@ export function SheetEditarCliente({ cliente, aberto, aoFechar }: { cliente: Cli
         >
           <SheetHeader>
             <SheetTitle>Editar cliente</SheetTitle>
-            <SheetDescription>Telefone ou e-mail em branco apagam o contato guardado.</SheetDescription>
+            <SheetDescription>Telefone, e-mail ou CPF/CNPJ em branco apagam o que estava guardado.</SheetDescription>
           </SheetHeader>
           <SheetBody className="flex flex-col gap-6">
             <CamposCliente valor={valor} aoMudar={setValor} prefixo="editar-cliente" colunas={1} />

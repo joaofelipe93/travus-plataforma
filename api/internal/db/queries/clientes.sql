@@ -1,5 +1,5 @@
 -- name: ListarClientes :many
-SELECT c.id, c.nome, c.telefone, c.email,
+SELECT c.id, c.nome, c.telefone, c.email, c.cpf_cnpj,
        count(q.id)::int                          AS total_cotas,
        (count(q.id) FILTER (WHERE q.ativa))::int AS cotas_ativas
 FROM clientes c
@@ -10,7 +10,7 @@ GROUP BY c.id
 ORDER BY c.nome;
 
 -- name: BuscarCliente :one
-SELECT id, nome, telefone, email, origem, criado_em, atualizado_em
+SELECT id, nome, telefone, email, cpf_cnpj, origem, criado_em, atualizado_em
 FROM clientes
 WHERE id = @id;
 
@@ -34,9 +34,9 @@ WHERE id = @id;
 -- No CRM o cadastro é digitado: telefone/e-mail em branco no formulário apagam o que estava lá
 -- (diferente da importação, em que coluna vazia não mexia no cadastro).
 -- name: CriarClienteCadastro :one
-INSERT INTO clientes (nome, nome_normalizado, telefone, email, origem)
-VALUES (@nome, @nome_normalizado, sqlc.narg(telefone), sqlc.narg(email), 'cadastro')
-RETURNING id, nome, telefone, email, origem, criado_em, atualizado_em;
+INSERT INTO clientes (nome, nome_normalizado, telefone, email, cpf_cnpj, origem)
+VALUES (@nome, @nome_normalizado, sqlc.narg(telefone), sqlc.narg(email), sqlc.narg(cpf_cnpj), 'cadastro')
+RETURNING id, nome, telefone, email, cpf_cnpj, origem, criado_em, atualizado_em;
 
 -- name: AtualizarCliente :one
 UPDATE clientes
@@ -44,9 +44,10 @@ SET nome             = @nome,
     nome_normalizado = @nome_normalizado,
     telefone         = sqlc.narg(telefone),
     email            = sqlc.narg(email),
+    cpf_cnpj         = sqlc.narg(cpf_cnpj),
     atualizado_em    = now()
 WHERE id = @id
-RETURNING id, nome, telefone, email, origem, criado_em, atualizado_em;
+RETURNING id, nome, telefone, email, cpf_cnpj, origem, criado_em, atualizado_em;
 
 -- name: ExcluirCliente :execrows
 DELETE FROM clientes WHERE id = @id;

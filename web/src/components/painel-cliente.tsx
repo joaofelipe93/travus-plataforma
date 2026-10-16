@@ -33,7 +33,7 @@ import { Switch } from "@/components/ui/switch";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { api } from "@/lib/api";
 import { pausarConsultasDeCota, desfazer, tirarCotaDoCache } from "@/lib/cache-cadastro";
-import { dataHora, tagCota } from "@/lib/sessao";
+import { dataHora, documento, tagCota } from "@/lib/sessao";
 import type { Cliente, Cota, LanceCliente } from "@/lib/tipos";
 
 type Detalhe = { cliente: Cliente; cotas: Cota[]; lances: LanceCliente[] };
@@ -77,7 +77,8 @@ export function PainelCliente({ id, editavel }: { id: number; editavel: boolean 
             )}
             {cliente && (
               <p className="mt-1 text-sm text-muted-foreground">
-                {[cliente.telefone, cliente.email].filter(Boolean).join(" · ") || "Sem telefone e sem e-mail"}
+                {[cliente.telefone, cliente.email, documento(cliente.cpf_cnpj)].filter(Boolean).join(" · ") ||
+                  "Sem telefone, e-mail e CPF/CNPJ"}
               </p>
             )}
           </div>
