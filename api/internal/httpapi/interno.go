@@ -63,6 +63,8 @@ func (s *Servidor) RotasInternas() http.Handler {
 	mux.HandleFunc("POST /internal/execucao-cotas/{id}/confirmacao-iniciada", s.marcarConfirmacaoIniciada)
 	mux.HandleFunc("POST /internal/execucao-cotas/{id}/concluir-confirmacao", s.concluirConfirmacao)
 	mux.HandleFunc("POST /internal/execucao-cotas/{id}/concluir-reimpressao", s.concluirReimpressao)
+	// Serviço de boletos (interno_boletos.go): outro worker, o mesmo token de serviço.
+	s.rotasInternasBoletos(mux)
 	return recuperar(s.exigirTokenWorker(mux))
 }
 
