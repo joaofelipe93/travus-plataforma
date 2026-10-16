@@ -172,9 +172,10 @@ scp -r tools/teste-ip-vm travus@<ip>:/tmp/ && ssh travus@<ip> 'bash /tmp/teste-i
   interna (puxa tarefa com token), então pode rodar na rede do escritório. **Nenhuma foi
   escolhida**: é decisão do usuário.
 
-Vale testar o Newcon pela VM no mesmo dia (`teste-ip-vm/teste-ip.sh --sem-login`): como ele não
-está atrás da Cloudflare, é bem possível que o `worker-canopus` rode na VM sem nada disso — e aí
-só o serviço de boletos precisa de solução.
+**O serviço que entra no Newcon está funcionando e não se mexe nele** (decisão do usuário,
+16/10/2026). O problema do 403 é só do Boleto Fácil, que é outro host e outra infraestrutura: o
+`cnp3` não passa pela Cloudflare. Nada do que for decidido aqui muda o worker do Newcon, e este
+serviço não herda nada dele além do cadastro de clientes e cotas.
 
 ## Regras
 
