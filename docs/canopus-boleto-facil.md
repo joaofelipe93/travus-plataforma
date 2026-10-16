@@ -130,6 +130,35 @@ cota testada devolveu a parcela do mês seguinte, ou seja, a lista mostra o que 
 agora, e uma parcela paga some dando lugar à próxima. Quem olhar só "ainda vem boleto?" vai cobrar
 cliente em dia.
 
+## De onde a chamada sai (em aberto)
+
+**O usuário relatou que a Canopus não aceita chamada do IP de uma VM** (16/10/2026). Isso decide a
+arquitetura do serviço, e é diferente do que parece:
+
+- as três rotas respondem a **`curl` puro**, sem navegador, com User-Agent de `curl` — foi assim
+  que elas foram verificadas. Então **não é o navegador que faz o site aceitar**: o Playwright do
+  worker do Newcon existe por causa dos postbacks do ASP.NET, não para furar bloqueio;
+- o site está atrás de **Cloudflare**, que barra faixas de datacenter antes de a requisição chegar
+  na aplicação. Se for esse o caso, **subir um Chromium na VM não resolve**: ele sai pelo mesmo IP.
+
+Para separar as duas hipóteses existe **`tools/teste-ip-vm/teste-boleto.sh`** (só leitura: página
+pública, JavaScript e `find-cota` com CPF fictício; **não chama `generate-bill`**). Rode na VM e
+compare com a máquina do escritório:
+
+| Resultado na VM | O que é | Caminho |
+|---|---|---|
+| passa igual | não há bloqueio | o serviço roda na VM, por HTTP, como planejado |
+| falha no `curl` e passa com cabeçalho de navegador | detecção de bot por cabeçalho | mandar cabeçalhos de navegador (ou Playwright), **sem** trocar de IP |
+| falha nas duas | bloqueio por IP de saída | a requisição precisa sair por outro IP; navegador na VM é inútil |
+
+No terceiro caso as opções reais são: **sair pela rede do escritório** (túnel só para
+`*.consorciocanopus.com.br`, serve também para o Newcon e não entrega dado de cliente a terceiro),
+**proxy residencial pago** (resolve o IP, mas CPF e boleto passam por um intermediário) ou **rodar
+o worker fora da VM**, do jeito que a plataforma já foi desenhada: o worker é cliente da API
+interna (puxa tarefa com token), então ele pode rodar na rede do escritório e só conversar com a
+plataforma. **Nenhuma dessas foi escolhida** — é decisão do usuário, e vale a mesma resposta para o
+worker do Newcon.
+
 ## Regras
 
 1. **Só leitura, e devagar.** O serviço nunca faz POST neste site. Entre clientes, espere; no
