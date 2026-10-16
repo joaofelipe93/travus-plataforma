@@ -654,6 +654,24 @@ func (s *Servidor) finalizarRodada(w http.ResponseWriter, r *http.Request) {
 		erroInterno(w, r, err)
 		return
 	}
+	// Rodada que terminou monta a fila de mensagens (boletos_mensagens.go). Rodada que falhou
+	// ou foi cancelada não manda nada: o que ela achou fica registrado e ninguém é cobrado por
+	// uma passada incompleta.
+	if status == "concluida" || status == "concluida_com_erros" {
+		if _, err := s.montarMensagens(ctx, qtx, id, rd.Tipo, rd.Referencia); err != nil {
+			erroInterno(w, r, err)
+			return
+		}
+	}
+	if status == "cancelada" {
+		motivo := "a rodada foi cancelada antes do envio"
+		if _, err := qtx.CancelarMensagensPendentesDaRodada(ctx, db.CancelarMensagensPendentesDaRodadaParams{
+			RodadaID: &id, Motivo: &motivo,
+		}); err != nil {
+			erroInterno(w, r, err)
+			return
+		}
+	}
 	if err := tx.Commit(ctx); err != nil {
 		erroInterno(w, r, err)
 		return

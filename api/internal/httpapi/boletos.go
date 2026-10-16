@@ -240,6 +240,11 @@ func (s *Servidor) responderRodada(w http.ResponseWriter, r *http.Request, id in
 		erroInterno(w, r, err)
 		return
 	}
+	mensagens, err := s.q.ListarMensagensDaRodada(ctx, &id)
+	if err != nil {
+		erroInterno(w, r, err)
+		return
+	}
 
 	saidaClientes := make([]rodadaClienteJSON, 0, len(clientes))
 	for _, c := range clientes {
@@ -266,17 +271,52 @@ func (s *Servidor) responderRodada(w http.ResponseWriter, r *http.Request, id in
 			Mensagem: e.Mensagem, CriadoEm: e.CriadoEm,
 		})
 	}
-	responderJSON(w, status, map[string]any{
+	saidaMensagens := make([]mensagemJSON, 0, len(mensagens))
+	for _, m := range mensagens {
+		saidaMensagens = append(saidaMensagens, mensagemJSON{
+			ID: m.ID, RodadaClienteID: m.RodadaClienteID, Tipo: m.Tipo, ParcelaID: m.ParcelaID,
+			DestinoNome: m.DestinoNome, Texto: m.Texto, PdfID: m.PdfID, Status: m.Status,
+			Tentativas: m.Tentativas, UltimoErro: m.UltimoErro, EnviadaEm: m.EnviadaEm, CriadaEm: m.CriadaEm,
+		})
+	}
+	// Na cobrança interessa o que mudou desde o envio: quantas parcelas foram pagas.
+	resposta := map[string]any{
 		"rodada": rodadaJSON{
 			ID: rd.ID, Tipo: rd.Tipo, Referencia: rd.Referencia.Format("2006-01"), Status: rd.Status,
 			Origem: rd.Origem, CriadaPorNome: rd.CriadaPorNome, CanceladaPor: rd.CanceladaPorNome,
 			CancelamentoPed: rd.CancelamentoSolicitado, Erro: rd.Erro, CriadaEm: rd.CriadaEm,
 			IniciadaEm: rd.IniciadaEm, FinalizadaEm: rd.FinalizadaEm,
 		},
-		"clientes": saidaClientes,
-		"parcelas": saidaParcelas,
-		"eventos":  saidaEventos,
-	})
+		"clientes":  saidaClientes,
+		"parcelas":  saidaParcelas,
+		"eventos":   saidaEventos,
+		"mensagens": saidaMensagens,
+	}
+	if rd.Tipo == "cobranca" {
+		resumo, err := s.q.ResumoCobranca(ctx, db.ResumoCobrancaParams{RodadaID: id, Referencia: rd.Referencia})
+		if err != nil {
+			erroInterno(w, r, err)
+			return
+		}
+		resposta["cobranca"] = map[string]any{"enviadas": resumo.Enviadas, "pagas": resumo.Pagas}
+	}
+	responderJSON(w, status, resposta)
+}
+
+type mensagemJSON struct {
+	ID              int64  `json:"id"`
+	RodadaClienteID *int64 `json:"rodada_cliente_id"`
+	Tipo            string `json:"tipo"`
+	ParcelaID       *int64 `json:"parcela_id"`
+	DestinoNome     string `json:"destino_nome"`
+	// O telefone não vai para a tela de propósito: ela mostra o nome, e o número é do cadastro.
+	Texto      string     `json:"texto"`
+	PdfID      *string    `json:"pdf_id"`
+	Status     string     `json:"status"`
+	Tentativas int32      `json:"tentativas"`
+	UltimoErro *string    `json:"ultimo_erro"`
+	EnviadaEm  *time.Time `json:"enviada_em"`
+	CriadaEm   time.Time  `json:"criada_em"`
 }
 
 type eventoBoletoJSON struct {
@@ -314,6 +354,14 @@ func (s *Servidor) cancelarRodada(w http.ResponseWriter, r *http.Request, u *Usu
 		return
 	}
 	if _, err := qtx.CancelarClientesPendentes(ctx, id); err != nil {
+		erroInterno(w, r, err)
+		return
+	}
+	// Mensagem que ainda não saiu não sai: cancelar a rodada é o botão de pânico do serviço.
+	motivo := "a rodada foi cancelada por " + u.Nome
+	if _, err := qtx.CancelarMensagensPendentesDaRodada(ctx, db.CancelarMensagensPendentesDaRodadaParams{
+		RodadaID: &id, Motivo: &motivo,
+	}); err != nil {
 		erroInterno(w, r, err)
 		return
 	}

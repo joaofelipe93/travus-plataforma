@@ -48,6 +48,9 @@ type Config struct {
 	RetencaoScreenshots time.Duration
 	// Lance real só com LANCE_REAL_HABILITADO=true. O worker tem a sua própria chave.
 	LanceRealHabilitado bool
+	// Envio dos boletos no WhatsApp dos clientes só com BOLETOS_ENVIO_HABILITADO=true. Com ela
+	// desligada, a rodada monta as mensagens e não manda nada (ensaio).
+	BoletosEnvioHabilitado bool
 	// Prazo, contado do fim do dry-run, para aprová-lo como lance real. Padrão quando a
 	// configuração do Canopus não pode ser lida.
 	ValidadeDryRun time.Duration
@@ -126,11 +129,13 @@ func (s *Servidor) Encerrar() {
 }
 
 // RodarTarefasDeFundo: escuta de eventos para o SSE, limpeza de screenshots vencidos,
-// envio de comprovantes ao Google Drive, dry-run automático do Canopus e vigia (alertas).
+// envio de comprovantes ao Google Drive, dry-run automático do Canopus, rodadas automáticas de
+// boletos (dias 8 e 14) e vigia (alertas).
 func (s *Servidor) RodarTarefasDeFundo(ctx context.Context) {
 	go s.hub.Rodar(ctx)
 	go s.rodarFilaDrive(ctx)
 	go s.rodarAgendador(ctx)
+	go s.rodarAgendadorBoletos(ctx)
 	go s.rodarVigia(ctx)
 	go func() {
 		t := time.NewTicker(time.Hour)
@@ -225,6 +230,8 @@ func (s *Servidor) Rotas() http.Handler {
 
 	// Serviço de boletos da Canopus (boletos.go): rodada de envio (busca os boletos do mês) e de
 	// cobrança. Todo perfil acompanha; admin e operador criam e cancelam.
+	mux.Handle("GET /boletos/configuracao", s.autenticado(s.configuracaoBoletos))
+	mux.Handle("PUT /boletos/configuracao", s.autenticado(exigirPerfil(s.atualizarConfiguracaoBoletos, editores...)))
 	mux.Handle("GET /boletos/rodadas", s.autenticado(s.listarRodadas))
 	mux.Handle("POST /boletos/rodadas", s.autenticado(exigirPerfil(s.criarRodada, editores...)))
 	mux.Handle("GET /boletos/rodadas/{id}", s.autenticado(s.buscarRodada))

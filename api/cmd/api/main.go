@@ -117,6 +117,8 @@ func serve() error {
 		RetencaoScreenshots: 30 * 24 * time.Hour,
 		// Só "true" liga. Desligado, a API recusa aprovar e entregar execuções reais.
 		LanceRealHabilitado: os.Getenv("LANCE_REAL_HABILITADO") == "true",
+		// Envio dos boletos no WhatsApp dos clientes: desligada, a rodada só monta a fila.
+		BoletosEnvioHabilitado: os.Getenv("BOLETOS_ENVIO_HABILITADO") == "true",
 		ValidadeDryRun:      2 * time.Hour,
 		Cofre:               cofre,
 		Google: httpapi.ConfigGoogle{
@@ -228,6 +230,13 @@ func migrate(args []string) error {
 				return err
 			}
 			slog.Info("migrações: login do papel checkin definido")
+		}
+		// Login do serviço boletos-whatsapp no Postgres (fila de mensagens dos boletos).
+		if senha := os.Getenv("BOLETOS_DB_SENHA"); senha != "" {
+			if err := migrations.DefinirSenhaBoletos(ctx, db, senha); err != nil {
+				return err
+			}
+			slog.Info("migrações: login do papel boletos definido")
 		}
 		// Login do papel só leitura do assistente (consulta livre).
 		if senha := os.Getenv("ASSISTENTE_DB_SENHA"); senha != "" {

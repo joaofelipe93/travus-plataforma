@@ -14,10 +14,15 @@ import (
 )
 
 type rodadaDetalhe struct {
-	Rodada   rodadaJSON          `json:"rodada"`
-	Clientes []rodadaClienteJSON `json:"clientes"`
-	Parcelas []parcelaJSON       `json:"parcelas"`
-	Eventos  []eventoBoletoJSON  `json:"eventos"`
+	Rodada    rodadaJSON          `json:"rodada"`
+	Clientes  []rodadaClienteJSON `json:"clientes"`
+	Parcelas  []parcelaJSON       `json:"parcelas"`
+	Eventos   []eventoBoletoJSON  `json:"eventos"`
+	Mensagens []mensagemJSON      `json:"mensagens"`
+	Cobranca  *struct {
+		Enviadas int `json:"enviadas"`
+		Pagas    int `json:"pagas"`
+	} `json:"cobranca"`
 }
 
 // cenarioBoletos: operador logado e dois clientes com documento (e um sem, que fica de fora).
