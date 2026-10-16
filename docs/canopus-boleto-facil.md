@@ -8,10 +8,10 @@ dias depois, cobra quem não pagou.
 **Leia este arquivo inteiro antes de mexer no serviço de boletos.** É o equivalente do
 [`canopus-newcon.md`](canopus-newcon.md) para este site, e nada aqui foi adivinhado: tudo veio da
 leitura do front (`/extensions/boleto-facil-rolledback/public/dist/dist.js` e `templates.js`) e de
-chamadas feitas à mão em 16/10/2026: `find-cota` com um CPF fictício (lista vazia) e
-**`generate-bill` + impressão num grupo/cota de verdade, até o PDF na mão**. A resposta do
-`find-cota` com cotas nunca foi vista: os nomes dos campos vêm do template do próprio site. O que
-**não** foi verificado está marcado como tal — não transforme suposição em código silenciosamente.
+chamadas feitas à mão em 16/10/2026, com a cadeia inteira percorrida: `find-cota` num CPF de
+verdade (4 cotas) e num fictício (lista vazia), e **`generate-bill` + impressão até o PDF na mão**.
+O que **não** foi verificado está marcado como tal — não transforme suposição em código
+silenciosamente.
 
 ## O site, por baixo
 
@@ -37,19 +37,23 @@ por fluxo e siga a ordem das três chamadas**: achar as cotas → gerar o boleto
 
 ```
 GET /find-cota/{documento}        documento = CPF (11) ou CNPJ (14), só dígitos
-→ 200 {"cotas":[{"CD_Grupo":"006650","CD_Cota":"0924","ID_Cota":…}, …]}
+→ 200 {"cotas":[{"CD_Grupo":"006650","CD_Cota":924,"Versao":0,"ID_Cota":468379}, …]}
 ```
 
-Os três nomes de campo saem do template `cotas` do site (`dist/templates.js`), que lê exatamente
-`CD_Grupo`, `CD_Cota` e `ID_Cota`; **uma resposta com cotas ainda não foi vista de perto**, então
-pode haver mais campos (e o tipo de `ID_Cota`, texto ou número, está em aberto).
+Resposta conferida num CPF real em 16/10/2026 (4 cotas, todas no mesmo grupo). **Dois detalhes que
+o template do site esconde**, e os dois quebram o casamento com o cadastro se passarem batido:
+
+- **`CD_Cota` e `ID_Cota` são números, não texto**, e `CD_Cota` vem **sem os zeros à esquerda** —
+  na mesma resposta apareceram cotas de 3 e de 4 dígitos. O cadastro guarda `"0924"`; comparar os
+  dois como texto erraria em toda cota de 3 dígitos. **Normalize os dois lados** (zeros à esquerda
+  até 6/4) antes de comparar. O `CD_Grupo`, ao contrário, é texto com os 6 dígitos.
+- **existe um campo `Versao`** (número) que nenhum template do site usa. O cadastro tem `versao`,
+  então o casamento certo é **grupo + cota + versão**, não só grupo + cota.
 
 - O front exige `^(\d{11}|\d{14})$` antes de chamar — **nada de pontuação**.
 - **Um cliente costuma ter vários grupos/cotas**: a lista vem toda de uma vez, e é ela que diz
-  quais cotas aquele documento tem na Canopus. O `CD_Grupo` vem com os zeros à esquerda, no mesmo
-  formato do cadastro da plataforma (`cotas.grupo`). Já a cota só foi vista com 4 dígitos, e
-  *não se sabe* se uma cota de 3 dígitos vem com o zero (`"0924"`) ou sem (`"924"`): **compare os
-  dois lados normalizados** (zeros à esquerda até 6/4), nunca por igualdade de texto.
+  quais cotas aquele documento tem na Canopus. Um CPF só já devolveu 4 cotas do mesmo
+  grupo — é o caso normal, não a exceção.
 - **Documento desconhecido não dá erro**: responde `200 {"cotas":[]}` (verificado com um CPF
   fictício válido). Por isso o CPF é validado na plataforma (`internal/cadastro.CpfCnpj`): sem
   isso um dígito errado no cadastro viraria "cliente sem cotas" para sempre, em silêncio.
@@ -130,34 +134,47 @@ cota testada devolveu a parcela do mês seguinte, ou seja, a lista mostra o que 
 agora, e uma parcela paga some dando lugar à próxima. Quem olhar só "ainda vem boleto?" vai cobrar
 cliente em dia.
 
-## De onde a chamada sai (em aberto)
+## De onde a chamada sai (quase resolvido)
 
-**O usuário relatou que a Canopus não aceita chamada do IP de uma VM** (16/10/2026). Isso decide a
-arquitetura do serviço, e é diferente do que parece:
+O `www` (onde vive o Boleto Fácil) está atrás de **Cloudflare**; o Newcon (`cnp3`) **não está** —
+responde direto, sem `Server: cloudflare`. Então o que a Cloudflare recusa afeta só o serviço de
+boletos, e não é bloqueio de IP puro como pareceu no começo. Medições de 16/10/2026:
 
-- as três rotas respondem a **`curl` puro**, sem navegador, com User-Agent de `curl` — foi assim
-  que elas foram verificadas. Então **não é o navegador que faz o site aceitar**: o Playwright do
-  worker do Newcon existe por causa dos postbacks do ASP.NET, não para furar bloqueio;
-- o site está atrás de **Cloudflare**, que barra faixas de datacenter antes de a requisição chegar
-  na aplicação. Se for esse o caso, **subir um Chromium na VM não resolve**: ele sai pelo mesmo IP.
-
-Para separar as duas hipóteses existe **`tools/teste-ip-vm/teste-boleto.sh`** (só leitura: página
-pública, JavaScript e `find-cota` com CPF fictício; **não chama `generate-bill`**). Rode na VM e
-compare com a máquina do escritório:
-
-| Resultado na VM | O que é | Caminho |
+| De onde | Cliente | Resultado |
 |---|---|---|
-| passa igual | não há bloqueio | o serviço roda na VM, por HTTP, como planejado |
-| falha no `curl` e passa com cabeçalho de navegador | detecção de bot por cabeçalho | mandar cabeçalhos de navegador (ou Playwright), **sem** trocar de IP |
-| falha nas duas | bloqueio por IP de saída | a requisição precisa sair por outro IP; navegador na VM é inútil |
+| escritório | `curl` com User-Agent de `curl` | **200** |
+| escritório | `curl` com User-Agent de Chrome | **200** |
+| escritório | Chromium headless do Playwright, User-Agent padrão (`HeadlessChrome`) | **403** |
+| escritório | o mesmo Chromium com User-Agent de Chrome normal | **200** |
+| VM | `curl` com User-Agent de `curl` | **403** (relatado pelo usuário) |
 
-No terceiro caso as opções reais são: **sair pela rede do escritório** (túnel só para
-`*.consorciocanopus.com.br`, serve também para o Newcon e não entrega dado de cliente a terceiro),
-**proxy residencial pago** (resolve o IP, mas CPF e boleto passam por um intermediário) ou **rodar
-o worker fora da VM**, do jeito que a plataforma já foi desenhada: o worker é cliente da API
-interna (puxa tarefa com token), então ele pode rodar na rede do escritório e só conversar com a
-plataforma. **Nenhuma dessas foi escolhida** — é decisão do usuário, e vale a mesma resposta para o
-worker do Newcon.
+Duas conclusões, e nenhuma delas é a que se esperava:
+
+1. **Navegador não é a saída por si só** — e pode ser *pior*. O Playwright com a configuração de
+   fábrica leva 403 até de um IP que o `curl` atravessa, porque ele se anuncia `HeadlessChrome` e
+   expõe `navigator.webdriver`. **Se o serviço usar Chromium aqui, o User-Agent tem de ser trocado**
+   (`newContext({ userAgent })`, mais `--disable-blink-features=AutomationControlled`).
+2. A Cloudflare está combinando **reputação do IP** com a **cara do cliente**: o mesmo `curl` que
+   passa do escritório é recusado da VM. Falta **uma** medição para fechar: `curl` com User-Agent
+   de navegador **na VM**.
+
+```bash
+# Na VM (só leitura, não gera boleto):
+scp -r tools/teste-ip-vm travus@<ip>:/tmp/ && ssh travus@<ip> 'bash /tmp/teste-ip-vm/teste-boleto.sh --navegador'
+```
+
+- **Se passar com cara de navegador**: o bloqueio é de cabeçalho. O serviço roda na VM, por HTTP,
+  mandando User-Agent de Chrome e `Referer` da página do Boleto Fácil. Nada de arquitetura nova.
+- **Se não passar de jeito nenhum**: é o IP de saída, e aí as opções são **sair pela rede do
+  escritório** (túnel só para `*.consorciocanopus.com.br`, sem entregar dado de cliente a
+  terceiro), **proxy residencial pago** (CPF e boleto passariam por um intermediário) ou **rodar o
+  worker fora da VM**, do jeito que a plataforma já foi desenhada — o worker é cliente da API
+  interna (puxa tarefa com token), então pode rodar na rede do escritório. **Nenhuma foi
+  escolhida**: é decisão do usuário.
+
+Vale testar o Newcon pela VM no mesmo dia (`teste-ip-vm/teste-ip.sh --sem-login`): como ele não
+está atrás da Cloudflare, é bem possível que o `worker-canopus` rode na VM sem nada disso — e aí
+só o serviço de boletos precisa de solução.
 
 ## Regras
 
