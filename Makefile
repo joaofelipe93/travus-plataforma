@@ -42,7 +42,12 @@ up: env ## Sobe traefik, postgres, migrações, api, web e worker (o worker só 
 	@echo "Pronto: http://app.localhost  |  http://api.localhost/health  |  http://traefik.localhost"
 
 down: ## Derruba os containers (o banco fica no volume)
-	$(COMPOSE) --profile canopus --profile backup --profile checkin down
+	$(COMPOSE) --profile canopus --profile backup --profile checkin --profile boletos down
+
+boletos: env ## Sobe também o worker de boletos (só LÊ o Boleto Fácil; não manda mensagem)
+	$(FORA_DA_VM)
+	$(COMPOSE) --profile boletos up -d --build --wait worker-boletos
+	@echo "Worker de boletos no ar: make logs s=worker-boletos (make down derruba)"
 
 checkin: env ## Sobe também o notificador de check-in (conecta ao WhatsApp e mostra QR; NÃO pareie o número da produção aqui)
 	$(FORA_DA_VM)
@@ -87,6 +92,7 @@ testes-sem-fila: env
 	$(COMPOSE) --profile teste run --rm api-teste
 	cd web && npm run lint && npx next typegen && npx tsc --noEmit
 	cd workers/canopus && for f in src/*.js; do node --check "$$f" || exit 1; done && npm test
+	cd workers/boletos-canopus && for f in src/*.js; do node --check "$$f" || exit 1; done && npm test
 	$(COMPOSE) --profile teste run --rm --build checkin-teste
 	sh -n workers/canopus/docker-entrypoint.sh
 	sh -n deploy/backup/backup.sh

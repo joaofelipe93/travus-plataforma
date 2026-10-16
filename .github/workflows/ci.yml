@@ -153,6 +153,26 @@ jobs:
       - name: Testes (sem Newcon; inclui o que garante que não há caminho para Confirmar)
         run: npm test
 
+  boletos:
+    name: Worker de boletos
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: workers/boletos-canopus
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: workers/boletos-canopus/package-lock.json
+      - run: npm ci --no-audit --no-fund
+      - name: Sintaxe
+        run: for f in src/*.js; do node --check "$f" || exit 1; done
+      - name: Testes (nenhum fala com o Boleto Fácil de verdade)
+        run: npm test
+
   scripts:
     name: Scripts e compose
     runs-on: ubuntu-24.04
