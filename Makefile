@@ -90,7 +90,8 @@ testes-sem-fila: env
 	$(COMPOSE) --profile teste run --rm --build checkin-teste
 	sh -n workers/canopus/docker-entrypoint.sh
 	sh -n deploy/backup/backup.sh
-	for f in deploy/vm/*.sh tools/smoke/*.sh; do bash -n "$$f" || exit 1; done
+	for f in deploy/vm/*.sh tools/smoke/*.sh tools/teste-ip-vm/*.sh; do bash -n "$$f" || exit 1; done
+	for f in tools/teste-ip-vm/*.js; do node --check "$$f" || exit 1; done
 	DOMINIO_APP=app.exemplo.com.br DOMINIO_API=api.exemplo.com.br BACKUP_DIR=/tmp $(PROD) config --quiet
 
 verificar: ## Checagens da CI de segurança: arquivos proibidos, versões em sincronia, migrações seguras (contra origin/main) e segredos (gitleaks)

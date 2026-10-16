@@ -163,7 +163,8 @@ jobs:
         run: |
           sh -n workers/canopus/docker-entrypoint.sh
           sh -n deploy/backup/backup.sh
-          for f in deploy/vm/*.sh tools/smoke/*.sh tools/ci/*.sh; do bash -n "$f" || exit 1; done
+          for f in deploy/vm/*.sh tools/smoke/*.sh tools/ci/*.sh tools/teste-ip-vm/*.sh; do bash -n "$f" || exit 1; done
+          for f in tools/teste-ip-vm/*.js; do node --check "$f" || exit 1; done
       - name: Versões iguais nos Dockerfiles, na CI e no package-lock
         run: bash tools/ci/checar-versoes.sh
       - name: Compose local e de produção válidos
