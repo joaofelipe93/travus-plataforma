@@ -47,6 +47,15 @@ services:
     labels:
       traefik.http.routers.checkin-webhook.tls.certresolver: ${CERT_RESOLVER:-le}
 
+  # Serviço de boletos ligado em produção (localmente fica no perfil boletos). São dois
+  # containers: o que busca no Boleto Fácil e o que manda no WhatsApp dos clientes. Nada é
+  # enviado enquanto BOLETOS_ENVIO_HABILITADO e a opção da tela estiverem desligadas.
+  worker-boletos:
+    profiles: !reset []
+
+  boletos-whatsapp:
+    profiles: !reset []
+
   # Um backup por dia, a partir de BACKUP_HORA, em BACKUP_DIR na própria VM.
   backup:
     profiles: !reset []
