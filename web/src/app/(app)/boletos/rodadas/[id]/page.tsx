@@ -77,7 +77,7 @@ export default function PaginaRodada() {
     <div className="flex flex-col gap-8">
       <header className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <Link href="/canopus/boletos" className="text-sm text-muted-foreground underline-offset-4 hover:underline">
+          <Link href="/boletos/rodadas" className="text-sm text-muted-foreground underline-offset-4 hover:underline">
             ← todas as rodadas
           </Link>
           <h2 className="font-heading text-xl font-semibold">
@@ -230,7 +230,7 @@ export default function PaginaRodada() {
               {clientes.map((c) => (
                 <TableRow key={c.id}>
                   <TableCell>
-                    <Link href={`/canopus/clientes/${c.cliente_id}`} className="underline-offset-4 hover:underline">
+                    <Link href={`/clientes/${c.cliente_id}`} className="underline-offset-4 hover:underline">
                       {c.cliente_nome}
                     </Link>
                   </TableCell>

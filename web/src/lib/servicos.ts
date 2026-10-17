@@ -4,6 +4,11 @@ import type { Perfil } from "./tipos";
 // que ele faz e as abas só dele, tudo sob /<id>. Serviço novo = uma entrada aqui e uma pasta
 // em app/(app)/<id> com layout.tsx. Os perfis só escondem o que a pessoa não pode usar: quem
 // decide é a API.
+//
+// O cadastro de **Clientes** não está aqui de propósito: ele não é um serviço, é o cadastro que
+// todos usam (/clientes, com um item próprio no trilho). Os serviços que agem sobre um cliente
+// — hoje lances e boletos — são ligados cliente a cliente pela API (`internal/servicos`), e os
+// ids daqui são os mesmos de lá.
 
 export type Aba = {
   href: string;
@@ -21,19 +26,24 @@ export type Servico = {
 
 export const servicos: readonly Servico[] = [
   {
-    id: "canopus",
-    nome: "Canopus",
-    descricao: "Credenciamento de lances no Newcon",
+    id: "lances",
+    nome: "Lances",
+    descricao: "Credenciamento de lances no Newcon (Canopus Consórcios)",
     abas: [
-      { href: "/canopus/execucoes", rotulo: "Execuções", perfis: null },
-      { href: "/canopus/cotas", rotulo: "Cotas", perfis: null },
-      { href: "/canopus/clientes", rotulo: "Clientes", perfis: null },
-      // Serviço de boletos (issue #48): rodadas do mês, fila de mensagens e configuração.
-      { href: "/canopus/boletos", rotulo: "Boletos", perfis: null },
-      // O QR dá acesso à conta do WhatsApp dos clientes: só admin.
-      { href: "/canopus/boletos/whatsapp", rotulo: "WhatsApp dos boletos", perfis: ["admin"] },
+      { href: "/lances/execucoes", rotulo: "Execuções", perfis: null },
+      { href: "/lances/cotas", rotulo: "Cotas", perfis: null },
       // Todo perfil vê o agendamento e os prazos; admin e operador editam (a API decide).
-      { href: "/canopus/configuracao", rotulo: "Configurações", perfis: null },
+      { href: "/lances/configuracao", rotulo: "Configurações", perfis: null },
+    ],
+  },
+  {
+    id: "boletos",
+    nome: "Boletos",
+    descricao: "Boletos do mês no WhatsApp dos clientes (Boleto Fácil da Canopus)",
+    abas: [
+      { href: "/boletos/rodadas", rotulo: "Rodadas", perfis: null },
+      // O QR dá acesso à conta do WhatsApp que fala com os clientes: só admin.
+      { href: "/boletos/whatsapp", rotulo: "WhatsApp", perfis: ["admin"] },
     ],
   },
   {

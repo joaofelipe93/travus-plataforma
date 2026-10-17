@@ -278,7 +278,7 @@ func TestResumoDoDryRunAutomaticoPorEmail(t *testing.T) {
 	if !strings.Contains(m.Assunto, "Dry-run automático") {
 		t.Errorf("assunto = %q", m.Assunto)
 	}
-	if !strings.Contains(m.Corpo, "Nenhum lance foi confirmado") || !strings.Contains(m.Corpo, "/canopus/execucoes/") {
+	if !strings.Contains(m.Corpo, "Nenhum lance foi confirmado") || !strings.Contains(m.Corpo, "/lances/execucoes/") {
 		t.Errorf("corpo = %q", m.Corpo)
 	}
 	// Dados de cliente não saem no e-mail.

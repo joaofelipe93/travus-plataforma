@@ -53,6 +53,10 @@ export function Trilho({ usuario }: { usuario: Usuario }) {
         <ItemTrilho href="/" atual={caminho === "/"}>
           Início
         </ItemTrilho>
+        {/* O cadastro é um só para a plataforma: fica fora dos serviços, logo abaixo do Início. */}
+        <ItemTrilho href="/clientes" atual={caminho === "/clientes" || caminho.startsWith("/clientes/")}>
+          Clientes
+        </ItemTrilho>
 
         <p className="px-3 pt-6 pb-1.5 text-xs text-muted-foreground/80">Serviços</p>
         {servicosVisiveis(usuario.perfil).map((s) => (

@@ -36,6 +36,12 @@ function Atalhos({ perfil }: { perfil: Perfil }) {
   return (
     <Secao titulo="Ir para">
       <ul className="flex flex-col divide-y">
+        <li className="py-3 first:pt-0">
+          <Link href="/clientes" className="font-heading text-[0.95rem] outline-none hover:underline focus-visible:underline">
+            Clientes
+          </Link>
+          <p className="mt-0.5 text-sm text-muted-foreground">O cadastro que todos os serviços usam</p>
+        </li>
         {servicosVisiveis(perfil).map((s) => (
           <li key={s.id} className="py-3 first:pt-0">
             <Link

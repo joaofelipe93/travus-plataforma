@@ -62,7 +62,7 @@ export default function PaginaRevisao() {
     },
     onSuccess: ({ id: real }) => {
       queryClient.invalidateQueries({ queryKey: ["execucoes"] });
-      router.push(`/canopus/execucoes/${real}`);
+      router.push(`/lances/execucoes/${real}`);
     },
     onError: () => setConfirmando(false),
   });
@@ -87,7 +87,7 @@ export default function PaginaRevisao() {
 
   return (
     <div className="flex flex-col gap-5">
-      <Link href={`/canopus/execucoes/${id}`} className="text-sm text-muted-foreground hover:text-foreground">
+      <Link href={`/lances/execucoes/${id}`} className="text-sm text-muted-foreground hover:text-foreground">
         ← Dry-run nº {id}
       </Link>
       <div className="border-b pb-5">
@@ -144,7 +144,7 @@ export default function PaginaRevisao() {
                   {dados.dry_run.execucao_real_id && (
                     <>
                       {" "}
-                      <Link className="underline" href={`/canopus/execucoes/${dados.dry_run.execucao_real_id}`}>
+                      <Link className="underline" href={`/lances/execucoes/${dados.dry_run.execucao_real_id}`}>
                         Ver execução nº {dados.dry_run.execucao_real_id}
                       </Link>
                     </>

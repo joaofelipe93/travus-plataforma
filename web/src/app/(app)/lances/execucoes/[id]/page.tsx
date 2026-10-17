@@ -90,7 +90,7 @@ export default function PaginaExecucao() {
   if (detalhe.isError) {
     return (
       <div className="flex flex-col gap-4">
-        <Link href="/canopus/execucoes" className="text-sm text-muted-foreground hover:text-foreground">
+        <Link href="/lances/execucoes" className="text-sm text-muted-foreground hover:text-foreground">
           ← Execuções
         </Link>
         <Alert variant="destructive">
@@ -119,7 +119,7 @@ export default function PaginaExecucao() {
 
   return (
     <div className="flex flex-col gap-6">
-      <Link href="/canopus/execucoes" className="text-sm text-muted-foreground hover:text-foreground">
+      <Link href="/lances/execucoes" className="text-sm text-muted-foreground hover:text-foreground">
         ← Execuções
       </Link>
 
@@ -145,7 +145,7 @@ export default function PaginaExecucao() {
             {execucao.dry_run_origem_id && (
               <>
                 {" · a partir do "}
-                <Link className="underline" href={`/canopus/execucoes/${execucao.dry_run_origem_id}`}>
+                <Link className="underline" href={`/lances/execucoes/${execucao.dry_run_origem_id}`}>
                   dry-run nº {execucao.dry_run_origem_id}
                 </Link>
               </>
@@ -156,7 +156,7 @@ export default function PaginaExecucao() {
         </div>
         <div className="flex gap-2">
           {podeRevisar && (
-            <Link href={`/canopus/execucoes/${execucao.id}/revisao`} className={buttonVariants({ variant: "destructive" })}>
+            <Link href={`/lances/execucoes/${execucao.id}/revisao`} className={buttonVariants({ variant: "destructive" })}>
               Revisar para lance real
             </Link>
           )}

@@ -1,13 +1,15 @@
 "use client";
 
-// Espaço de Clientes: resumo da carteira em cima, lista à esquerda, cliente aberto à direita.
-// A lista e o painel vivem na mesma tela — trocar de cliente é navegar para
-// /canopus/clientes/<id>, então o endereço continua servindo para abrir um cliente direto.
+// Espaço de Clientes: o cadastro que todos os serviços usam, fora de qualquer serviço.
+// Resumo da carteira em cima, lista à esquerda, cliente aberto à direita. A lista e o painel
+// vivem na mesma tela — trocar de cliente é navegar para /clientes/<id>, então o endereço
+// continua servindo para abrir um cliente direto.
 
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import Link from "next/link";
 import { useState } from "react";
 import { SheetNovoCliente } from "@/components/cadastro-sheets";
+import { Pagina } from "@/components/pagina";
 import { PainelCliente } from "@/components/painel-cliente";
 import { ResumoCarteira } from "@/components/resumo-carteira";
 import { TracoCotas } from "@/components/traco-cotas";
@@ -16,6 +18,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { api } from "@/lib/api";
+
 import { podeEditar, useSessao } from "@/lib/sessao";
 import type { ClienteResumo, Cota } from "@/lib/tipos";
 import { useAdiado } from "@/lib/use-adiado";
@@ -37,30 +40,40 @@ export function EspacoClientes({ selecionadoId }: { selecionadoId?: number }) {
     queryKey: ["cotas", ""],
     queryFn: () => api<{ cotas: Cota[] }>("/cotas"),
   });
+  // O catálogo de serviços vem da API (mesma lista do banco): a lista só precisa dele para
+  // dizer de qual serviço o cliente está fora.
+  const catalogo = useQuery({
+    queryKey: ["servicos"],
+    queryFn: () => api<{ servicos: { id: string; nome: string }[] }>("/servicos"),
+    staleTime: Infinity,
+  });
 
   const lista = clientes.data?.clientes ?? [];
 
   return (
-    <div className="flex flex-col gap-8">
+    <Pagina
+      titulo="Clientes"
+      descricao="O cadastro é um só para a plataforma: cada cliente entra nos serviços que você ligar para ele."
+      acoes={
+        editavel && (
+          <Button onClick={() => setNovoAberto(true)} aria-label="Cadastrar cliente">
+            Novo cliente
+          </Button>
+        )
+      }
+    >
+      <div className="flex flex-col gap-8">
       <ResumoCarteira cotas={cotas.data?.cotas} clientes={clientes.data?.clientes.length} />
 
-      {/* A lista acompanha a rolagem (o topo do serviço é fixo, por isso o deslocamento). */}
+      {/* A lista acompanha a rolagem (o topo da página é fixo, por isso o deslocamento). */}
       <div className="grid gap-8 lg:grid-cols-[20rem_minmax(0,1fr)] lg:items-start xl:grid-cols-[23rem_minmax(0,1fr)] xl:gap-12">
-        <aside className="flex flex-col gap-3 lg:sticky lg:top-[10.5rem]">
-          <div className="flex gap-2">
-            <Input
-              className="flex-1"
-              placeholder="Buscar cliente"
-              value={busca}
-              onChange={(e) => setBusca(e.target.value)}
-              aria-label="Buscar cliente pelo nome"
-            />
-            {editavel && (
-              <Button onClick={() => setNovoAberto(true)} aria-label="Cadastrar cliente">
-                Novo
-              </Button>
-            )}
-          </div>
+        <aside className="flex flex-col gap-3 lg:sticky lg:top-[9rem]">
+          <Input
+            placeholder="Buscar cliente"
+            value={busca}
+            onChange={(e) => setBusca(e.target.value)}
+            aria-label="Buscar cliente pelo nome"
+          />
 
           {clientes.isError ? (
             <Alert variant="destructive">
@@ -93,7 +106,11 @@ export function EspacoClientes({ selecionadoId }: { selecionadoId?: number }) {
                 )}
                 {lista.map((c) => (
                   <li key={c.id}>
-                    <ItemCliente cliente={c} selecionado={c.id === selecionadoId} />
+                    <ItemCliente
+                      cliente={c}
+                      selecionado={c.id === selecionadoId}
+                      catalogo={catalogo.data?.servicos ?? []}
+                    />
                   </li>
                 ))}
               </ul>
@@ -111,14 +128,25 @@ export function EspacoClientes({ selecionadoId }: { selecionadoId?: number }) {
       </div>
 
       {editavel && <SheetNovoCliente aberto={novoAberto} aoFechar={() => setNovoAberto(false)} />}
-    </div>
+      </div>
+    </Pagina>
   );
 }
 
-function ItemCliente({ cliente, selecionado }: { cliente: ClienteResumo; selecionado: boolean }) {
+function ItemCliente({
+  cliente,
+  selecionado,
+  catalogo,
+}: {
+  cliente: ClienteResumo;
+  selecionado: boolean;
+  catalogo: { id: string; nome: string }[];
+}) {
+  // Ficar em todos os serviços é o normal e não merece tinta; o que interessa é quem está fora.
+  const fora = catalogo.filter((s) => !cliente.servicos.includes(s.id));
   return (
     <Link
-      href={`/canopus/clientes/${cliente.id}`}
+      href={`/clientes/${cliente.id}`}
       aria-current={selecionado ? "true" : undefined}
       className={cn(
         "flex flex-col gap-2 rounded-md border-l-2 border-transparent px-3 py-2.5 transition-colors outline-none",
@@ -134,6 +162,7 @@ function ItemCliente({ cliente, selecionado }: { cliente: ClienteResumo; selecio
           : cliente.cotas_ativas === cliente.total_cotas
             ? `${cliente.total_cotas} cota(s)`
             : `${cliente.cotas_ativas} de ${cliente.total_cotas} ativa(s)`}
+        {fora.length > 0 && ` · fora de ${fora.map((s) => s.nome).join(" e ")}`}
       </span>
     </Link>
   );
