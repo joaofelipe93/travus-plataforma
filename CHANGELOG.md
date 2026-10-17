@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.13.0](https://github.com/joaofelipe93/travus-plataforma/compare/v0.12.1...v0.13.0) (2026-10-17)
+
+
+### Novidades
+
+* **api:** CPF/CNPJ no cadastro para o Boleto Fácil da Canopus ([#70](https://github.com/joaofelipe93/travus-plataforma/issues/70)) ([dd5d886](https://github.com/joaofelipe93/travus-plataforma/commit/dd5d886f5e9d5f676974963d6a4190b339ee1495))
+* **boletos:** buscar os boletos em aberto no Boleto Fácil da Canopus ([#71](https://github.com/joaofelipe93/travus-plataforma/issues/71)) ([c15bf38](https://github.com/joaofelipe93/travus-plataforma/commit/c15bf38b093c5f4e60337444d2edc10443e60496))
+* **boletos:** mandar os boletos no WhatsApp e cobrar quem não pagou ([#72](https://github.com/joaofelipe93/travus-plataforma/issues/72)) ([779b3d2](https://github.com/joaofelipe93/travus-plataforma/commit/779b3d2129d360577767d493bbc44886aec5251e))
+
 ## [0.12.1](https://github.com/joaofelipe93/travus-plataforma/compare/v0.12.0...v0.12.1) (2026-10-15)
 
 
