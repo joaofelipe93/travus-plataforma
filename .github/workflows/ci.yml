@@ -231,6 +231,8 @@ jobs:
           for f in tools/teste-ip-vm/*.js; do node --check "$f" || exit 1; done
       - name: Versões iguais nos Dockerfiles, na CI e no package-lock
         run: bash tools/ci/checar-versoes.sh
+      - name: Todo serviço de produção tem imagem publicada
+        run: bash tools/ci/checar-imagens-deploy.sh
       - name: Compose local e de produção válidos
         env:
           POSTGRES_PASSWORD: x

@@ -102,9 +102,10 @@ testes-sem-fila: env
 	for f in tools/teste-ip-vm/*.js; do node --check "$$f" || exit 1; done
 	DOMINIO_APP=app.exemplo.com.br DOMINIO_API=api.exemplo.com.br BACKUP_DIR=/tmp $(PROD) config --quiet
 
-verificar: ## Checagens da CI de segurança: arquivos proibidos, versões em sincronia, migrações seguras (contra origin/main) e segredos (gitleaks)
+verificar: ## Checagens da CI: arquivos proibidos, versões em sincronia, imagens do deploy, migrações seguras (contra origin/main) e segredos (gitleaks)
 	bash tools/ci/arquivos-proibidos.sh
 	bash tools/ci/checar-versoes.sh
+	bash tools/ci/checar-imagens-deploy.sh
 	git fetch --quiet origin main && bash tools/ci/checar-migracoes.sh origin/main
 	docker run --rm -v "$(CURDIR):/repo:ro" ghcr.io/gitleaks/gitleaks:v8.28.0 git /repo --no-banner --redact --gitleaks-ignore-path /repo/.gitleaksignore
 

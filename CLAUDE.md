@@ -87,7 +87,7 @@ Não há cadastro público de usuários: só `make usuario`. A senha é pedida n
 | Worker Canopus | sintaxe e testes (inclui a garantia de que não há caminho para Confirmar) |
 | Worker de boletos | sintaxe e testes (nenhum fala com o Boleto Fácil de verdade) |
 | Boletos no WhatsApp | migrações no banco de teste, baileys em 6.7.24, typecheck e testes (nenhum fala com o WhatsApp) |
-| Scripts e compose | sintaxe dos scripts, compose local e de produção válidos e **versões em sincronia** (`tools/ci/checar-versoes.sh`: Node e Go dos Dockerfiles iguais aos da CI, `go.mod` cabendo neles, imagem do Playwright igual ao pacote em **cada** worker que usa navegador e a mesma imagem nos dois) |
+| Scripts e compose | sintaxe dos scripts, compose local e de produção válidos, **toda imagem de produção publicada** (`tools/ci/checar-imagens-deploy.sh`) e **versões em sincronia** (`tools/ci/checar-versoes.sh`: Node e Go dos Dockerfiles iguais aos da CI, `go.mod` cabendo neles, imagem do Playwright igual ao pacote em **cada** worker que usa navegador e a mesma imagem nos dois) |
 | Segurança | nenhum arquivo proibido versionado (`tools/ci/arquivos-proibidos.sh`) e gitleaks no histórico inteiro (falsos positivos revisados em `.gitleaksignore`; segredo de verdade se troca, não se ignora) |
 | Migrações seguras para rollback | `tools/ci/checar-migracoes.sh`: migração existente não se edita; número novo maior que o da `main` e sem repetição (dois PRs com a mesma versão: renumere); o Up não destrói nem renomeia, salvo `-- ci: destrutiva-aprovada: <motivo>` |
 | Integração | `make up` com credenciais fictícias do Newcon, build da imagem do notificador e `make smoke` (sem execução, sem WhatsApp) |
@@ -122,7 +122,8 @@ merge do PR "chore: versão X.Y.Z" → tag vX.Y.Z + release → workflow Deploy:
 - **Rollback manual**: workflow **Voltar versão** (digitar `VOLTAR`, mesma aprovação) ou **Deploy** à mão com uma versão já lançada. O código volta; **as migrações não** (por isso a CI exige migrações seguras e há o backup antes de cada deploy).
 - Ambiente `producao` no GitHub: aprovação obrigatória do usuário, só `main` e tags `v*`; segredos `DEPLOY_SSH_KEY`, `DEPLOY_KNOWN_HOSTS`; variáveis `DEPLOY_HOST`, `DOMINIO_APP`, `DOMINIO_API`.
 - **Aprovar o job "Produção" é o pedido explícito de deploy** (regra 7): nunca aprove por conta própria.
-- Os pacotes do GHCR precisam ser **públicos** (a VM baixa sem login; as imagens não têm segredos). Pacote novo nasce privado: tornar público uma vez, em github.com/joaofelipe93?tab=packages.
+- Os pacotes do GHCR precisam ser **públicos** (a VM baixa sem login; as imagens não têm segredos). Pacote novo nasce privado: tornar público uma vez, em github.com/joaofelipe93?tab=packages. São seis hoje: `travus-api`, `travus-web`, `travus-worker-canopus`, `travus-checkin-whatsapp`, `travus-worker-boletos` e `travus-boletos-whatsapp`.
+- **Serviço novo que roda em produção precisa de três coisas**, ou o deploy falha no meio da troca: estar no compose de produção, ter a imagem mapeada em `deploy/docker-compose.imagens.yml` e estar na lista que o `deploy.yml` compila. A v0.13.0 caiu exatamente por faltarem as duas últimas (a VM tentou baixar a tag local `:dev`); `tools/ci/checar-imagens-deploy.sh` passou a conferir isso na CI e no `make verificar`.
 
 ## Arquitetura
 
