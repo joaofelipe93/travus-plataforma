@@ -38,20 +38,20 @@ func TestClienteNasceAtivoNosServicos(t *testing.T) {
 	rec := n.enviarJSON(http.MethodPost, "/clientes", map[string]any{"nome": "CLIENTE TODOS"})
 	esperarStatus(t, rec, http.StatusCreated, "cadastrar sem escolher serviços")
 	criado := decodificar[respostaClienteComServicos](t, rec)
-	if len(criado.Servicos) != 2 || !ativoEm(criado.Servicos, "canopus") || !ativoEm(criado.Servicos, "boletos") {
+	if len(criado.Servicos) != 2 || !ativoEm(criado.Servicos, "lances") || !ativoEm(criado.Servicos, "boletos") {
 		t.Fatalf("cliente novo devia nascer ativo nos dois serviços: %+v", criado.Servicos)
 	}
 
 	// Com a lista, só o que foi escolhido. O catálogo inteiro volta mesmo assim, para a tela
 	// poder desenhar o interruptor desligado.
-	rec = n.enviarJSON(http.MethodPost, "/clientes", map[string]any{"nome": "CLIENTE SO LANCES", "servicos": []string{"canopus"}})
+	rec = n.enviarJSON(http.MethodPost, "/clientes", map[string]any{"nome": "CLIENTE SO LANCES", "servicos": []string{"lances"}})
 	esperarStatus(t, rec, http.StatusCreated, "cadastrar escolhendo um serviço")
 	soLances := decodificar[respostaClienteComServicos](t, rec)
 	if len(soLances.Servicos) != 2 {
 		t.Fatalf("o catálogo inteiro devia voltar: %+v", soLances.Servicos)
 	}
-	if !ativoEm(soLances.Servicos, "canopus") || ativoEm(soLances.Servicos, "boletos") {
-		t.Errorf("servicos = %+v, quer canopus ativo e boletos não", soLances.Servicos)
+	if !ativoEm(soLances.Servicos, "lances") || ativoEm(soLances.Servicos, "boletos") {
+		t.Errorf("servicos = %+v, quer lances ativo e boletos não", soLances.Servicos)
 	}
 
 	esperarStatus(t, n.enviarJSON(http.MethodPost, "/clientes",
@@ -80,8 +80,8 @@ func TestLigarEDesligarServicoDoCliente(t *testing.T) {
 	rec := n.enviarJSON(http.MethodPut, caminho, map[string]any{"ativo": false})
 	esperarStatus(t, rec, http.StatusOK, "desligar boletos")
 	depois := decodificar[respostaClienteComServicos](t, rec)
-	if ativoEm(depois.Servicos, "boletos") || !ativoEm(depois.Servicos, "canopus") {
-		t.Errorf("desligar boletos não devia mexer no canopus: %+v", depois.Servicos)
+	if ativoEm(depois.Servicos, "boletos") || !ativoEm(depois.Servicos, "lances") {
+		t.Errorf("desligar boletos não devia mexer nos lances: %+v", depois.Servicos)
 	}
 	// A cota continua lá: desligar um serviço não apaga cadastro.
 	if len(depois.Cotas) != 1 || !depois.Cotas[0].Ativa {
@@ -97,14 +97,14 @@ func TestLigarEDesligarServicoDoCliente(t *testing.T) {
 			Clientes []clienteResumoJSON `json:"clientes"`
 		}](t, n.req(http.MethodGet, "/clientes"+consulta, nil, nil)).Clientes
 	}
-	if todos := lista(""); len(todos) != 1 || len(todos[0].Servicos) != 1 || todos[0].Servicos[0] != "canopus" {
-		t.Errorf("a lista devia trazer só canopus como ativo: %+v", todos)
+	if todos := lista(""); len(todos) != 1 || len(todos[0].Servicos) != 1 || todos[0].Servicos[0] != "lances" {
+		t.Errorf("a lista devia trazer só lances como ativo: %+v", todos)
 	}
 	if len(lista("?servico=boletos")) != 0 {
 		t.Error("cliente desligado não devia aparecer no filtro de boletos")
 	}
-	if len(lista("?servico=canopus")) != 1 {
-		t.Error("cliente ligado devia aparecer no filtro de canopus")
+	if len(lista("?servico=lances")) != 1 {
+		t.Error("cliente ligado devia aparecer no filtro de lances")
 	}
 	esperarStatus(t, n.req(http.MethodGet, "/clientes?servico=inventado", nil, nil),
 		http.StatusBadRequest, "filtro com serviço que não existe")
@@ -120,7 +120,7 @@ func TestLigarEDesligarServicoDoCliente(t *testing.T) {
 		http.StatusBadRequest, "sem dizer se liga ou desliga")
 }
 
-func TestClienteDesligadoDoCanopusFicaForaDasExecucoes(t *testing.T) {
+func TestClienteDesligadoDosLancesFicaForaDasExecucoes(t *testing.T) {
 	s := novoServidorTeste(t)
 	h := s.Rotas()
 	criarUsuario(t, s, "operador@exemplo.com", db.PerfilUsuarioOperador)
@@ -132,8 +132,8 @@ func TestClienteDesligadoDoCanopusFicaForaDasExecucoes(t *testing.T) {
 	fora := n.cadastrarCliente(t, map[string]any{
 		"nome": "CLIENTE DESLIGADO", "cotas": []map[string]any{cotaFicticia("1234", "99", nil)},
 	})
-	esperarStatus(t, n.enviarJSON(http.MethodPut, fmt.Sprintf("/clientes/%d/servicos/canopus", fora.Cliente.ID),
-		map[string]any{"ativo": false}), http.StatusOK, "desligar o canopus")
+	esperarStatus(t, n.enviarJSON(http.MethodPut, fmt.Sprintf("/clientes/%d/servicos/lances", fora.Cliente.ID),
+		map[string]any{"ativo": false}), http.StatusOK, "desligar os lances")
 
 	// A cota do desligado não entra num dry-run pedido na tela: a execução inteira é recusada,
 	// com a contagem, em vez de a cota sumir em silêncio.
@@ -156,9 +156,9 @@ func TestClienteDesligadoDoCanopusFicaForaDasExecucoes(t *testing.T) {
 	}
 
 	// A tela de novo dry-run pede a lista já filtrada, para não oferecer o que seria recusado.
-	canopus := "canopus"
+	lances := "lances"
 	ativa := true
-	cotas, err := s.q.ListarCotas(context.Background(), db.ListarCotasParams{Ativa: &ativa, Servico: &canopus})
+	cotas, err := s.q.ListarCotas(context.Background(), db.ListarCotasParams{Ativa: &ativa, Servico: &lances})
 	if err != nil {
 		t.Fatal(err)
 	}

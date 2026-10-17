@@ -8,10 +8,10 @@
 -- Agora quem decide é esta tabela, e o documento volta a ser só um dado do cliente.
 CREATE TABLE cliente_servicos (
     cliente_id    bigint      NOT NULL REFERENCES clientes (id) ON DELETE CASCADE,
-    -- Serviços que agem sobre um cliente. 'canopus' é o credenciamento de lances no Newcon e
+    -- Serviços que agem sobre um cliente. 'lances' é o credenciamento de lances no Newcon e
     -- 'boletos' é o envio e a cobrança do Boleto Fácil. Reservas não entra: hóspede não é
     -- cliente do cadastro. Serviço novo = migração nova, junto do código que o use.
-    servico       text        NOT NULL CHECK (servico IN ('canopus', 'boletos')),
+    servico       text        NOT NULL CHECK (servico IN ('lances', 'boletos')),
     ativo         boolean     NOT NULL DEFAULT true,
     -- Quem ligou ou desligou por último: a tela mostra de onde veio a decisão.
     alterado_por  bigint      REFERENCES usuarios (id),
@@ -28,7 +28,7 @@ CREATE INDEX cliente_servicos_servico_idx ON cliente_servicos (servico) WHERE at
 INSERT INTO cliente_servicos (cliente_id, servico)
 SELECT c.id, s.servico
 FROM clientes c
-CROSS JOIN (VALUES ('canopus'), ('boletos')) AS s (servico);
+CROSS JOIN (VALUES ('lances'), ('boletos')) AS s (servico);
 
 -- O assistente responde "quem está ativo no serviço X": tabela nova precisa do GRANT
 -- (migração 00011). Não há coluna sensível aqui.

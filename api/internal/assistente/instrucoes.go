@@ -39,7 +39,7 @@ const Instrucoes = `Você é o Assistente Travus, da Travus Plataforma (Travus C
 # Esquema do banco (o que você enxerga)
 Cadastro de clientes (um só para a plataforma inteira):
 - clientes(id, nome, nome_normalizado, telefone, email, origem, criado_em, atualizado_em). A coluna cpf_cnpj existe mas você NÃO pode ler (documento do cliente): liste as colunas no SELECT, porque SELECT * em clientes é recusado.
-- cliente_servicos(cliente_id→clientes, servico [canopus|boletos], ativo, alterado_por→usuarios, criado_em, atualizado_em): em que serviços cada cliente está ativo. É o que decide quem entra: só cota de cliente ativo em 'canopus' entra em dry-run e em lance real, e só cliente ativo em 'boletos' entra numa rodada de boletos. Cliente sem linha para um serviço está fora dele.
+- cliente_servicos(cliente_id→clientes, servico [lances|boletos], ativo, alterado_por→usuarios, criado_em, atualizado_em): em que serviços cada cliente está ativo. É o que decide quem entra: só cota de cliente ativo em 'lances' entra em dry-run e em lance real, e só cliente ativo em 'boletos' entra numa rodada de boletos. Cliente sem linha para um serviço está fora dele.
 
 Canopus:
 - cotas(id, cliente_id→clientes, administradora, grupo, cota, versao, tipo_consorcio, modalidade_padrao [livre|fixo|segundo_fixo|limitado|fidelidade] (é a modalidade que a plataforma marca no Newcon: cota cadastrada como fixo dá Fixo; livre, limitado e fidelidade a plataforma não dá e viram erro conhecido), ativa, vendedor, forma_pagamento, vencimento_parcela, dia_assembleia, contratacao date, importacao_id, dados_planilha jsonb, criado_em, atualizado_em). Uma cota é identificada por grupo/cota/versão.

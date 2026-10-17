@@ -140,7 +140,7 @@ func (s *Servidor) criarExecucao(w http.ResponseWriter, r *http.Request, u *Usua
 	}
 	if int(n) != len(ids) {
 		responderErro(w, http.StatusUnprocessableEntity, fmt.Sprintf(
-			"%d cota(s) escolhida(s) não existem, estão inativas ou são de cliente desligado do Canopus: atualize a lista e tente de novo",
+			"%d cota(s) escolhida(s) não existem, estão inativas ou são de cliente desligado do serviço de Lances: atualize a lista e tente de novo",
 			len(ids)-int(n)))
 		return
 	}

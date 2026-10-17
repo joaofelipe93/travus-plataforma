@@ -17,7 +17,7 @@ FROM cotas q
 JOIN clientes c ON c.id = q.cliente_id
 WHERE q.id = ANY(@cota_ids::bigint[]) AND q.ativa
   AND EXISTS (SELECT 1 FROM cliente_servicos cs
-              WHERE cs.cliente_id = c.id AND cs.servico = 'canopus' AND cs.ativo);
+              WHERE cs.cliente_id = c.id AND cs.servico = 'lances' AND cs.ativo);
 
 -- Execução real: sempre aprovada a partir de um dry-run.
 -- origem: 'manual' (admin aprovou na tela) ou 'agendada' (lance real automático).
@@ -267,7 +267,7 @@ FROM cotas q
 JOIN clientes c ON c.id = q.cliente_id
 WHERE q.ativa
   AND EXISTS (SELECT 1 FROM cliente_servicos cs
-              WHERE cs.cliente_id = c.id AND cs.servico = 'canopus' AND cs.ativo)
+              WHERE cs.cliente_id = c.id AND cs.servico = 'lances' AND cs.ativo)
 ORDER BY c.nome, q.grupo, q.cota, q.versao;
 
 -- Execuções agendadas que terminaram e ainda não foram avisadas por e-mail. Vale para o

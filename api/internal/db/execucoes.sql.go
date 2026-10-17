@@ -257,7 +257,7 @@ FROM cotas q
 JOIN clientes c ON c.id = q.cliente_id
 WHERE q.ativa
   AND EXISTS (SELECT 1 FROM cliente_servicos cs
-              WHERE cs.cliente_id = c.id AND cs.servico = 'canopus' AND cs.ativo)
+              WHERE cs.cliente_id = c.id AND cs.servico = 'lances' AND cs.ativo)
 ORDER BY c.nome, q.grupo, q.cota, q.versao
 `
 
@@ -792,7 +792,7 @@ FROM cotas q
 JOIN clientes c ON c.id = q.cliente_id
 WHERE q.id = ANY($2::bigint[]) AND q.ativa
   AND EXISTS (SELECT 1 FROM cliente_servicos cs
-              WHERE cs.cliente_id = c.id AND cs.servico = 'canopus' AND cs.ativo)
+              WHERE cs.cliente_id = c.id AND cs.servico = 'lances' AND cs.ativo)
 `
 
 type InserirCotasNaExecucaoParams struct {

@@ -10,7 +10,7 @@ package servicos
 
 // ID de um serviço, como ele aparece no banco e na API.
 const (
-	Canopus = "canopus"
+	Lances  = "lances"
 	Boletos = "boletos"
 )
 
@@ -24,7 +24,7 @@ type Servico struct {
 
 // Todos, na ordem em que a tela mostra.
 var Todos = []Servico{
-	{ID: Canopus, Nome: "Canopus", Descricao: "As cotas do cliente entram nos dry-runs e nos lances do Newcon."},
+	{ID: Lances, Nome: "Lances", Descricao: "As cotas do cliente entram nos dry-runs e nos lances do Newcon."},
 	{ID: Boletos, Nome: "Boletos", Descricao: "As rodadas do mês buscam os boletos do cliente e mandam no WhatsApp dele."},
 }
 

@@ -232,12 +232,12 @@ O cadastro de clientes é **um só para a plataforma inteira** (decisão do usu�
 **ativação por cliente** (`cliente_servicos`, migração 00018). Não há mais importação de planilha.
 
 - **Ativação por serviço**: `cliente_servicos(cliente_id, servico, ativo, alterado_por)`, com `servico` em
-  `canopus` (lances no Newcon) ou `boletos` (Boleto Fácil). O catálogo da API é `internal/servicos` e o CHECK
-  do banco tem a mesma lista: **serviço novo entra nos dois, numa migração**. Só cota de cliente **ativo no
-  Canopus** entra em dry-run e em lance real; só cliente **ativo em boletos** entra numa rodada. Desligar não
+  `lances` (credenciamento no Newcon) ou `boletos` (Boleto Fácil). O catálogo da API é `internal/servicos` e o
+  CHECK do banco tem a mesma lista: **serviço novo entra nos dois, numa migração**. Só cota de cliente **ativo
+  em lances** entra em dry-run e em lance real; só cliente **ativo em boletos** entra numa rodada. Desligar não
   apaga nada e não mexe em cota — a cota simplesmente para de entrar nas execuções daquele serviço, e a
   resposta diz quantas cotas ativas aquilo afeta. Cliente novo sem a lista `servicos` nasce ativo em todos
-  (é como era antes). `GET /clientes?servico=canopus` filtra a carteira de um serviço.
+  (é como era antes). `GET /clientes?servico=lances` filtra a carteira de um serviço.
 - Antes da 00018 isso era implícito e cada serviço inventava a regra: o dry-run pegava toda cota ativa e a
   rodada de boletos pegava todo cliente com CPF/CNPJ — ou seja, **preencher um documento ligava um serviço
   sem querer**. Agora o documento é só um dado do cliente.
