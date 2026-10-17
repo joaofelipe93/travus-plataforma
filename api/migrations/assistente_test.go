@@ -39,6 +39,8 @@ func TestPapelAssistenteSoLeOPermitido(t *testing.T) {
 		"SELECT count(*) FROM boletos.rodada_clientes",
 		"SELECT parcela, vencimento, valor_centavos FROM boletos.parcelas",
 		"SELECT count(*) FROM boletos.eventos",
+		"SELECT id, tipo, destino_nome, status FROM boletos.mensagens",
+		"SELECT dia_envio, dia_cobranca, envio_habilitado FROM boletos.configuracao",
 	} {
 		if _, err := tx.ExecContext(ctx, consulta); err != nil {
 			t.Fatalf("assistente deveria ler %q: %v", consulta, err)
@@ -49,7 +51,10 @@ func TestPapelAssistenteSoLeOPermitido(t *testing.T) {
 	for _, consulta := range []string{
 		"SELECT senha_hash FROM usuarios",
 		"SELECT * FROM usuarios",
-		"SELECT cpf_cnpj FROM clientes", // documento do cliente: fora do alcance do assistente
+		"SELECT cpf_cnpj FROM clientes",                  // documento do cliente: fora do alcance do assistente
+		"SELECT destino_telefone FROM boletos.mensagens", // telefone e anexo do boleto também não
+		"SELECT anexo_pdf FROM boletos.mensagens",
+		"SELECT * FROM boletos.mensagens",
 		"SELECT * FROM clientes",
 		"SELECT count(*) FROM sessoes",
 		"SELECT dados_cifrados FROM integracoes",

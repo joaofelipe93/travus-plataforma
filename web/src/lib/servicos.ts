@@ -28,6 +28,10 @@ export const servicos: readonly Servico[] = [
       { href: "/canopus/execucoes", rotulo: "Execuções", perfis: null },
       { href: "/canopus/cotas", rotulo: "Cotas", perfis: null },
       { href: "/canopus/clientes", rotulo: "Clientes", perfis: null },
+      // Serviço de boletos (issue #48): rodadas do mês, fila de mensagens e configuração.
+      { href: "/canopus/boletos", rotulo: "Boletos", perfis: null },
+      // O QR dá acesso à conta do WhatsApp dos clientes: só admin.
+      { href: "/canopus/boletos/whatsapp", rotulo: "WhatsApp dos boletos", perfis: ["admin"] },
       // Todo perfil vê o agendamento e os prazos; admin e operador editam (a API decide).
       { href: "/canopus/configuracao", rotulo: "Configurações", perfis: null },
     ],

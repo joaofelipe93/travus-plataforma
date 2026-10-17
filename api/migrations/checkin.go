@@ -30,6 +30,13 @@ func DefinirSenhaAssistente(ctx context.Context, db Executor, senha string) erro
 	return definirSenhaPapel(ctx, db, "assistente", "ASSISTENTE_DB_SENHA", "00011", senha)
 }
 
+// DefinirSenhaBoletos liga o login do papel `boletos` (migração 00017) com a senha de
+// BOLETOS_DB_SENHA. É o papel do serviço que manda os boletos no WhatsApp: só a fila de
+// mensagens e a configuração do schema boletos.
+func DefinirSenhaBoletos(ctx context.Context, db Executor, senha string) error {
+	return definirSenhaPapel(ctx, db, "boletos", "BOLETOS_DB_SENHA", "00017", senha)
+}
+
 func definirSenhaPapel(ctx context.Context, db Executor, papel, variavel, migracao, senha string) error {
 	if len(senha) < TamanhoMinimoSenhaCheckin {
 		return fmt.Errorf("%s precisa ter ao menos %d caracteres", variavel, TamanhoMinimoSenhaCheckin)

@@ -405,3 +405,171 @@ export type RespostaConfiguracaoCanopus = {
   // Chave LANCE_REAL_HABILITADO do servidor: desligada, nenhum lance real acontece.
   lance_real_habilitado: boolean;
 };
+
+
+// ===== Serviço de boletos da Canopus (issue #48) =====
+
+// Uma rodada é uma passada pelo cadastro: 'envio' busca os boletos do mês e manda; 'cobranca'
+// pergunta de novo depois e cobra quem não pagou.
+export type TipoRodada = "envio" | "cobranca";
+
+export type StatusRodada =
+  | "na_fila"
+  | "em_andamento"
+  | "concluida"
+  | "concluida_com_erros"
+  | "cancelada"
+  | "falhou";
+
+export type RodadaResumo = {
+  id: number;
+  tipo: TipoRodada;
+  // Mês de referência, "AAAA-MM".
+  referencia: string;
+  status: StatusRodada;
+  origem: OrigemExecucao;
+  criada_por_nome: string;
+  criada_em: string;
+  finalizada_em: string | null;
+  erro: string | null;
+  total: number;
+  consultados: number;
+  sem_boleto: number;
+  com_erro: number;
+  parcelas: number;
+};
+
+export type Rodada = {
+  id: number;
+  tipo: TipoRodada;
+  referencia: string;
+  status: StatusRodada;
+  origem: OrigemExecucao;
+  criada_por_nome: string;
+  cancelada_por_nome: string | null;
+  cancelamento_solicitado: boolean;
+  erro: string | null;
+  criada_em: string;
+  iniciada_em: string | null;
+  finalizada_em: string | null;
+};
+
+export type StatusClienteRodada =
+  | "pendente"
+  | "em_andamento"
+  | "consultado"
+  | "sem_boleto"
+  | "erro"
+  | "cancelado";
+
+export type ClienteRodada = {
+  id: number;
+  cliente_id: number;
+  ordem: number;
+  cliente_nome: string;
+  status: StatusClienteRodada;
+  erro_tipo: "conhecido" | "inesperado" | null;
+  erro: string | null;
+  // Cotas que o CPF tem na Canopus e quantas delas estão no cadastro.
+  cotas_no_site: number;
+  cotas_casadas: number;
+  tentativas: number;
+  iniciado_em: string | null;
+  finalizado_em: string | null;
+};
+
+export type ParcelaBoleto = {
+  id: number;
+  rodada_cliente_id: number;
+  cota_id: number;
+  grupo: string;
+  cota: string;
+  versao: string;
+  // Texto: vem com zeros à esquerda e pode ser "DIF" (reajuste).
+  parcela: string;
+  vencimento: string;
+  valor_centavos: number;
+  tipo: string;
+  pdf_id: string | null;
+  criada_em: string;
+};
+
+export type StatusMensagemBoleto = "pendente" | "enviada" | "falhou" | "cancelada";
+
+export type MensagemBoleto = {
+  id: number;
+  rodada_cliente_id: number | null;
+  tipo: "envio" | "cobranca" | "teste";
+  parcela_id: number | null;
+  destino_nome: string;
+  texto: string;
+  pdf_id: string | null;
+  status: StatusMensagemBoleto;
+  tentativas: number;
+  // Em ensaio, traz o motivo de a mensagem não ter sido enviada.
+  ultimo_erro: string | null;
+  enviada_em: string | null;
+  criada_em: string;
+};
+
+export type EventoRodada = {
+  id: number;
+  rodada_cliente_id: number | null;
+  nivel: "info" | "ok" | "aviso" | "erro";
+  mensagem: string;
+  criado_em: string;
+};
+
+export type DetalheRodada = {
+  rodada: Rodada;
+  clientes: ClienteRodada[];
+  parcelas: ParcelaBoleto[];
+  eventos: EventoRodada[];
+  mensagens: MensagemBoleto[];
+  // Só na cobrança: quantas parcelas do envio do mês já foram pagas.
+  cobranca?: { enviadas: number; pagas: number };
+};
+
+export type ConfiguracaoBoletos = {
+  agendamento_ativo: boolean;
+  dia_envio: number;
+  hora_envio: number;
+  dia_cobranca: number;
+  hora_cobranca: number;
+  // Dia que cai em sábado, domingo ou feriado antecipa para o dia útil anterior (issue #48).
+  antecipar_dia_util: boolean;
+  envio_habilitado: boolean;
+  pausa_envio_segundos: number;
+  max_mensagens_rodada: number;
+  envio_habilitado_por_nome: string;
+  atualizado_por_nome: string;
+  atualizado_em: string;
+  proximo_envio: string;
+  proxima_cobranca: string;
+  // "o dia 14 cai no sábado", quando houve antecipação.
+  motivo_envio: string;
+  motivo_cobranca: string;
+};
+
+export type RespostaConfiguracaoBoletos = {
+  configuracao: ConfiguracaoBoletos;
+  pode_editar: boolean;
+  // Só admin liga o envio no WhatsApp dos clientes.
+  pode_ligar_envio: boolean;
+  // Chave BOLETOS_ENVIO_HABILITADO do servidor: desligada, nada sai.
+  envio_habilitado_servidor: boolean;
+  fila: { pendentes: number; falharam: number; proxima: string | null };
+};
+
+export type SituacaoWhatsappBoletos = {
+  disponivel: boolean;
+  motivo?: string;
+  estado: EstadoWhatsapp;
+  numero: string | null;
+  qr: string | null;
+  envio_habilitado_servico: boolean;
+  envio_habilitado_configuracao: boolean;
+  envio_habilitado_servidor: boolean;
+  pausa_envio_segundos: number;
+  fila: Partial<Record<StatusMensagemBoleto, number>>;
+};

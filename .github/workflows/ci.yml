@@ -111,6 +111,50 @@ jobs:
         working-directory: workers/checkin-whatsapp
         run: npm run typecheck && npm run typecheck:tests && npm test
 
+  boletos-whatsapp:
+    name: Boletos no WhatsApp (TypeScript)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:18.6-alpine
+        env:
+          POSTGRES_USER: travus
+          POSTGRES_PASSWORD: senha-de-teste-da-ci
+          POSTGRES_DB: travus_teste
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U travus" --health-interval 5s --health-timeout 3s --health-retries 20
+    env:
+      TEST_DATABASE_URL: postgres://travus:senha-de-teste-da-ci@localhost:5432/travus_teste?sslmode=disable
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache-dependency-path: api/go.sum
+      - name: Migrações no banco de teste (schema boletos e papel boletos)
+        working-directory: api
+        env:
+          DATABASE_URL: ${{ env.TEST_DATABASE_URL }}
+        run: go run ./cmd/api migrate up
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: workers/boletos-whatsapp/package-lock.json
+      - name: Dependências
+        working-directory: workers/boletos-whatsapp
+        run: npm ci --no-audit --no-fund
+      - name: baileys fixo em 6.7.24
+        working-directory: workers/boletos-whatsapp
+        run: |
+          versao=$(node -p "require('./package-lock.json').packages['node_modules/baileys'].version")
+          [ "$versao" = "6.7.24" ] || { echo "::error::baileys em $versao; a 7.x tem quedas silenciosas de conexão"; exit 1; }
+      - name: Typecheck e testes (nenhum fala com o WhatsApp)
+        working-directory: workers/boletos-whatsapp
+        run: npm run typecheck && npm run typecheck:tests && npm test
+
   web:
     name: Web (Next.js)
     runs-on: ubuntu-24.04
@@ -196,6 +240,8 @@ jobs:
           CHECKIN_ADMIN_TOKEN: x
           CHECKIN_DB_SENHA: x
           ASSISTENTE_DB_SENHA: x
+          BOLETOS_ADMIN_TOKEN: x
+          BOLETOS_DB_SENHA: x
         run: |
           docker compose -f deploy/docker-compose.yml config --quiet
           DOMINIO_APP=app.exemplo.com.br DOMINIO_API=api.exemplo.com.br BACKUP_DIR=/tmp \

@@ -10,6 +10,56 @@ import (
 	"time"
 )
 
+const atualizarConfiguracaoBoletos = `-- name: AtualizarConfiguracaoBoletos :exec
+UPDATE boletos.configuracao
+SET agendamento_ativo    = $1,
+    dia_envio            = $2,
+    hora_envio           = $3,
+    dia_cobranca         = $4,
+    hora_cobranca        = $5,
+    antecipar_dia_util   = $6,
+    envio_habilitado     = $7,
+    envio_habilitado_por = CASE WHEN $7::boolean AND NOT envio_habilitado
+                                THEN $8::bigint
+                                ELSE envio_habilitado_por END,
+    pausa_envio_segundos = $9,
+    max_mensagens_rodada = $10,
+    atualizado_por       = $11,
+    atualizado_em        = now()
+WHERE id
+`
+
+type AtualizarConfiguracaoBoletosParams struct {
+	AgendamentoAtivo   bool
+	DiaEnvio           int16
+	HoraEnvio          int16
+	DiaCobranca        int16
+	HoraCobranca       int16
+	AnteciparDiaUtil   bool
+	EnvioHabilitado    bool
+	EnvioHabilitadoPor *int64
+	PausaEnvioSegundos int16
+	MaxMensagensRodada int32
+	AtualizadoPor      *int64
+}
+
+func (q *Queries) AtualizarConfiguracaoBoletos(ctx context.Context, arg AtualizarConfiguracaoBoletosParams) error {
+	_, err := q.db.Exec(ctx, atualizarConfiguracaoBoletos,
+		arg.AgendamentoAtivo,
+		arg.DiaEnvio,
+		arg.HoraEnvio,
+		arg.DiaCobranca,
+		arg.HoraCobranca,
+		arg.AnteciparDiaUtil,
+		arg.EnvioHabilitado,
+		arg.EnvioHabilitadoPor,
+		arg.PausaEnvioSegundos,
+		arg.MaxMensagensRodada,
+		arg.AtualizadoPor,
+	)
+	return err
+}
+
 const buscarParcelaParaWorker = `-- name: BuscarParcelaParaWorker :one
 SELECT p.id, p.rodada_cliente_id, p.grupo, p.cota, p.versao, p.parcela, p.vencimento, p.pdf_id,
        rc.rodada_id, r.worker, r.status AS rodada_status
@@ -105,6 +155,25 @@ WHERE rodada_id = $1 AND status = 'pendente'
 
 func (q *Queries) CancelarClientesPendentes(ctx context.Context, rodadaID int64) (int64, error) {
 	result, err := q.db.Exec(ctx, cancelarClientesPendentes, rodadaID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const cancelarMensagensPendentesDaRodada = `-- name: CancelarMensagensPendentesDaRodada :execrows
+UPDATE boletos.mensagens
+SET status = 'cancelada', anexo_pdf = NULL, ultimo_erro = $1
+WHERE rodada_id = $2 AND status = 'pendente'
+`
+
+type CancelarMensagensPendentesDaRodadaParams struct {
+	Motivo   *string
+	RodadaID *int64
+}
+
+func (q *Queries) CancelarMensagensPendentesDaRodada(ctx context.Context, arg CancelarMensagensPendentesDaRodadaParams) (int64, error) {
+	result, err := q.db.Exec(ctx, cancelarMensagensPendentesDaRodada, arg.Motivo, arg.RodadaID)
 	if err != nil {
 		return 0, err
 	}
@@ -217,6 +286,65 @@ func (q *Queries) ClientesParaBoletos(ctx context.Context) ([]ClientesParaBoleto
 	return items, nil
 }
 
+const clientesParaCobranca = `-- name: ClientesParaCobranca :many
+SELECT DISTINCT rc.id, rc.cliente_id, rc.cliente_nome, c.telefone
+FROM boletos.rodada_clientes rc
+JOIN boletos.parcelas p ON p.rodada_cliente_id = rc.id
+JOIN clientes c ON c.id = rc.cliente_id
+WHERE rc.rodada_id = $1
+  AND EXISTS (
+      SELECT 1
+      FROM boletos.parcelas pe
+      JOIN boletos.rodada_clientes rce ON rce.id = pe.rodada_cliente_id
+      JOIN boletos.rodadas re ON re.id = rce.rodada_id
+      WHERE re.tipo = 'envio' AND re.referencia = $2
+        AND re.status IN ('concluida', 'concluida_com_erros')
+        AND rce.cliente_id = rc.cliente_id
+        AND pe.cota_id = p.cota_id AND pe.parcela = p.parcela AND pe.vencimento = p.vencimento
+  )
+ORDER BY rc.cliente_nome
+`
+
+type ClientesParaCobrancaParams struct {
+	RodadaID   int64
+	Referencia time.Time
+}
+
+type ClientesParaCobrancaRow struct {
+	ID          int64
+	ClienteID   int64
+	ClienteNome string
+	Telefone    *string
+}
+
+// Clientes desta rodada de COBRANÇA que continuam com uma parcela em aberto que JÁ havia sido
+// mandada na rodada de envio do mês. É a regra da issue #48: o follow-up é para quem recebeu o
+// boleto e não pagou. O site não diz "pago" — pago é a parcela que não volta mais como aberta.
+func (q *Queries) ClientesParaCobranca(ctx context.Context, arg ClientesParaCobrancaParams) ([]ClientesParaCobrancaRow, error) {
+	rows, err := q.db.Query(ctx, clientesParaCobranca, arg.RodadaID, arg.Referencia)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ClientesParaCobrancaRow
+	for rows.Next() {
+		var i ClientesParaCobrancaRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.ClienteID,
+			&i.ClienteNome,
+			&i.Telefone,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const concluirRodadaCliente = `-- name: ConcluirRodadaCliente :execrows
 UPDATE boletos.rodada_clientes
 SET status        = $1,
@@ -252,6 +380,74 @@ func (q *Queries) ConcluirRodadaCliente(ctx context.Context, arg ConcluirRodadaC
 	return result.RowsAffected(), nil
 }
 
+const configuracaoBoletos = `-- name: ConfiguracaoBoletos :one
+
+SELECT c.id, c.agendamento_ativo, c.dia_envio, c.hora_envio, c.dia_cobranca, c.hora_cobranca,
+       c.antecipar_dia_util, c.envio_habilitado, c.envio_habilitado_por, c.pausa_envio_segundos,
+       c.max_mensagens_rodada, c.ultimo_envio_dia, c.ultimo_envio_em, c.ultimo_envio_resultado,
+       c.ultima_cobranca_dia, c.ultima_cobranca_em, c.ultima_cobranca_resultado,
+       c.atualizado_por, c.atualizado_em,
+       u.nome AS atualizado_por_nome, ue.nome AS envio_habilitado_por_nome
+FROM boletos.configuracao c
+LEFT JOIN usuarios u ON u.id = c.atualizado_por
+LEFT JOIN usuarios ue ON ue.id = c.envio_habilitado_por
+WHERE c.id
+`
+
+type ConfiguracaoBoletosRow struct {
+	ID                      bool
+	AgendamentoAtivo        bool
+	DiaEnvio                int16
+	HoraEnvio               int16
+	DiaCobranca             int16
+	HoraCobranca            int16
+	AnteciparDiaUtil        bool
+	EnvioHabilitado         bool
+	EnvioHabilitadoPor      *int64
+	PausaEnvioSegundos      int16
+	MaxMensagensRodada      int32
+	UltimoEnvioDia          *time.Time
+	UltimoEnvioEm           *time.Time
+	UltimoEnvioResultado    *string
+	UltimaCobrancaDia       *time.Time
+	UltimaCobrancaEm        *time.Time
+	UltimaCobrancaResultado *string
+	AtualizadoPor           *int64
+	AtualizadoEm            time.Time
+	AtualizadoPorNome       *string
+	EnvioHabilitadoPorNome  *string
+}
+
+// ===== Etapa 3: fila de mensagens no WhatsApp (migração 00017) =====
+func (q *Queries) ConfiguracaoBoletos(ctx context.Context) (ConfiguracaoBoletosRow, error) {
+	row := q.db.QueryRow(ctx, configuracaoBoletos)
+	var i ConfiguracaoBoletosRow
+	err := row.Scan(
+		&i.ID,
+		&i.AgendamentoAtivo,
+		&i.DiaEnvio,
+		&i.HoraEnvio,
+		&i.DiaCobranca,
+		&i.HoraCobranca,
+		&i.AnteciparDiaUtil,
+		&i.EnvioHabilitado,
+		&i.EnvioHabilitadoPor,
+		&i.PausaEnvioSegundos,
+		&i.MaxMensagensRodada,
+		&i.UltimoEnvioDia,
+		&i.UltimoEnvioEm,
+		&i.UltimoEnvioResultado,
+		&i.UltimaCobrancaDia,
+		&i.UltimaCobrancaEm,
+		&i.UltimaCobrancaResultado,
+		&i.AtualizadoPor,
+		&i.AtualizadoEm,
+		&i.AtualizadoPorNome,
+		&i.EnvioHabilitadoPorNome,
+	)
+	return i, err
+}
+
 const contarClientesDaRodada = `-- name: ContarClientesDaRodada :one
 SELECT count(*)::int                                            AS total,
        (count(*) FILTER (WHERE status = 'pendente'))::int        AS pendentes,
@@ -276,6 +472,37 @@ func (q *Queries) ContarClientesDaRodada(ctx context.Context, rodadaID int64) (C
 		&i.Pendentes,
 		&i.EmAndamento,
 		&i.ComErro,
+	)
+	return i, err
+}
+
+const contarMensagensDaRodada = `-- name: ContarMensagensDaRodada :one
+SELECT count(*)::int                                          AS total,
+       (count(*) FILTER (WHERE status = 'pendente'))::int      AS pendentes,
+       (count(*) FILTER (WHERE status = 'enviada'))::int        AS enviadas,
+       (count(*) FILTER (WHERE status = 'falhou'))::int         AS falharam,
+       (count(*) FILTER (WHERE status = 'cancelada'))::int      AS canceladas
+FROM boletos.mensagens
+WHERE rodada_id = $1
+`
+
+type ContarMensagensDaRodadaRow struct {
+	Total      int32
+	Pendentes  int32
+	Enviadas   int32
+	Falharam   int32
+	Canceladas int32
+}
+
+func (q *Queries) ContarMensagensDaRodada(ctx context.Context, rodadaID *int64) (ContarMensagensDaRodadaRow, error) {
+	row := q.db.QueryRow(ctx, contarMensagensDaRodada, rodadaID)
+	var i ContarMensagensDaRodadaRow
+	err := row.Scan(
+		&i.Total,
+		&i.Pendentes,
+		&i.Enviadas,
+		&i.Falharam,
+		&i.Canceladas,
 	)
 	return i, err
 }
@@ -317,6 +544,50 @@ func (q *Queries) CotasDoCliente(ctx context.Context, clienteID int64) ([]CotasD
 		return nil, err
 	}
 	return items, nil
+}
+
+const criarMensagemBoleto = `-- name: CriarMensagemBoleto :one
+INSERT INTO boletos.mensagens (rodada_id, rodada_cliente_id, tipo, parcela_id, destino_telefone,
+                               destino_nome, texto, pdf_id, anexo_pdf, anexo_nome, status, ultimo_erro)
+VALUES ($1, $2, $3, $4,
+        $5, $6, $7, $8, $9,
+        $10, $11, $12)
+RETURNING id
+`
+
+type CriarMensagemBoletoParams struct {
+	RodadaID        *int64
+	RodadaClienteID *int64
+	Tipo            string
+	ParcelaID       *int64
+	DestinoTelefone string
+	DestinoNome     string
+	Texto           string
+	PdfID           *string
+	AnexoPdf        []byte
+	AnexoNome       *string
+	Status          string
+	UltimoErro      *string
+}
+
+func (q *Queries) CriarMensagemBoleto(ctx context.Context, arg CriarMensagemBoletoParams) (int64, error) {
+	row := q.db.QueryRow(ctx, criarMensagemBoleto,
+		arg.RodadaID,
+		arg.RodadaClienteID,
+		arg.Tipo,
+		arg.ParcelaID,
+		arg.DestinoTelefone,
+		arg.DestinoNome,
+		arg.Texto,
+		arg.PdfID,
+		arg.AnexoPdf,
+		arg.AnexoNome,
+		arg.Status,
+		arg.UltimoErro,
+	)
+	var id int64
+	err := row.Scan(&id)
+	return id, err
 }
 
 const criarParcela = `-- name: CriarParcela :one
@@ -499,6 +770,27 @@ func (q *Queries) DevolverRodadasComTravaVencida(ctx context.Context) ([]Devolve
 	return items, nil
 }
 
+const estadoFilaBoletos = `-- name: EstadoFilaBoletos :one
+SELECT (count(*) FILTER (WHERE status = 'pendente'))::int                       AS pendentes,
+       (count(*) FILTER (WHERE status = 'falhou'))::int                         AS falharam,
+       min(proxima_tentativa_em) FILTER (WHERE status = 'pendente')             AS proxima
+FROM boletos.mensagens
+`
+
+type EstadoFilaBoletosRow struct {
+	Pendentes int32
+	Falharam  int32
+	Proxima   interface{}
+}
+
+// Fila do vigia e da tela: mensagens que desistiram ou estão paradas há tempo.
+func (q *Queries) EstadoFilaBoletos(ctx context.Context) (EstadoFilaBoletosRow, error) {
+	row := q.db.QueryRow(ctx, estadoFilaBoletos)
+	var i EstadoFilaBoletosRow
+	err := row.Scan(&i.Pendentes, &i.Falharam, &i.Proxima)
+	return i, err
+}
+
 const finalizarRodada = `-- name: FinalizarRodada :execrows
 UPDATE boletos.rodadas
 SET status        = $1,
@@ -527,6 +819,16 @@ func (q *Queries) FinalizarRodada(ctx context.Context, arg FinalizarRodadaParams
 		return 0, err
 	}
 	return result.RowsAffected(), nil
+}
+
+const garantirConfiguracaoBoletos = `-- name: GarantirConfiguracaoBoletos :exec
+INSERT INTO boletos.configuracao (id) VALUES (true) ON CONFLICT (id) DO NOTHING
+`
+
+// A linha se recria sozinha se alguém a apagar (o TRUNCATE dos testes leva ela).
+func (q *Queries) GarantirConfiguracaoBoletos(ctx context.Context) error {
+	_, err := q.db.Exec(ctx, garantirConfiguracaoBoletos)
+	return err
 }
 
 const iniciarRodadaCliente = `-- name: IniciarRodadaCliente :execrows
@@ -597,6 +899,62 @@ func (q *Queries) ListarEventosDaRodada(ctx context.Context, rodadaID int64) ([]
 			&i.Mensagem,
 			&i.Dados,
 			&i.CriadoEm,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listarMensagensDaRodada = `-- name: ListarMensagensDaRodada :many
+SELECT m.id, m.rodada_cliente_id, m.tipo, m.parcela_id, m.destino_nome, m.texto, m.pdf_id,
+       m.status, m.tentativas, m.ultimo_erro, m.enviada_em, m.criada_em
+FROM boletos.mensagens m
+WHERE m.rodada_id = $1
+ORDER BY m.id
+`
+
+type ListarMensagensDaRodadaRow struct {
+	ID              int64
+	RodadaClienteID *int64
+	Tipo            string
+	ParcelaID       *int64
+	DestinoNome     string
+	Texto           string
+	PdfID           *string
+	Status          string
+	Tentativas      int32
+	UltimoErro      *string
+	EnviadaEm       *time.Time
+	CriadaEm        time.Time
+}
+
+func (q *Queries) ListarMensagensDaRodada(ctx context.Context, rodadaID *int64) ([]ListarMensagensDaRodadaRow, error) {
+	rows, err := q.db.Query(ctx, listarMensagensDaRodada, rodadaID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListarMensagensDaRodadaRow
+	for rows.Next() {
+		var i ListarMensagensDaRodadaRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.RodadaClienteID,
+			&i.Tipo,
+			&i.ParcelaID,
+			&i.DestinoNome,
+			&i.Texto,
+			&i.PdfID,
+			&i.Status,
+			&i.Tentativas,
+			&i.UltimoErro,
+			&i.EnviadaEm,
+			&i.CriadaEm,
 		); err != nil {
 			return nil, err
 		}
@@ -837,6 +1195,67 @@ func (q *Queries) ParcelasDoEnvio(ctx context.Context, referencia time.Time) ([]
 	return items, nil
 }
 
+const parcelasParaMensagem = `-- name: ParcelasParaMensagem :many
+SELECT p.id, p.rodada_cliente_id, p.grupo, p.cota, p.parcela, p.vencimento, p.valor_centavos,
+       p.pdf_id, rc.cliente_nome, c.telefone, a.conteudo AS pdf_conteudo, a.nome AS pdf_nome
+FROM boletos.parcelas p
+JOIN boletos.rodada_clientes rc ON rc.id = p.rodada_cliente_id
+JOIN clientes c ON c.id = rc.cliente_id
+LEFT JOIN arquivos a ON a.id = p.pdf_id
+WHERE rc.rodada_id = $1
+ORDER BY rc.ordem, p.grupo, p.cota, p.vencimento
+`
+
+type ParcelasParaMensagemRow struct {
+	ID              int64
+	RodadaClienteID int64
+	Grupo           string
+	Cota            string
+	Parcela         string
+	Vencimento      time.Time
+	ValorCentavos   int64
+	PdfID           *string
+	ClienteNome     string
+	Telefone        *string
+	PdfConteudo     []byte
+	PdfNome         *string
+}
+
+// Parcelas de uma rodada com o que a mensagem de envio precisa, inclusive o PDF (uma cópia vai
+// para a fila e é apagada no envio).
+func (q *Queries) ParcelasParaMensagem(ctx context.Context, rodadaID int64) ([]ParcelasParaMensagemRow, error) {
+	rows, err := q.db.Query(ctx, parcelasParaMensagem, rodadaID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ParcelasParaMensagemRow
+	for rows.Next() {
+		var i ParcelasParaMensagemRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.RodadaClienteID,
+			&i.Grupo,
+			&i.Cota,
+			&i.Parcela,
+			&i.Vencimento,
+			&i.ValorCentavos,
+			&i.PdfID,
+			&i.ClienteNome,
+			&i.Telefone,
+			&i.PdfConteudo,
+			&i.PdfNome,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const proximoClienteDaRodada = `-- name: ProximoClienteDaRodada :one
 SELECT rc.id, rc.cliente_id, rc.cliente_nome, c.cpf_cnpj::text AS cpf_cnpj
 FROM boletos.rodada_clientes rc
@@ -872,6 +1291,38 @@ func (q *Queries) ProximoClienteDaRodada(ctx context.Context, arg ProximoCliente
 		&i.CpfCnpj,
 	)
 	return i, err
+}
+
+const registrarDisparoCobranca = `-- name: RegistrarDisparoCobranca :exec
+UPDATE boletos.configuracao
+SET ultima_cobranca_dia = $1, ultima_cobranca_em = now(), ultima_cobranca_resultado = $2
+WHERE id
+`
+
+type RegistrarDisparoCobrancaParams struct {
+	Dia       *time.Time
+	Resultado *string
+}
+
+func (q *Queries) RegistrarDisparoCobranca(ctx context.Context, arg RegistrarDisparoCobrancaParams) error {
+	_, err := q.db.Exec(ctx, registrarDisparoCobranca, arg.Dia, arg.Resultado)
+	return err
+}
+
+const registrarDisparoEnvio = `-- name: RegistrarDisparoEnvio :exec
+UPDATE boletos.configuracao
+SET ultimo_envio_dia = $1, ultimo_envio_em = now(), ultimo_envio_resultado = $2
+WHERE id
+`
+
+type RegistrarDisparoEnvioParams struct {
+	Dia       *time.Time
+	Resultado *string
+}
+
+func (q *Queries) RegistrarDisparoEnvio(ctx context.Context, arg RegistrarDisparoEnvioParams) error {
+	_, err := q.db.Exec(ctx, registrarDisparoEnvio, arg.Dia, arg.Resultado)
+	return err
 }
 
 const registrarEventoBoleto = `-- name: RegistrarEventoBoleto :exec
@@ -947,6 +1398,44 @@ func (q *Queries) ReservarProximaRodada(ctx context.Context, worker *string) (Re
 	return i, err
 }
 
+const resumoCobranca = `-- name: ResumoCobranca :one
+WITH enviadas AS (
+    SELECT rce.cliente_id, pe.cota_id, pe.parcela, pe.vencimento
+    FROM boletos.parcelas pe
+    JOIN boletos.rodada_clientes rce ON rce.id = pe.rodada_cliente_id
+    JOIN boletos.rodadas re ON re.id = rce.rodada_id
+    WHERE re.tipo = 'envio' AND re.referencia = $1
+      AND re.status IN ('concluida', 'concluida_com_erros')
+), abertas AS (
+    SELECT rc.cliente_id, p.cota_id, p.parcela, p.vencimento
+    FROM boletos.parcelas p
+    JOIN boletos.rodada_clientes rc ON rc.id = p.rodada_cliente_id
+    WHERE rc.rodada_id = $2
+)
+SELECT (SELECT count(*) FROM enviadas)::int                                     AS enviadas,
+       (SELECT count(*) FROM enviadas e WHERE NOT EXISTS (
+            SELECT 1 FROM abertas a WHERE a.cliente_id = e.cliente_id AND a.cota_id = e.cota_id
+              AND a.parcela = e.parcela AND a.vencimento = e.vencimento))::int   AS pagas
+`
+
+type ResumoCobrancaParams struct {
+	Referencia time.Time
+	RodadaID   int64
+}
+
+type ResumoCobrancaRow struct {
+	Enviadas int32
+	Pagas    int32
+}
+
+// Quantas parcelas do envio do mês não voltaram na cobrança: foram pagas.
+func (q *Queries) ResumoCobranca(ctx context.Context, arg ResumoCobrancaParams) (ResumoCobrancaRow, error) {
+	row := q.db.QueryRow(ctx, resumoCobranca, arg.Referencia, arg.RodadaID)
+	var i ResumoCobrancaRow
+	err := row.Scan(&i.Enviadas, &i.Pagas)
+	return i, err
+}
+
 const rodadaParaWorker = `-- name: RodadaParaWorker :one
 SELECT id, tipo, referencia, status, worker, cancelamento_solicitado
 FROM boletos.rodadas
@@ -973,6 +1462,47 @@ func (q *Queries) RodadaParaWorker(ctx context.Context, id int64) (RodadaParaWor
 		&i.Status,
 		&i.Worker,
 		&i.CancelamentoSolicitado,
+	)
+	return i, err
+}
+
+const travarConfiguracaoBoletos = `-- name: TravarConfiguracaoBoletos :one
+SELECT agendamento_ativo, dia_envio, hora_envio, dia_cobranca, hora_cobranca, antecipar_dia_util,
+       ultimo_envio_dia, ultima_cobranca_dia, atualizado_por, envio_habilitado_por
+FROM boletos.configuracao
+WHERE id
+FOR UPDATE
+`
+
+type TravarConfiguracaoBoletosRow struct {
+	AgendamentoAtivo   bool
+	DiaEnvio           int16
+	HoraEnvio          int16
+	DiaCobranca        int16
+	HoraCobranca       int16
+	AnteciparDiaUtil   bool
+	UltimoEnvioDia     *time.Time
+	UltimaCobrancaDia  *time.Time
+	AtualizadoPor      *int64
+	EnvioHabilitadoPor *int64
+}
+
+// Trava a linha da configuração para decidir o agendamento sem concorrência (mesmo desenho do
+// dry-run agendado do Canopus).
+func (q *Queries) TravarConfiguracaoBoletos(ctx context.Context) (TravarConfiguracaoBoletosRow, error) {
+	row := q.db.QueryRow(ctx, travarConfiguracaoBoletos)
+	var i TravarConfiguracaoBoletosRow
+	err := row.Scan(
+		&i.AgendamentoAtivo,
+		&i.DiaEnvio,
+		&i.HoraEnvio,
+		&i.DiaCobranca,
+		&i.HoraCobranca,
+		&i.AnteciparDiaUtil,
+		&i.UltimoEnvioDia,
+		&i.UltimaCobrancaDia,
+		&i.AtualizadoPor,
+		&i.EnvioHabilitadoPor,
 	)
 	return i, err
 }

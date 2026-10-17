@@ -86,6 +86,28 @@ type Auditoria struct {
 	CriadoEm   time.Time
 }
 
+type BoletosConfiguracao struct {
+	ID                      bool
+	AgendamentoAtivo        bool
+	DiaEnvio                int16
+	HoraEnvio               int16
+	DiaCobranca             int16
+	HoraCobranca            int16
+	AnteciparDiaUtil        bool
+	EnvioHabilitado         bool
+	EnvioHabilitadoPor      *int64
+	PausaEnvioSegundos      int16
+	MaxMensagensRodada      int32
+	UltimoEnvioDia          *time.Time
+	UltimoEnvioEm           *time.Time
+	UltimoEnvioResultado    *string
+	UltimaCobrancaDia       *time.Time
+	UltimaCobrancaEm        *time.Time
+	UltimaCobrancaResultado *string
+	AtualizadoPor           *int64
+	AtualizadoEm            time.Time
+}
+
 type BoletosEvento struct {
 	ID              int64
 	RodadaID        int64
@@ -94,6 +116,26 @@ type BoletosEvento struct {
 	Mensagem        string
 	Dados           []byte
 	CriadoEm        time.Time
+}
+
+type BoletosMensagen struct {
+	ID                 int64
+	RodadaID           *int64
+	RodadaClienteID    *int64
+	Tipo               string
+	ParcelaID          *int64
+	DestinoTelefone    string
+	DestinoNome        string
+	Texto              string
+	PdfID              *string
+	AnexoPdf           []byte
+	AnexoNome          *string
+	Status             string
+	Tentativas         int32
+	ProximaTentativaEm time.Time
+	UltimoErro         *string
+	EnviadaEm          *time.Time
+	CriadaEm           time.Time
 }
 
 type BoletosParcela struct {

@@ -1,0 +1,12 @@
+# Segredos e a sessão do WhatsApp nunca entram na imagem: chegam por variável de ambiente e volume.
+.env
+.env.*
+!.env.example
+data
+dados
+
+node_modules
+dist
+tests
+logs
+*.log

@@ -228,3 +228,147 @@ SET status        = @status,
     worker        = NULL,
     trava_ate     = NULL
 WHERE id = @id AND worker = @worker AND status = 'em_andamento';
+
+-- ===== Etapa 3: fila de mensagens no WhatsApp (migração 00017) =====
+
+-- name: ConfiguracaoBoletos :one
+SELECT c.id, c.agendamento_ativo, c.dia_envio, c.hora_envio, c.dia_cobranca, c.hora_cobranca,
+       c.antecipar_dia_util, c.envio_habilitado, c.envio_habilitado_por, c.pausa_envio_segundos,
+       c.max_mensagens_rodada, c.ultimo_envio_dia, c.ultimo_envio_em, c.ultimo_envio_resultado,
+       c.ultima_cobranca_dia, c.ultima_cobranca_em, c.ultima_cobranca_resultado,
+       c.atualizado_por, c.atualizado_em,
+       u.nome AS atualizado_por_nome, ue.nome AS envio_habilitado_por_nome
+FROM boletos.configuracao c
+LEFT JOIN usuarios u ON u.id = c.atualizado_por
+LEFT JOIN usuarios ue ON ue.id = c.envio_habilitado_por
+WHERE c.id;
+
+-- A linha se recria sozinha se alguém a apagar (o TRUNCATE dos testes leva ela).
+-- name: GarantirConfiguracaoBoletos :exec
+INSERT INTO boletos.configuracao (id) VALUES (true) ON CONFLICT (id) DO NOTHING;
+
+-- name: AtualizarConfiguracaoBoletos :exec
+UPDATE boletos.configuracao
+SET agendamento_ativo    = @agendamento_ativo,
+    dia_envio            = @dia_envio,
+    hora_envio           = @hora_envio,
+    dia_cobranca         = @dia_cobranca,
+    hora_cobranca        = @hora_cobranca,
+    antecipar_dia_util   = @antecipar_dia_util,
+    envio_habilitado     = @envio_habilitado,
+    envio_habilitado_por = CASE WHEN @envio_habilitado::boolean AND NOT envio_habilitado
+                                THEN sqlc.narg(envio_habilitado_por)::bigint
+                                ELSE envio_habilitado_por END,
+    pausa_envio_segundos = @pausa_envio_segundos,
+    max_mensagens_rodada = @max_mensagens_rodada,
+    atualizado_por       = sqlc.narg(atualizado_por),
+    atualizado_em        = now()
+WHERE id;
+
+-- name: RegistrarDisparoEnvio :exec
+UPDATE boletos.configuracao
+SET ultimo_envio_dia = @dia, ultimo_envio_em = now(), ultimo_envio_resultado = @resultado
+WHERE id;
+
+-- name: RegistrarDisparoCobranca :exec
+UPDATE boletos.configuracao
+SET ultima_cobranca_dia = @dia, ultima_cobranca_em = now(), ultima_cobranca_resultado = @resultado
+WHERE id;
+
+-- Trava a linha da configuração para decidir o agendamento sem concorrência (mesmo desenho do
+-- dry-run agendado do Canopus).
+-- name: TravarConfiguracaoBoletos :one
+SELECT agendamento_ativo, dia_envio, hora_envio, dia_cobranca, hora_cobranca, antecipar_dia_util,
+       ultimo_envio_dia, ultima_cobranca_dia, atualizado_por, envio_habilitado_por
+FROM boletos.configuracao
+WHERE id
+FOR UPDATE;
+
+-- Parcelas de uma rodada com o que a mensagem de envio precisa, inclusive o PDF (uma cópia vai
+-- para a fila e é apagada no envio).
+-- name: ParcelasParaMensagem :many
+SELECT p.id, p.rodada_cliente_id, p.grupo, p.cota, p.parcela, p.vencimento, p.valor_centavos,
+       p.pdf_id, rc.cliente_nome, c.telefone, a.conteudo AS pdf_conteudo, a.nome AS pdf_nome
+FROM boletos.parcelas p
+JOIN boletos.rodada_clientes rc ON rc.id = p.rodada_cliente_id
+JOIN clientes c ON c.id = rc.cliente_id
+LEFT JOIN arquivos a ON a.id = p.pdf_id
+WHERE rc.rodada_id = @rodada_id
+ORDER BY rc.ordem, p.grupo, p.cota, p.vencimento;
+
+-- Clientes desta rodada de COBRANÇA que continuam com uma parcela em aberto que JÁ havia sido
+-- mandada na rodada de envio do mês. É a regra da issue #48: o follow-up é para quem recebeu o
+-- boleto e não pagou. O site não diz "pago" — pago é a parcela que não volta mais como aberta.
+-- name: ClientesParaCobranca :many
+SELECT DISTINCT rc.id, rc.cliente_id, rc.cliente_nome, c.telefone
+FROM boletos.rodada_clientes rc
+JOIN boletos.parcelas p ON p.rodada_cliente_id = rc.id
+JOIN clientes c ON c.id = rc.cliente_id
+WHERE rc.rodada_id = @rodada_id
+  AND EXISTS (
+      SELECT 1
+      FROM boletos.parcelas pe
+      JOIN boletos.rodada_clientes rce ON rce.id = pe.rodada_cliente_id
+      JOIN boletos.rodadas re ON re.id = rce.rodada_id
+      WHERE re.tipo = 'envio' AND re.referencia = @referencia
+        AND re.status IN ('concluida', 'concluida_com_erros')
+        AND rce.cliente_id = rc.cliente_id
+        AND pe.cota_id = p.cota_id AND pe.parcela = p.parcela AND pe.vencimento = p.vencimento
+  )
+ORDER BY rc.cliente_nome;
+
+-- Quantas parcelas do envio do mês não voltaram na cobrança: foram pagas.
+-- name: ResumoCobranca :one
+WITH enviadas AS (
+    SELECT rce.cliente_id, pe.cota_id, pe.parcela, pe.vencimento
+    FROM boletos.parcelas pe
+    JOIN boletos.rodada_clientes rce ON rce.id = pe.rodada_cliente_id
+    JOIN boletos.rodadas re ON re.id = rce.rodada_id
+    WHERE re.tipo = 'envio' AND re.referencia = @referencia
+      AND re.status IN ('concluida', 'concluida_com_erros')
+), abertas AS (
+    SELECT rc.cliente_id, p.cota_id, p.parcela, p.vencimento
+    FROM boletos.parcelas p
+    JOIN boletos.rodada_clientes rc ON rc.id = p.rodada_cliente_id
+    WHERE rc.rodada_id = @rodada_id
+)
+SELECT (SELECT count(*) FROM enviadas)::int                                     AS enviadas,
+       (SELECT count(*) FROM enviadas e WHERE NOT EXISTS (
+            SELECT 1 FROM abertas a WHERE a.cliente_id = e.cliente_id AND a.cota_id = e.cota_id
+              AND a.parcela = e.parcela AND a.vencimento = e.vencimento))::int   AS pagas;
+
+-- name: CriarMensagemBoleto :one
+INSERT INTO boletos.mensagens (rodada_id, rodada_cliente_id, tipo, parcela_id, destino_telefone,
+                               destino_nome, texto, pdf_id, anexo_pdf, anexo_nome, status, ultimo_erro)
+VALUES (sqlc.narg(rodada_id), sqlc.narg(rodada_cliente_id), @tipo, sqlc.narg(parcela_id),
+        @destino_telefone, @destino_nome, @texto, sqlc.narg(pdf_id), sqlc.narg(anexo_pdf),
+        sqlc.narg(anexo_nome), @status, sqlc.narg(ultimo_erro))
+RETURNING id;
+
+-- name: ListarMensagensDaRodada :many
+SELECT m.id, m.rodada_cliente_id, m.tipo, m.parcela_id, m.destino_nome, m.texto, m.pdf_id,
+       m.status, m.tentativas, m.ultimo_erro, m.enviada_em, m.criada_em
+FROM boletos.mensagens m
+WHERE m.rodada_id = @rodada_id
+ORDER BY m.id;
+
+-- name: ContarMensagensDaRodada :one
+SELECT count(*)::int                                          AS total,
+       (count(*) FILTER (WHERE status = 'pendente'))::int      AS pendentes,
+       (count(*) FILTER (WHERE status = 'enviada'))::int        AS enviadas,
+       (count(*) FILTER (WHERE status = 'falhou'))::int         AS falharam,
+       (count(*) FILTER (WHERE status = 'cancelada'))::int      AS canceladas
+FROM boletos.mensagens
+WHERE rodada_id = @rodada_id;
+
+-- name: CancelarMensagensPendentesDaRodada :execrows
+UPDATE boletos.mensagens
+SET status = 'cancelada', anexo_pdf = NULL, ultimo_erro = @motivo
+WHERE rodada_id = @rodada_id AND status = 'pendente';
+
+-- Fila do vigia e da tela: mensagens que desistiram ou estão paradas há tempo.
+-- name: EstadoFilaBoletos :one
+SELECT (count(*) FILTER (WHERE status = 'pendente'))::int                       AS pendentes,
+       (count(*) FILTER (WHERE status = 'falhou'))::int                         AS falharam,
+       min(proxima_tentativa_em) FILTER (WHERE status = 'pendente')             AS proxima
+FROM boletos.mensagens;
