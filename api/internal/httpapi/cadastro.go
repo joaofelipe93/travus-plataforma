@@ -14,10 +14,12 @@ import (
 )
 
 type clienteResumoJSON struct {
-	ID          int64   `json:"id"`
-	Nome        string  `json:"nome"`
-	Telefone    *string `json:"telefone"`
-	Email       *string `json:"email"`
+	ID       int64   `json:"id"`
+	Nome     string  `json:"nome"`
+	Telefone *string `json:"telefone"`
+	Email    *string `json:"email"`
+	// Documento do cliente (só dígitos), usado pelo Boleto Fácil do Canopus.
+	CpfCnpj     *string `json:"cpf_cnpj"`
 	TotalCotas  int32   `json:"total_cotas"`
 	CotasAtivas int32   `json:"cotas_ativas"`
 }
@@ -27,6 +29,7 @@ type clienteJSON struct {
 	Nome         string    `json:"nome"`
 	Telefone     *string   `json:"telefone"`
 	Email        *string   `json:"email"`
+	CpfCnpj      *string   `json:"cpf_cnpj"`
 	Origem       string    `json:"origem"`
 	CriadoEm     time.Time `json:"criado_em"`
 	AtualizadoEm time.Time `json:"atualizado_em"`
@@ -72,7 +75,7 @@ func (s *Servidor) listarClientes(w http.ResponseWriter, r *http.Request, _ *Usu
 	}
 	out := make([]clienteResumoJSON, 0, len(rows))
 	for _, c := range rows {
-		out = append(out, clienteResumoJSON{c.ID, c.Nome, c.Telefone, c.Email, c.TotalCotas, c.CotasAtivas})
+		out = append(out, clienteResumoJSON{c.ID, c.Nome, c.Telefone, c.Email, c.CpfCnpj, c.TotalCotas, c.CotasAtivas})
 	}
 	responderJSON(w, http.StatusOK, map[string]any{"clientes": out})
 }
@@ -117,7 +120,7 @@ func (s *Servidor) buscarCliente(w http.ResponseWriter, r *http.Request, _ *Usua
 		})
 	}
 	responderJSON(w, http.StatusOK, map[string]any{
-		"cliente": clienteJSON{c.ID, c.Nome, c.Telefone, c.Email, c.Origem, c.CriadoEm, c.AtualizadoEm},
+		"cliente": clienteJSON{c.ID, c.Nome, c.Telefone, c.Email, c.CpfCnpj, c.Origem, c.CriadoEm, c.AtualizadoEm},
 		"cotas":   cotasParaJSON(cotas),
 		"lances":  lances,
 	})

@@ -55,6 +55,8 @@ export type ClienteFormulario = {
   nome: string;
   telefone: string;
   email: string;
+  // CPF ou CNPJ como a pessoa digitar: a API guarda só os dígitos e confere o verificador.
+  cpf_cnpj: string;
 };
 
 export type ClienteResumo = {
@@ -62,6 +64,8 @@ export type ClienteResumo = {
   nome: string;
   telefone: string | null;
   email: string | null;
+  // Só dígitos (11 ou 14); sem documento é null. É o que o Boleto Fácil do Canopus pede.
+  cpf_cnpj: string | null;
   total_cotas: number;
   cotas_ativas: number;
 };
@@ -71,6 +75,7 @@ export type Cliente = {
   nome: string;
   telefone: string | null;
   email: string | null;
+  cpf_cnpj: string | null;
   origem: string;
   criado_em: string;
   atualizado_em: string;
