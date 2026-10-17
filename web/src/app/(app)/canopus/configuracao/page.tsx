@@ -57,7 +57,7 @@ const minutos = ["00", "15", "30", "45"];
 
 const resultadoDisparo: Record<ResultadoDisparo, string> = {
   criada: "o dry-run entrou na fila",
-  sem_cotas: "nenhuma cota ativa no cadastro: não havia o que conferir",
+  sem_cotas: "nenhuma cota ativa de cliente ativo no serviço de Lances: não havia o que conferir",
   sem_responsavel: "a configuração estava sem a pessoa que a alterou",
   atrasada: "a plataforma estava fora do ar na hora e o dry-run não foi criado atrasado",
   antes_de_ligar: "horário anterior ao agendamento atual: nada a fazer",

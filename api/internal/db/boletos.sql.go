@@ -245,6 +245,8 @@ SELECT c.id, c.nome, c.cpf_cnpj::text AS cpf_cnpj, count(q.id)::int AS cotas
 FROM clientes c
 JOIN cotas q ON q.cliente_id = c.id
 WHERE c.cpf_cnpj IS NOT NULL
+  AND EXISTS (SELECT 1 FROM cliente_servicos cs
+              WHERE cs.cliente_id = c.id AND cs.servico = 'boletos' AND cs.ativo)
 GROUP BY c.id
 ORDER BY c.nome
 `
@@ -258,9 +260,10 @@ type ClientesParaBoletosRow struct {
 
 // Serviço de boletos da Canopus (schema boletos, migração 00016). O worker não fala com o
 // banco: tudo passa por aqui, pelas rotas internas da API. Ver docs/canopus-boleto-facil.md.
-// Clientes que podem entrar numa rodada: com documento cadastrado e com pelo menos uma cota.
-// De propósito NÃO filtra cotas.ativa: aquela coluna diz "entra nas execuções de lance", e cota
-// fora do lance continua pagando boleto.
+// Clientes que podem entrar numa rodada: ativos no serviço de boletos (migração 00018), com
+// documento cadastrado e com pelo menos uma cota. De propósito NÃO filtra cotas.ativa: aquela
+// coluna diz "entra nas execuções de lance", e cota fora do lance continua pagando boleto.
+// Até a 00018, ter documento era o que ligava o serviço: agora quem liga é a ativação.
 func (q *Queries) ClientesParaBoletos(ctx context.Context) ([]ClientesParaBoletosRow, error) {
 	rows, err := q.db.Query(ctx, clientesParaBoletos)
 	if err != nil {

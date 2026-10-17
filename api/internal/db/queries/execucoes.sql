@@ -5,7 +5,9 @@ INSERT INTO execucoes (tipo, criada_por, origem)
 VALUES (@tipo, @criada_por, @origem)
 RETURNING id, tipo, status, criada_em;
 
--- Só cotas ativas entram. Ordem: cliente, grupo, cota, versão.
+-- Só cotas ativas de cliente ativo no Canopus entram (migração 00018). Ordem: cliente, grupo,
+-- cota, versão. O handler compara o que entrou com o que foi pedido e recusa a execução
+-- inteira se faltar alguma: cota some da lista em silêncio, nunca.
 -- name: InserirCotasNaExecucao :execrows
 INSERT INTO execucao_cotas (execucao_id, cota_id, ordem, grupo, cota, versao, cliente_nome, modalidade)
 SELECT @execucao_id::bigint, q.id,
@@ -13,7 +15,9 @@ SELECT @execucao_id::bigint, q.id,
        q.grupo, q.cota, q.versao, c.nome, q.modalidade_padrao
 FROM cotas q
 JOIN clientes c ON c.id = q.cliente_id
-WHERE q.id = ANY(@cota_ids::bigint[]) AND q.ativa;
+WHERE q.id = ANY(@cota_ids::bigint[]) AND q.ativa
+  AND EXISTS (SELECT 1 FROM cliente_servicos cs
+              WHERE cs.cliente_id = c.id AND cs.servico = 'lances' AND cs.ativo);
 
 -- Execução real: sempre aprovada a partir de um dry-run.
 -- origem: 'manual' (admin aprovou na tela) ou 'agendada' (lance real automático).
@@ -256,12 +260,14 @@ LIMIT 1;
 
 -- ===== Dry-run automático (agendamento.go) =====
 
--- Todas as cotas ativas, na ordem em que a execução as processa.
+-- Todas as cotas ativas de cliente ativo no Canopus, na ordem em que a execução as processa.
 -- name: CotasAtivasIDs :many
 SELECT q.id
 FROM cotas q
 JOIN clientes c ON c.id = q.cliente_id
 WHERE q.ativa
+  AND EXISTS (SELECT 1 FROM cliente_servicos cs
+              WHERE cs.cliente_id = c.id AND cs.servico = 'lances' AND cs.ativo)
 ORDER BY c.nome, q.grupo, q.cota, q.versao;
 
 -- Execuções agendadas que terminaram e ainda não foram avisadas por e-mail. Vale para o

@@ -162,7 +162,7 @@ func (s *Servidor) dispararDryRunAgendado(ctx context.Context) error {
 		return err
 	}
 	if len(ids) == 0 {
-		slog.Warn("agendador: nenhuma cota ativa no cadastro, dry-run automático não criado")
+		slog.Warn("agendador: nenhuma cota ativa de cliente ativo no serviço de Lances, dry-run automático não criado")
 		return marcar(disparoSemCotas)
 	}
 

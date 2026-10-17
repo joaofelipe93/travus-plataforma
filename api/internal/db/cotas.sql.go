@@ -306,6 +306,11 @@ WHERE ($1::bigint IS NULL OR q.cliente_id = $1::bigint)
        OR c.nome ILIKE '%' || $4::text || '%'
        OR q.grupo LIKE '%' || $4::text || '%'
        OR q.cota LIKE '%' || $4::text || '%')
+  -- Com o filtro de serviço, só cotas de cliente ativo nele (é o que a tela de novo dry-run
+  -- pede, para não oferecer cota que a execução vai recusar). Sem o filtro, vêm todas.
+  AND ($5::text IS NULL
+       OR EXISTS (SELECT 1 FROM cliente_servicos cs
+                  WHERE cs.cliente_id = c.id AND cs.servico = $5::text AND cs.ativo))
 ORDER BY c.nome, q.grupo, q.cota, q.versao
 `
 
@@ -314,6 +319,7 @@ type ListarCotasParams struct {
 	Grupo     *string
 	Ativa     *bool
 	Busca     *string
+	Servico   *string
 }
 
 type ListarCotasRow struct {
@@ -341,6 +347,7 @@ func (q *Queries) ListarCotas(ctx context.Context, arg ListarCotasParams) ([]Lis
 		arg.Grupo,
 		arg.Ativa,
 		arg.Busca,
+		arg.Servico,
 	)
 	if err != nil {
 		return nil, err

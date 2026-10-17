@@ -139,7 +139,9 @@ func (s *Servidor) criarExecucao(w http.ResponseWriter, r *http.Request, u *Usua
 		return
 	}
 	if int(n) != len(ids) {
-		responderErro(w, http.StatusUnprocessableEntity, fmt.Sprintf("%d cota(s) escolhida(s) não existem ou estão inativas: atualize a lista e tente de novo", len(ids)-int(n)))
+		responderErro(w, http.StatusUnprocessableEntity, fmt.Sprintf(
+			"%d cota(s) escolhida(s) não existem, estão inativas ou são de cliente desligado do serviço de Lances: atualize a lista e tente de novo",
+			len(ids)-int(n)))
 		return
 	}
 	if _, err := qtx.InserirEvento(ctx, db.InserirEventoParams{

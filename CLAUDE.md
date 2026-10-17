@@ -166,7 +166,7 @@ merge do PR "chore: versão X.Y.Z" → tag vX.Y.Z + release → workflow Deploy:
     - `whatsapp.go` + `internal/checkin` (cliente): tela WhatsApp, **só admin**, com auditoria. `GET /integracoes/whatsapp` (estado, número, QR, grupo, fila; notificador fora do ar vira `indisponivel` com 200), `GET …/grupos`, `PUT …/grupo`, `POST …/teste`, `POST …/desconectar` (exige `"confirmar": true`). Repassa ao notificador pela rede interna com `CHECKIN_ADMIN_TOKEN` (`CHECKIN_URL`); o navegador nunca vê o token.
     - `vigia.go`: a cada 5 min confere banco, contato do worker (10 min), fila parada, cota em `erro_apos_confirmar` (24 h), **dry-run automático que não rodou** (com o motivo gravado no disparo), **lance real automático que não registrou lance** (com o motivo da decisão), Drive, backup (26 h, erro), disco (80%), certificado (14 dias) e, com `VIGIA_CHECKIN=true` (produção), o notificador (sem resposta ou WhatsApp fora há 10 min, sem grupo, mensagens que desistiram, fila parada, eventos do webhook não reconhecidos em 24 h); manda e-mail só quando muda (novos, lembrete a cada 12 h, resolvidos), sem nome de cliente, e faz ping no monitor externo (`VIGIA_PING_URL`). `internal/alerta`: SMTP com STARTTLS obrigatório (ou TLS na 465). Sem `SMTP_HOST`, os alertas só vão para o log.
     - `sse.go`: `GET /execucoes/{id}/eventos` (SSE, `Last-Event-ID`, `event: fim`); `Hub` com `LISTEN execucao_eventos` (trigger no insert).
-    - `crm.go`: cadastro do Canopus (clientes e cotas digitados). `POST /clientes` (com as cotas juntas, numa transação), `PATCH`/`DELETE /clientes/{id}`, `POST /cotas`, `PUT`/`DELETE /cotas/{id}`. Nome repetido ou cota repetida viram 409; cota com lance ou execução não muda de identidade nem some (409, desative).
+    - `crm.go`: cadastro de clientes e cotas, **um só para a plataforma** (ver "Regras do cadastro"). `POST /clientes` (com as cotas juntas e a lista `servicos`, numa transação), `PATCH`/`DELETE /clientes/{id}`, `PUT /clientes/{id}/servicos/{servico}` (**admin e operador**, liga/desliga com auditoria), `GET /servicos` (catálogo de `internal/servicos`), `POST /cotas`, `PUT`/`DELETE /cotas/{id}`. Nome repetido ou cota repetida viram 409; cota com lance ou execução não muda de identidade nem some (409, desative).
     - `assistente.go` + `assistente_ferramentas.go` + `internal/assistente`: assistente da tela inicial (ver "Assistente"). `GET /assistente` (disponível, modelo, o que o perfil pode) e `POST /assistente/conversa` (histórico da tela → resposta em SSE: `texto`, `ferramenta`, `fim`, `erro`). Uma pergunta por vez e `ASSISTENTE_PERGUNTAS_POR_HORA` por pessoa; auditoria `assistente_pergunta` com os tokens gastos.
     - `perfil.go` + `internal/credenciais`: "Meu perfil" (ver "Perfil e credenciais pessoais"). `GET /perfil` (dados, catálogo e o que a pessoa já cadastrou), `PATCH /perfil` (nome, telefone, cargo, observações), `PUT`/`DELETE /perfil/credenciais/{credencial}`, `GET /credenciais` (**só admin**: quem tem e quem falta). Auditoria sem valores (`perfil_atualizado`, `credencial_gravada`, `credencial_removida`).
   - `internal/cadastro`: valida e normaliza o que o formulário manda (nome em maiúsculas com espaços únicos, grupo/cota/versão só com dígitos e zeros à esquerda 6/4/2, modalidade, dia do mês, data AAAA-MM-DD).
@@ -202,7 +202,7 @@ merge do PR "chore: versão X.Y.Z" → tag vX.Y.Z + release → workflow Deploy:
 | Perfil | Pode |
 |---|---|
 | `leitura` | ver clientes, cotas, execuções, revisões, comprovantes e rodadas de boletos |
-| `operador` | + cadastrar, editar e excluir cliente e cota, ativar/desativar cota, criar e cancelar dry-run, pedir reimpressão de comprovante, enviar comprovante ao Drive, ver as reservas (dados de hóspedes), **criar e cancelar rodada de boletos**, **ajustar a configuração do Canopus** (dry-run automático, pasta do Drive, prazos; o lance real automático é só do admin) |
+| `operador` | + cadastrar, editar e excluir cliente e cota, ativar/desativar cota, **ligar e desligar um serviço para um cliente**, criar e cancelar dry-run, pedir reimpressão de comprovante, enviar comprovante ao Drive, ver as reservas (dados de hóspedes), **criar e cancelar rodada de boletos**, **ajustar a configuração do Canopus** (dry-run automático, pasta do Drive, prazos; o lance real automático é só do admin) |
 | `admin` | tudo do operador + **aprovar lance real**, **ligar o lance real automático** (e mudar o teto e a espera), **ligar o envio dos boletos** e **gerenciar o WhatsApp dos boletos** (QR, teste, desconectar), ver a situação do Google Drive e **gerenciar o WhatsApp do notificador** (QR, grupo, teste, desconectar) |
 
 Todo perfil usa o **Assistente**, com as ferramentas do perfil: `leitura` só tem `estado_plataforma` e `resumo_canopus`; operador e admin também `listar_reservas` e `consultar_banco`.
@@ -227,9 +227,20 @@ Qualquer perfil cuida do **próprio** perfil (dados de contato e credenciais pes
 
 ## Regras do cadastro (CRM)
 
-O Canopus é um CRM: **admin e operador digitam** o cliente e as cotas dele (Clientes → Novo).
-Não há mais importação de planilha.
+O cadastro de clientes é **um só para a plataforma inteira** (decisão do usuário em 17/10/2026):
+**admin e operador digitam** o cliente e as cotas dele, e o que separa um serviço do outro é a
+**ativação por cliente** (`cliente_servicos`, migração 00018). Não há mais importação de planilha.
 
+- **Ativação por serviço**: `cliente_servicos(cliente_id, servico, ativo, alterado_por)`, com `servico` em
+  `lances` (credenciamento no Newcon) ou `boletos` (Boleto Fácil). O catálogo da API é `internal/servicos` e o
+  CHECK do banco tem a mesma lista: **serviço novo entra nos dois, numa migração**. Só cota de cliente **ativo
+  em lances** entra em dry-run e em lance real; só cliente **ativo em boletos** entra numa rodada. Desligar não
+  apaga nada e não mexe em cota — a cota simplesmente para de entrar nas execuções daquele serviço, e a
+  resposta diz quantas cotas ativas aquilo afeta. Cliente novo sem a lista `servicos` nasce ativo em todos
+  (é como era antes). `GET /clientes?servico=lances` filtra a carteira de um serviço.
+- Antes da 00018 isso era implícito e cada serviço inventava a regra: o dry-run pegava toda cota ativa e a
+  rodada de boletos pegava todo cliente com CPF/CNPJ — ou seja, **preencher um documento ligava um serviço
+  sem querer**. Agora o documento é só um dado do cliente.
 - Cliente = nome normalizado (maiúsculas, espaços únicos). Nome repetido é o mesmo cliente: a API recusa com 409.
 - **CPF/CNPJ é opcional, mas é o que o Boleto Fácil pede** (migração 00015, `clientes.cpf_cnpj`): guardado só com dígitos (11 ou 14), com o dígito verificador conferido na API (`cadastro.CpfCnpj`) porque documento errado faz o site do Canopus devolver "nenhuma cota" em silêncio. Documento repetido é 409; em branco apaga o que estava lá. A planilha antiga não trazia CPF, então a maior parte do cadastro ainda está sem. O **assistente não lê essa coluna** (`SELECT *` em `clientes` é recusado para ele).
 - Grupo/cota/versão só com dígitos e zeros à esquerda (6/4/2), versão padrão `00`; administradora padrão `CANOPUS`; modalidade padrão `segundo_fixo`.
@@ -324,6 +335,13 @@ lance real automático (desligado por padrão; só admin liga):
 Decididas pelo usuário no CRM (17/09/2026): a importação por planilha sai da interface e da API, mas a tabela
 `importacoes` e o histórico ficam; **admin e operador** cadastram e editam; os campos extras da planilha viram
 colunas de verdade na cota.
+
+Decidido pelo usuário em 17/10/2026: **as informações do cliente são universais** — o mesmo cadastro serve a
+todos os serviços e a diferença é a **ativação de cada serviço em cada cliente** (migração 00018, ver "Regras
+do cadastro"). Na mesma conversa ele pediu o retrabalho do design das telas (esqueleto em largura cheia, com
+grade) e escolheu: cadastro de clientes em **espaço próprio no trilho**, fora do Canopus, e CPF/CNPJ opcional
+com nome único (que já tinha entrado pelo PR #70). Fica em aberto se o Canopus se divide em **Lances** e
+**Boletos** quando o cadastro sair de dentro dele.
 
 Decididas pelo usuário na Etapa 3: "Parcelas em Atraso" → aceitar e marcar o lance; cota que já tem lance na assembleia → pular, salvo "registrar mesmo assim" por cota na revisão; só admin aprova lance real; prazo de oferta encerrado → erro conhecido; PDF do teste de reimpressão não vai ao Drive.
 
