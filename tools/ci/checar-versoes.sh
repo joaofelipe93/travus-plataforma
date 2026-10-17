@@ -6,8 +6,9 @@
 #   1. Node: web/Dockerfile, workers/checkin-whatsapp/Dockerfile e NODE_VERSION da CI;
 #   2. Go: api/Dockerfile, o serviço api-teste do compose e GO_VERSION da CI (e a linha "go"
 #      do go.mod não pode ser maior);
-#   3. Playwright: a tag da imagem do worker Canopus e o pacote no package-lock.json
-#      (a imagem traz os navegadores; versões diferentes quebram o worker no Newcon).
+#   3. Playwright: a tag da imagem de CADA worker que usa navegador e o pacote no
+#      package-lock.json dele (a imagem traz os navegadores; versões diferentes quebram o
+#      worker), e a mesma tag nos dois workers (camadas compartilhadas no disco da VM).
 #
 #   bash tools/ci/checar-versoes.sh
 set -euo pipefail
@@ -49,9 +50,17 @@ else
   echo "✓ go.mod ($go_mod) cabe no Go $ci_go"
 fi
 
-pw_imagem=$(sed -nE 's#^FROM mcr\.microsoft\.com/playwright:v([0-9.]+)-.*#\1#p' workers/canopus/Dockerfile | head -1)
-pw_pacote=$(node -p "require('./workers/canopus/package-lock.json').packages['node_modules/playwright'].version" 2> /dev/null || echo "?")
-conferir "Playwright da imagem e do package-lock do worker Canopus" "$pw_pacote" "$pw_imagem" "workers/canopus/Dockerfile"
+for worker in canopus boletos-canopus; do
+  pw_imagem=$(sed -nE 's#^FROM mcr\.microsoft\.com/playwright:v([0-9.]+)-.*#\1#p' "workers/$worker/Dockerfile" | head -1)
+  pw_pacote=$(node -p "require('./workers/$worker/package-lock.json').packages['node_modules/playwright'].version" 2> /dev/null || echo "?")
+  conferir "Playwright da imagem e do package-lock do worker $worker" "$pw_pacote" "$pw_imagem" "workers/$worker/Dockerfile"
+done
+
+# Os dois workers com Playwright usam a MESMA imagem de propósito: as camadas são compartilhadas
+# e o disco da VM (2 GB de RAM, disco pequeno) não guarda dois Chromium diferentes.
+pw_canopus=$(sed -nE 's#^FROM mcr\.microsoft\.com/playwright:v([0-9.]+-[a-z]+).*#\1#p' workers/canopus/Dockerfile | head -1)
+pw_boletos=$(sed -nE 's#^FROM mcr\.microsoft\.com/playwright:v([0-9.]+-[a-z]+).*#\1#p' workers/boletos-canopus/Dockerfile | head -1)
+conferir "Imagem do Playwright igual nos dois workers" "$pw_canopus" "$pw_boletos" "workers/boletos-canopus/Dockerfile"
 
 if [ "$falhas" -gt 0 ]; then
   echo "$falhas versão(ões) fora de sincronia."

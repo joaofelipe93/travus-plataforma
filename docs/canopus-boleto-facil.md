@@ -115,14 +115,18 @@ senão               → GET /print-overdue-bill/{group}/{cota}/{id}/{transactio
 
 ## Como o serviço usa isso
 
+Implementado em **`workers/boletos-canopus`** (o worker) e em **`api/internal/httpapi/boletos.go`**
++ `interno_boletos.go` (a fila, o cadastro das parcelas e os PDFs, schema `boletos`).
+
 ```
-por cliente com cpf_cnpj no cadastro:
-  find-cota → casa CD_Grupo/CD_Cota com as cotas cadastradas (só as nossas entram)
-  por cota:  generate-bill → parcelas com price > 0 → PDF → mensagem no WhatsApp do cliente
-  guarda cada parcela (parcelNumber, date, price, transactionId) para a cobrança seguinte
-dias depois:
+rodada de ENVIO (dia 8), por cliente com cpf_cnpj no cadastro:
+  find-cota → casa CD_Grupo/CD_Cota/Versao com as cotas cadastradas (só as nossas entram)
+  por cota:  generate-bill → parcelas com price > 0 → PDF na sequência → guarda na plataforma
+  (a mensagem no WhatsApp é a etapa seguinte)
+rodada de COBRANCA (dia 14):
   generate-bill de novo → parcela que não volta mais como aberta = paga → quem continua aberto
-  recebe o follow-up
+  recebe o follow-up. Aqui o PDF NÃO é baixado: a mensagem é só o lembrete, e cada impressão é
+  um pedido a mais na rota que responde 429.
 ```
 
 **O site não diz "pago".** A única leitura de pagamento que ele permite é a ausência: a parcela

@@ -223,6 +223,13 @@ func (s *Servidor) Rotas() http.Handler {
 	mux.Handle("POST /integracoes/whatsapp/teste", s.autenticado(exigirPerfil(s.testeWhatsapp, admins...)))
 	mux.Handle("POST /integracoes/whatsapp/desconectar", s.autenticado(exigirPerfil(s.desconectarWhatsapp, admins...)))
 
+	// Serviço de boletos da Canopus (boletos.go): rodada de envio (busca os boletos do mês) e de
+	// cobrança. Todo perfil acompanha; admin e operador criam e cancelam.
+	mux.Handle("GET /boletos/rodadas", s.autenticado(s.listarRodadas))
+	mux.Handle("POST /boletos/rodadas", s.autenticado(exigirPerfil(s.criarRodada, editores...)))
+	mux.Handle("GET /boletos/rodadas/{id}", s.autenticado(s.buscarRodada))
+	mux.Handle("POST /boletos/rodadas/{id}/cancelar", s.autenticado(exigirPerfil(s.cancelarRodada, editores...)))
+
 	// Assistente da tela inicial (assistente.go): todo perfil pergunta; as ferramentas dependem do perfil.
 	mux.Handle("GET /assistente", s.autenticado(s.estadoAssistente))
 	mux.Handle("POST /assistente/conversa", s.autenticado(s.conversarAssistente))

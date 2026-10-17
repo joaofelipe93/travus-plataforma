@@ -35,6 +35,10 @@ func TestPapelAssistenteSoLeOPermitido(t *testing.T) {
 		"SELECT count(*) FROM checkin.mensagens",
 		"SELECT count(*) FROM checkin.resumos",
 		"SELECT count(*) FROM checkin.configuracao",
+		"SELECT count(*) FROM boletos.rodadas",
+		"SELECT count(*) FROM boletos.rodada_clientes",
+		"SELECT parcela, vencimento, valor_centavos FROM boletos.parcelas",
+		"SELECT count(*) FROM boletos.eventos",
 	} {
 		if _, err := tx.ExecContext(ctx, consulta); err != nil {
 			t.Fatalf("assistente deveria ler %q: %v", consulta, err)

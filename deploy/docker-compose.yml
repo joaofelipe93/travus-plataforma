@@ -224,6 +224,35 @@ services:
     logging: *logs
     mem_limit: 1536m
 
+  # Worker de boletos da Canopus: pega a rodada na fila da API, consulta o Boleto Fácil por CPF e
+  # guarda as parcelas em aberto e o PDF. SÓ LÊ o site (nada de Newcon, nada de WhatsApp aqui).
+  # Perfil boletos: fica desligado no dia a dia (make boletos sobe) — ver CLAUDE.md.
+  worker-boletos:
+    build:
+      context: ../workers/boletos-canopus
+      args: *versao
+    image: travus/worker-boletos:dev
+    profiles: [boletos]
+    restart: unless-stopped
+    environment:
+      HOME: /tmp
+      API_INTERNA_URL: http://api:8081
+      WORKER_TOKEN: ${WORKER_TOKEN:?defina WORKER_TOKEN em deploy/.env (make up gera)}
+      WORKER_NOME: boletos-1
+      # navegador: Chromium com User-Agent de Chrome (o padrão do Playwright leva 403 da
+      # Cloudflare). http: fetch puro, mais leve — só depois do teste na VM dizer que passa.
+      BOLETOS_MODO: ${BOLETOS_MODO:-navegador}
+      TZ: America/Sao_Paulo
+    depends_on:
+      api:
+        condition: service_healthy
+    # Ao desligar, termina o cliente atual e devolve a rodada à fila.
+    stop_grace_period: 90s
+    shm_size: 1gb
+    networks: [interna]
+    logging: *logs
+    mem_limit: 1536m
+
   # Notificador de check-in: webhook de reserva do PMS → checkin.mensagens → grupo do WhatsApp.
   # Aqui fica desligado (perfil checkin: make checkin sobe; conecta ao WhatsApp e mostra QR); em
   # produção, o docker-compose.prod.yml o liga. UM container só: duas conexões na mesma sessão do

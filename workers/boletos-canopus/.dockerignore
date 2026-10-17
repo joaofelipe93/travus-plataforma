@@ -1,0 +1,7 @@
+# Segredos e dados de clientes nunca entram na imagem: o token chega por ambiente e o CPF vem
+# da API, a cada cliente. PDF de boleto nunca é gravado em arquivo aqui.
+.env
+.env.*
+node_modules
+test
+*.pdf

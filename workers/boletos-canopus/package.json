@@ -1,0 +1,17 @@
+{
+  "name": "travus-boletos-canopus",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Busca no Boleto Fácil da Canopus os boletos em aberto dos clientes da plataforma",
+  "main": "src/worker.js",
+  "scripts": {
+    "start": "node src/worker.js",
+    "test": "node --test --test-concurrency=1 test/*.test.js"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "dependencies": {
+    "playwright": "1.63.0"
+  }
+}

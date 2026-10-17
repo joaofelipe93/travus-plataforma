@@ -86,6 +86,66 @@ type Auditoria struct {
 	CriadoEm   time.Time
 }
 
+type BoletosEvento struct {
+	ID              int64
+	RodadaID        int64
+	RodadaClienteID *int64
+	Nivel           string
+	Mensagem        string
+	Dados           []byte
+	CriadoEm        time.Time
+}
+
+type BoletosParcela struct {
+	ID              int64
+	RodadaClienteID int64
+	CotaID          int64
+	Grupo           string
+	Cota            string
+	Versao          string
+	Parcela         string
+	Vencimento      time.Time
+	ValorCentavos   int64
+	Tipo            string
+	ChargeID        *int64
+	TransactionID   *int64
+	PdfID           *string
+	CriadaEm        time.Time
+}
+
+type BoletosRodada struct {
+	ID                     int64
+	Tipo                   string
+	Referencia             time.Time
+	Status                 string
+	Origem                 string
+	CriadaPor              int64
+	CancelamentoSolicitado bool
+	CanceladaPor           *int64
+	Worker                 *string
+	TravaAte               *time.Time
+	Erro                   *string
+	CriadaEm               time.Time
+	IniciadaEm             *time.Time
+	FinalizadaEm           *time.Time
+}
+
+type BoletosRodadaCliente struct {
+	ID           int64
+	RodadaID     int64
+	ClienteID    int64
+	Ordem        int32
+	ClienteNome  string
+	Status       string
+	ErroTipo     *string
+	Erro         *string
+	CotasNoSite  int32
+	CotasCasadas int32
+	Tentativas   int32
+	IniciadoEm   *time.Time
+	FinalizadoEm *time.Time
+}
+
 type CheckinConfiguracao struct {
 	ID           bool
 	GrupoJid     string
