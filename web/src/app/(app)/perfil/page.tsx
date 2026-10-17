@@ -13,6 +13,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import { Pagina, Painel, Secao } from "@/components/pagina";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -31,37 +32,30 @@ export default function PaginaPerfil() {
   const perfil = useQuery({ queryKey: ["perfil"], queryFn: () => api<RespostaPerfil>("/perfil") });
 
   return (
-    <main className="flex w-full max-w-3xl flex-1 flex-col gap-6 px-8 py-8">
-      <div>
-        <h1 className="font-heading text-2xl font-semibold">Meu perfil</h1>
-        <p className="mt-0.5 text-sm text-muted-foreground">Seus dados de contato e os acessos que só você cadastra.</p>
-      </div>
-
+    <Pagina titulo="Meu perfil" descricao="Seus dados de contato e os acessos que só você cadastra.">
       {perfil.isError ? (
-        <Alert variant="destructive">
+        <Alert variant="destructive" className="max-w-xl">
           <AlertDescription>{perfil.error.message}</AlertDescription>
         </Alert>
       ) : !perfil.data ? (
-        <Skeleton className="h-96 w-full" />
+        <Skeleton className="h-96 w-full max-w-5xl" />
       ) : (
-        <>
+        // Duas frentes independentes, uma ao lado da outra: o que a pessoa descreve sobre si
+        // e os acessos que ela guarda. Nenhuma das duas precisa de mais de meia tela.
+        <div className="grid items-start gap-10 xl:grid-cols-2 xl:gap-14">
           <Dados key={perfil.data.usuario.atualizado_em} usuario={perfil.data.usuario} />
           <Acessos credenciais={perfil.data.credenciais} cofreConfigurado={perfil.data.cofre_configurado} />
-        </>
+        </div>
       )}
-    </main>
+    </Pagina>
   );
 }
 
-function Secao({ titulo, descricao, children }: { titulo: string; descricao?: string; children: React.ReactNode }) {
+function Bloco({ titulo, descricao, children }: { titulo: string; descricao?: string; children: React.ReactNode }) {
   return (
-    <section className="rounded-lg border p-5">
-      <div className="mb-4">
-        <h2 className="font-medium">{titulo}</h2>
-        {descricao && <p className="mt-0.5 text-sm text-muted-foreground">{descricao}</p>}
-      </div>
-      {children}
-    </section>
+    <Secao titulo={titulo} descricao={descricao}>
+      <Painel>{children}</Painel>
+    </Secao>
   );
 }
 
@@ -100,7 +94,7 @@ function Dados({ usuario }: { usuario: MeuPerfil }) {
   });
 
   return (
-    <Secao titulo="Dados">
+    <Bloco titulo="Dados">
       <form
         className="flex flex-col gap-4"
         onSubmit={(e) => {
@@ -151,13 +145,13 @@ function Dados({ usuario }: { usuario: MeuPerfil }) {
           {mudou && !salvar.isPending && <span className="text-sm text-muted-foreground">Você tem mudanças por salvar.</span>}
         </div>
       </form>
-    </Secao>
+    </Bloco>
   );
 }
 
 function Acessos({ credenciais, cofreConfigurado }: { credenciais: Credencial[]; cofreConfigurado: boolean }) {
   return (
-    <Secao
+    <Bloco
       titulo="Acessos"
       descricao="Seus tokens em serviços de terceiros. Eles ficam cifrados no servidor, valem só para você e nunca voltam para a tela: se esquecer, cadastre outro."
     >
@@ -181,7 +175,7 @@ function Acessos({ credenciais, cofreConfigurado }: { credenciais: Credencial[];
           ))}
         </ul>
       )}
-    </Secao>
+    </Bloco>
   );
 }
 

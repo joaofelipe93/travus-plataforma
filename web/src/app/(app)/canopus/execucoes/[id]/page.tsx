@@ -15,6 +15,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import { Colunas, Secao } from "@/components/pagina";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button, buttonVariants } from "@/components/ui/button";
@@ -117,17 +118,17 @@ export default function PaginaExecucao() {
   const mostrarComprovante = execucao.tipo !== "dry_run";
 
   return (
-    <div className="flex flex-col gap-5">
+    <div className="flex flex-col gap-6">
       <Link href="/canopus/execucoes" className="text-sm text-muted-foreground hover:text-foreground">
         ← Execuções
       </Link>
 
-      <div className="flex flex-wrap items-start justify-between gap-3">
+      <div className="flex flex-wrap items-start justify-between gap-x-10 gap-y-3 border-b pb-5">
         <div>
           <div className="flex flex-wrap items-center gap-2">
-            <h1 className="text-xl font-semibold tracking-tight">
+            <h2 className="font-heading text-xl font-semibold">
               {nomeTipo(execucao.tipo)} nº {execucao.id}
-            </h1>
+            </h2>
             <Badge variant={situacaoExecucao[execucao.status].variante}>
               {execucao.cancelamento_solicitado && !terminou ? "Cancelando" : situacaoExecucao[execucao.status].rotulo}
             </Badge>
@@ -167,74 +168,84 @@ export default function PaginaExecucao() {
         </div>
       </div>
 
-      {execucao.tipo === "dry_run" && (
-        <p className="rounded-md border border-dashed px-3 py-2 text-sm text-muted-foreground">Dry-run: nenhum lance foi ou será confirmado nesta execução.</p>
-      )}
-      {execucao.tipo === "reimpressao" && (
-        <p className="rounded-md border border-dashed px-3 py-2 text-sm text-muted-foreground">Reimpressão de comprovante pelo Histórico: não registra lance.</p>
-      )}
-      {execucao.tipo === "real" && (
-        <Alert variant="destructive">
-          <AlertTitle>Execução real</AlertTitle>
-          <AlertDescription>O worker clica em Confirmar no Newcon para as cotas abaixo. Cota que passou pela confirmação nunca é repetida automaticamente.</AlertDescription>
-        </Alert>
-      )}
-      {execucao.erro && (
-        <Alert variant="destructive">
-          <AlertTitle>A execução foi interrompida</AlertTitle>
-          <AlertDescription>{execucao.erro}</AlertDescription>
-        </Alert>
-      )}
-      {execucao.cancelamento_solicitado && !terminou && (
-        <Alert>
-          <AlertDescription>
-            Cancelamento pedido{execucao.cancelada_por_nome ? ` por ${execucao.cancelada_por_nome}` : ""}: o worker termina a cota atual e para.
-          </AlertDescription>
-        </Alert>
-      )}
+      {/* O que aconteceu fica na coluna larga; o log corre ao lado, para dar para acompanhar
+          os eventos e as linhas das cotas ao mesmo tempo. */}
+      <Colunas
+        lateral={
+          <Secao titulo="Log da execução">
+            <Log eventos={eventos} />
+          </Secao>
+        }
+      >
+        <div className="flex flex-col gap-5">
+          {execucao.tipo === "dry_run" && (
+            <p className="rounded-md border border-dashed px-3 py-2 text-sm text-muted-foreground">
+              Dry-run: nenhum lance foi ou será confirmado nesta execução.
+            </p>
+          )}
+          {execucao.tipo === "reimpressao" && (
+            <p className="rounded-md border border-dashed px-3 py-2 text-sm text-muted-foreground">Reimpressão de comprovante pelo Histórico: não registra lance.</p>
+          )}
+          {execucao.tipo === "real" && (
+            <Alert variant="destructive">
+              <AlertTitle>Execução real</AlertTitle>
+              <AlertDescription>O worker clica em Confirmar no Newcon para as cotas abaixo. Cota que passou pela confirmação nunca é repetida automaticamente.</AlertDescription>
+            </Alert>
+          )}
+          {execucao.erro && (
+            <Alert variant="destructive">
+              <AlertTitle>A execução foi interrompida</AlertTitle>
+              <AlertDescription>{execucao.erro}</AlertDescription>
+            </Alert>
+          )}
+          {execucao.cancelamento_solicitado && !terminou && (
+            <Alert>
+              <AlertDescription>
+                Cancelamento pedido{execucao.cancelada_por_nome ? ` por ${execucao.cancelada_por_nome}` : ""}: o worker termina a cota atual e para.
+              </AlertDescription>
+            </Alert>
+          )}
 
-      <div className="flex flex-col gap-2">
-        <div className="flex flex-wrap justify-between gap-2 text-sm">
-          <span>
-            {processadas} de {cotas.length} cota(s) processada(s)
-          </span>
-          <span className="text-muted-foreground">
-            {(totais.verificada ?? 0) + (totais.confirmada ?? 0) + (totais.reimpressa ?? 0)} ok ·{" "}
-            {(totais.erro_antes_confirmar ?? 0) + (totais.erro_apos_confirmar ?? 0)} com erro
-            {comLanceNaAssembleia > 0 && execucao.tipo === "dry_run" && ` · ${comLanceNaAssembleia} já com lance nesta assembleia`}
-          </span>
+          <div className="flex flex-col gap-2">
+            <div className="flex flex-wrap justify-between gap-2 text-sm">
+              <span>
+                {processadas} de {cotas.length} cota(s) processada(s)
+              </span>
+              <span className="text-muted-foreground">
+                {(totais.verificada ?? 0) + (totais.confirmada ?? 0) + (totais.reimpressa ?? 0)} ok ·{" "}
+                {(totais.erro_antes_confirmar ?? 0) + (totais.erro_apos_confirmar ?? 0)} com erro
+                {comLanceNaAssembleia > 0 && execucao.tipo === "dry_run" && ` · ${comLanceNaAssembleia} já com lance nesta assembleia`}
+              </span>
+            </div>
+            <div className="h-2 overflow-hidden rounded-full bg-muted" role="progressbar" aria-valuenow={percentual} aria-valuemin={0} aria-valuemax={100}>
+              <div className="h-full bg-primary transition-all" style={{ width: `${percentual}%` }} />
+            </div>
+          </div>
+
+          <div className="rounded-lg border">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead className="w-10">#</TableHead>
+                  <TableHead>Cliente</TableHead>
+                  <TableHead>Cota</TableHead>
+                  <TableHead>Situação</TableHead>
+                  <TableHead>Assembleia</TableHead>
+                  <TableHead>Resultado</TableHead>
+                  {mostrarComprovante && <TableHead>Comprovante</TableHead>}
+                  <TableHead className="text-right">Screenshot</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {cotas.map((c) => (
+                  <LinhaCota key={c.id} cota={c} lance={lancesPorCota.get(c.id)} mostrarComprovante={mostrarComprovante} editavel={podeEditar(perfil)} />
+                ))}
+              </TableBody>
+            </Table>
+          </div>
+
         </div>
-        <div className="h-2 overflow-hidden rounded-full bg-muted" role="progressbar" aria-valuenow={percentual} aria-valuemin={0} aria-valuemax={100}>
-          <div className="h-full bg-primary transition-all" style={{ width: `${percentual}%` }} />
-        </div>
-      </div>
-
-      <div className="rounded-lg border">
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead className="w-10">#</TableHead>
-              <TableHead>Cliente</TableHead>
-              <TableHead>Cota</TableHead>
-              <TableHead>Situação</TableHead>
-              <TableHead>Assembleia</TableHead>
-              <TableHead>Resultado</TableHead>
-              {mostrarComprovante && <TableHead>Comprovante</TableHead>}
-              <TableHead className="text-right">Screenshot</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {cotas.map((c) => (
-              <LinhaCota key={c.id} cota={c} lance={lancesPorCota.get(c.id)} mostrarComprovante={mostrarComprovante} editavel={podeEditar(perfil)} />
-            ))}
-          </TableBody>
-        </Table>
-      </div>
-
-      <section className="flex flex-col gap-2">
-        <h2 className="text-sm font-medium">Log da execução</h2>
-        <Log eventos={eventos} />
-      </section>
+      </Colunas>
 
       <AlertDialog open={confirmarCancelamento} onOpenChange={(aberto) => !cancelar.isPending && setConfirmarCancelamento(aberto)}>
         <AlertDialogContent>
@@ -343,7 +354,7 @@ function Log({ eventos }: { eventos: EventoExecucao[] }) {
   }, [eventos.length]);
 
   return (
-    <div className="max-h-80 overflow-y-auto rounded-lg border bg-muted/30 p-3 font-mono text-xs">
+    <div className="max-h-[34rem] overflow-y-auto rounded-lg border bg-muted/30 p-3 font-mono text-xs">
       {eventos.length === 0 && <p className="text-muted-foreground">Aguardando eventos…</p>}
       {eventos.map((e) => (
         <p key={e.id} className={cn("whitespace-pre-wrap break-words", corNivel[e.nivel])}>

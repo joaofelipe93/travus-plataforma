@@ -2,6 +2,7 @@
 
 import { useQuery } from "@tanstack/react-query";
 import Link from "next/link";
+import { Secao } from "@/components/pagina";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { buttonVariants } from "@/components/ui/button";
@@ -23,21 +24,22 @@ export default function PaginaExecucoes() {
   const lista = execucoes.data?.execucoes ?? [];
 
   return (
-    <div className="flex flex-col gap-4">
-      <div className="flex flex-wrap items-end justify-between gap-3">
-        <div>
-          <p className="text-sm text-muted-foreground">
-            Dry-runs no Newcon: vão até a tela de credenciamento e não confirmam lance. As marcadas como{" "}
-            <em>Automática</em> saem do agendamento em Configurações.
-          </p>
-        </div>
-        {podeEditar(sessao.data?.usuario.perfil) && (
+    <Secao
+      titulo="Execuções"
+      descricao={
+        <>
+          Dry-runs no Newcon: vão até a tela de credenciamento e não confirmam lance. As marcadas como <em>Automática</em>{" "}
+          saem do agendamento em Configurações.
+        </>
+      }
+      acoes={
+        podeEditar(sessao.data?.usuario.perfil) && (
           <Link href="/canopus/execucoes/nova" className={buttonVariants()}>
             Dar Lance
           </Link>
-        )}
-      </div>
-
+        )
+      }
+    >
       {execucoes.isError ? (
         <Alert variant="destructive">
           <AlertDescription>{execucoes.error.message}</AlertDescription>
@@ -103,6 +105,6 @@ export default function PaginaExecucoes() {
           </Table>
         </div>
       )}
-    </div>
+    </Secao>
   );
 }

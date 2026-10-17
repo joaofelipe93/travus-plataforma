@@ -28,10 +28,11 @@ export default function LayoutApp({ children }: { children: React.ReactNode }) {
   }
 
   // Trilho de serviços à esquerda; cada serviço desenha o próprio cabeçalho e abas no layout dele.
+  // O trilho é a única coisa de largura fixa: o resto da tela é do conteúdo.
   return (
     <div className="flex min-h-svh flex-1">
       <Trilho usuario={sessao.data.usuario} />
-      {children}
+      <div className="flex min-w-0 flex-1 flex-col">{children}</div>
     </div>
   );
 }

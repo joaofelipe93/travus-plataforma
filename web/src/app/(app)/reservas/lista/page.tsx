@@ -183,7 +183,7 @@ export default function PaginaReservas() {
       )}
 
       {!lista ? (
-        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
           {[0, 1, 2].map((i) => (
             <div key={i} className="h-72 animate-pulse rounded-xl bg-card/60" />
           ))}
@@ -193,7 +193,7 @@ export default function PaginaReservas() {
           {mensagemVazia(visao, filtrando, (todas?.length ?? 0) > 0)}
         </p>
       ) : (
-        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
           {lista.map((r) => (
             <CartaoReserva key={r.chave} reserva={r} hoje={hoje} nova={novas.has(r.chave)} />
           ))}
@@ -268,7 +268,7 @@ function ResumoReservas({ reservas, hoje, filtrado }: { reservas: Reserva[] | un
 
   return (
     <section
-      className="grid grid-cols-2 gap-3 border-b border-border/60 pb-6 lg:grid-cols-4"
+      className="grid grid-cols-2 gap-4 border-b border-border/60 pb-6 lg:grid-cols-4 lg:gap-8"
       aria-label={filtrado ? "Resumo do que está filtrado" : "Resumo das reservas"}
     >
       {numeros.map((n) => (

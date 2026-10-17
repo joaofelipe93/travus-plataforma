@@ -113,8 +113,8 @@ function WhatsappBoletos() {
   }
 
   return (
-    <div className="flex max-w-3xl flex-col gap-6">
-      <Alert>
+    <div className="flex flex-col gap-8">
+      <Alert className="max-w-3xl">
         <AlertTitle>Este é o número que fala com os clientes</AlertTitle>
         <AlertDescription>
           Não é o mesmo do grupo de reservas. Pareie aqui o chip dedicado aos boletos — se você ler este QR
@@ -123,12 +123,13 @@ function WhatsappBoletos() {
       </Alert>
 
       {!dados.disponivel ? (
-        <Alert variant="destructive">
+        <Alert variant="destructive" className="max-w-3xl">
           <AlertTitle>Serviço fora do ar</AlertTitle>
           <AlertDescription>{dados.motivo ?? "o serviço de envio não respondeu"}</AlertDescription>
         </Alert>
       ) : (
-        <>
+        // A conexão (e o QR, quando precisa parear) é o assunto principal; o resto é consulta.
+        <div className="grid items-start gap-8 xl:grid-cols-[minmax(0,28rem)_minmax(0,24rem)]">
           <section className="flex flex-col gap-3 rounded-lg border p-4">
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div>
@@ -242,7 +243,7 @@ function WhatsappBoletos() {
               </Button>
             </div>
           </section>
-        </>
+        </div>
       )}
     </div>
   );
