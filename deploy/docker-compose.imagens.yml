@@ -1,4 +1,8 @@
-# Imagens prontas do GitHub Container Registry, compiladas pela CI a partir da tag da versão
+# Imagens prontas do GitHub Container Registry, compiladas pela CI a partir da tag da versão.
+# TODO de verdade: serviço novo que roda em produção precisa de uma linha AQUI e de uma entrada
+# na lista do deploy.yml — senão a VM tenta baixar a tag local `:dev` e o deploy cai no meio da
+# troca (aconteceu na v0.13.0). `tools/ci/checar-imagens-deploy.sh` passou a barrar isso na CI.
+#
 # (.github/workflows/deploy.yml). Vai por cima do docker-compose.yml e do docker-compose.prod.yml
 # só no deploy pelo GitHub (publicar.sh --imagens): a VM baixa em vez de compilar.
 # O deploy manual (make deploy) e o make prod-local continuam compilando.
@@ -20,3 +24,7 @@ services:
     image: ${REGISTRO:-ghcr.io/joaofelipe93}/travus-worker-canopus:${VERSAO:?defina VERSAO}
   checkin-whatsapp:
     image: ${REGISTRO:-ghcr.io/joaofelipe93}/travus-checkin-whatsapp:${VERSAO:?defina VERSAO}
+  worker-boletos:
+    image: ${REGISTRO:-ghcr.io/joaofelipe93}/travus-worker-boletos:${VERSAO:?defina VERSAO}
+  boletos-whatsapp:
+    image: ${REGISTRO:-ghcr.io/joaofelipe93}/travus-boletos-whatsapp:${VERSAO:?defina VERSAO}
