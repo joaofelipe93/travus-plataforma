@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.15.0](https://github.com/joaofelipe93/travus-plataforma/compare/v0.14.0...v0.15.0) (2026-10-17)
+
+
+### ⚠ BREAKING CHANGES
+
+* **web:** Clientes em espaço próprio e Canopus dividido em Lances e Boletos ([#79](https://github.com/joaofelipe93/travus-plataforma/issues/79))
+
+### Novidades
+
+* **web:** Clientes em espaço próprio e Canopus dividido em Lances e Boletos ([#79](https://github.com/joaofelipe93/travus-plataforma/issues/79)) ([dd5e28b](https://github.com/joaofelipe93/travus-plataforma/commit/dd5e28b1cb19b09d5a8455117809b9d85c31bddc))
+
 ## [0.14.0](https://github.com/joaofelipe93/travus-plataforma/compare/v0.13.1...v0.14.0) (2026-10-17)
 
 
