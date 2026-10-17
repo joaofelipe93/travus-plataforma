@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.14.0](https://github.com/joaofelipe93/travus-plataforma/compare/v0.13.1...v0.14.0) (2026-10-17)
+
+
+### Novidades
+
+* **api:** ativação de serviço por cliente no cadastro universal ([#77](https://github.com/joaofelipe93/travus-plataforma/issues/77)) ([2b826ed](https://github.com/joaofelipe93/travus-plataforma/commit/2b826ed849be5f3056cb7cee82d2e607aa817189))
+
 ## [0.13.1](https://github.com/joaofelipe93/travus-plataforma/compare/v0.13.0...v0.13.1) (2026-10-17)
 
 
