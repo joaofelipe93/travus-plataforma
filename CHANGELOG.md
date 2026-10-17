@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.13.1](https://github.com/joaofelipe93/travus-plataforma/compare/v0.13.0...v0.13.1) (2026-10-17)
+
+
+### Correções
+
+* **deploy:** publicar as imagens dos dois serviços de boletos ([#74](https://github.com/joaofelipe93/travus-plataforma/issues/74)) ([d41ae5c](https://github.com/joaofelipe93/travus-plataforma/commit/d41ae5ce90b63b2e32b299639832d8c24661bbdf))
+
 ## [0.13.0](https://github.com/joaofelipe93/travus-plataforma/compare/v0.12.1...v0.13.0) (2026-10-17)
 
 
