@@ -21,6 +21,9 @@ func TestPapelAssistenteSoLeOPermitido(t *testing.T) {
 	for _, consulta := range []string{
 		"SELECT count(*) FROM clientes",
 		"SELECT id, nome, telefone, email FROM clientes",
+		// Em que serviços cada cliente está ativo (migração 00018): é o que explica quem
+		// entrou numa execução ou numa rodada de boletos.
+		"SELECT cliente_id, servico, ativo FROM cliente_servicos",
 		"SELECT count(*) FROM cotas",
 		"SELECT count(*) FROM execucoes",
 		"SELECT count(*) FROM execucao_cotas",

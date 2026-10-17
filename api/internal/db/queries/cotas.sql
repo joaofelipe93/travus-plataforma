@@ -11,6 +11,11 @@ WHERE (sqlc.narg(cliente_id)::bigint IS NULL OR q.cliente_id = sqlc.narg(cliente
        OR c.nome ILIKE '%' || sqlc.narg(busca)::text || '%'
        OR q.grupo LIKE '%' || sqlc.narg(busca)::text || '%'
        OR q.cota LIKE '%' || sqlc.narg(busca)::text || '%')
+  -- Com o filtro de serviço, só cotas de cliente ativo nele (é o que a tela de novo dry-run
+  -- pede, para não oferecer cota que a execução vai recusar). Sem o filtro, vêm todas.
+  AND (sqlc.narg(servico)::text IS NULL
+       OR EXISTS (SELECT 1 FROM cliente_servicos cs
+                  WHERE cs.cliente_id = c.id AND cs.servico = sqlc.narg(servico)::text AND cs.ativo))
 ORDER BY c.nome, q.grupo, q.cota, q.versao;
 
 -- name: ListarGrupos :many

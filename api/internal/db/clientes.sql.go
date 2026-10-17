@@ -118,6 +118,17 @@ func (q *Queries) BuscarCliente(ctx context.Context, id int64) (BuscarClienteRow
 	return i, err
 }
 
+const contarCotasAtivasDoCliente = `-- name: ContarCotasAtivasDoCliente :one
+SELECT count(*)::int FROM cotas WHERE cliente_id = $1 AND ativa
+`
+
+func (q *Queries) ContarCotasAtivasDoCliente(ctx context.Context, clienteID int64) (int32, error) {
+	row := q.db.QueryRow(ctx, contarCotasAtivasDoCliente, clienteID)
+	var column_1 int32
+	err := row.Scan(&column_1)
+	return column_1, err
+}
+
 const contarCotasDoCliente = `-- name: ContarCotasDoCliente :one
 SELECT count(*)::int FROM cotas WHERE cliente_id = $1
 `
@@ -205,6 +216,42 @@ func (q *Queries) CriarClienteCadastro(ctx context.Context, arg CriarClienteCada
 	return i, err
 }
 
+const definirServicoDoCliente = `-- name: DefinirServicoDoCliente :one
+INSERT INTO cliente_servicos (cliente_id, servico, ativo, alterado_por)
+VALUES ($1, $2, $3, $4)
+ON CONFLICT (cliente_id, servico) DO UPDATE
+SET ativo         = excluded.ativo,
+    alterado_por  = excluded.alterado_por,
+    atualizado_em = now()
+RETURNING servico, ativo, atualizado_em
+`
+
+type DefinirServicoDoClienteParams struct {
+	ClienteID   int64
+	Servico     string
+	Ativo       bool
+	AlteradoPor *int64
+}
+
+type DefinirServicoDoClienteRow struct {
+	Servico      string
+	Ativo        bool
+	AtualizadoEm time.Time
+}
+
+// Ligar e desligar passam pelo mesmo caminho: a linha nasce na primeira vez e depois só muda.
+func (q *Queries) DefinirServicoDoCliente(ctx context.Context, arg DefinirServicoDoClienteParams) (DefinirServicoDoClienteRow, error) {
+	row := q.db.QueryRow(ctx, definirServicoDoCliente,
+		arg.ClienteID,
+		arg.Servico,
+		arg.Ativo,
+		arg.AlteradoPor,
+	)
+	var i DefinirServicoDoClienteRow
+	err := row.Scan(&i.Servico, &i.Ativo, &i.AtualizadoEm)
+	return i, err
+}
+
 const excluirCliente = `-- name: ExcluirCliente :execrows
 DELETE FROM clientes WHERE id = $1
 `
@@ -219,15 +266,25 @@ func (q *Queries) ExcluirCliente(ctx context.Context, id int64) (int64, error) {
 
 const listarClientes = `-- name: ListarClientes :many
 SELECT c.id, c.nome, c.telefone, c.email, c.cpf_cnpj,
-       count(q.id)::int                          AS total_cotas,
-       (count(q.id) FILTER (WHERE q.ativa))::int AS cotas_ativas
+       count(DISTINCT q.id)::int                          AS total_cotas,
+       (count(DISTINCT q.id) FILTER (WHERE q.ativa))::int AS cotas_ativas,
+       coalesce(array_agg(DISTINCT cs.servico) FILTER (WHERE cs.ativo), '{}')::text[] AS servicos
 FROM clientes c
 LEFT JOIN cotas q ON q.cliente_id = c.id
-WHERE $1::text IS NULL
-   OR c.nome ILIKE '%' || $1::text || '%'
+LEFT JOIN cliente_servicos cs ON cs.cliente_id = c.id
+WHERE ($1::text IS NULL
+       OR c.nome ILIKE '%' || $1::text || '%')
+  AND ($2::text IS NULL
+       OR EXISTS (SELECT 1 FROM cliente_servicos a
+                  WHERE a.cliente_id = c.id AND a.servico = $2::text AND a.ativo))
 GROUP BY c.id
 ORDER BY c.nome
 `
+
+type ListarClientesParams struct {
+	Busca   *string
+	Servico *string
+}
 
 type ListarClientesRow struct {
 	ID          int64
@@ -237,10 +294,14 @@ type ListarClientesRow struct {
 	CpfCnpj     *string
 	TotalCotas  int32
 	CotasAtivas int32
+	Servicos    []string
 }
 
-func (q *Queries) ListarClientes(ctx context.Context, busca *string) ([]ListarClientesRow, error) {
-	rows, err := q.db.Query(ctx, listarClientes, busca)
+// O cadastro é um só para a plataforma: a lista já diz em que serviços o cliente está ativo
+// (migração 00018) e aceita o filtro por serviço, que é como cada espaço mostra só a carteira
+// dele. As contagens são DISTINCT porque agora há duas junções que multiplicam linhas.
+func (q *Queries) ListarClientes(ctx context.Context, arg ListarClientesParams) ([]ListarClientesRow, error) {
+	rows, err := q.db.Query(ctx, listarClientes, arg.Busca, arg.Servico)
 	if err != nil {
 		return nil, err
 	}
@@ -256,6 +317,7 @@ func (q *Queries) ListarClientes(ctx context.Context, busca *string) ([]ListarCl
 			&i.CpfCnpj,
 			&i.TotalCotas,
 			&i.CotasAtivas,
+			&i.Servicos,
 		); err != nil {
 			return nil, err
 		}
@@ -295,6 +357,46 @@ func (q *Queries) ListarClientesParaImportacao(ctx context.Context) ([]ListarCli
 			&i.NomeNormalizado,
 			&i.Telefone,
 			&i.Email,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listarServicosDoCliente = `-- name: ListarServicosDoCliente :many
+SELECT cs.servico, cs.ativo, cs.atualizado_em, u.nome AS alterado_por_nome
+FROM cliente_servicos cs
+LEFT JOIN usuarios u ON u.id = cs.alterado_por
+WHERE cs.cliente_id = $1
+ORDER BY cs.servico
+`
+
+type ListarServicosDoClienteRow struct {
+	Servico         string
+	Ativo           bool
+	AtualizadoEm    time.Time
+	AlteradoPorNome *string
+}
+
+func (q *Queries) ListarServicosDoCliente(ctx context.Context, clienteID int64) ([]ListarServicosDoClienteRow, error) {
+	rows, err := q.db.Query(ctx, listarServicosDoCliente, clienteID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListarServicosDoClienteRow
+	for rows.Next() {
+		var i ListarServicosDoClienteRow
+		if err := rows.Scan(
+			&i.Servico,
+			&i.Ativo,
+			&i.AtualizadoEm,
+			&i.AlteradoPorNome,
 		); err != nil {
 			return nil, err
 		}

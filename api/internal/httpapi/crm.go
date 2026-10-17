@@ -15,6 +15,7 @@ import (
 
 	"github.com/joaofelipe93/travus-plataforma/api/internal/cadastro"
 	"github.com/joaofelipe93/travus-plataforma/api/internal/db"
+	"github.com/joaofelipe93/travus-plataforma/api/internal/servicos"
 )
 
 const (
@@ -28,6 +29,9 @@ type pedidoCliente struct {
 	Email    string               `json:"email"`
 	CpfCnpj  string               `json:"cpf_cnpj"`
 	Cotas    []pedidoCotaCadastro `json:"cotas"`
+	// Serviços em que o cliente novo já nasce ativo. Ausente (null) = todos, que é como a
+	// plataforma se comportava antes da migração 00018; lista vazia = nenhum.
+	Servicos []string `json:"servicos"`
 }
 
 type pedidoCotaCadastro struct {
@@ -154,6 +158,11 @@ func (s *Servidor) criarCliente(w http.ResponseWriter, r *http.Request, u *Usuar
 		responderErroCadastro(w, r, err)
 		return
 	}
+	servicosDoNovo, err := servicosPedidos(p.Servicos)
+	if err != nil {
+		responderErroCadastro(w, r, err)
+		return
+	}
 	cotas := make([]cotaValidada, 0, len(p.Cotas))
 	vistas := map[string]bool{}
 	for i, pc := range p.Cotas {
@@ -200,13 +209,23 @@ func (s *Servidor) criarCliente(w http.ResponseWriter, r *http.Request, u *Usuar
 		}
 		ids = append(ids, id)
 	}
+	// O cadastro é um só; a ativação é que separa os serviços (migração 00018). Grava todos
+	// os conhecidos, com ativo = true só nos escolhidos, para a tela já mostrar os dois lados.
+	for _, cat := range servicos.Todos {
+		if _, err := qtx.DefinirServicoDoCliente(ctx, db.DefinirServicoDoClienteParams{
+			ClienteID: cliente.ID, Servico: cat.ID, Ativo: servicosDoNovo[cat.ID], AlteradoPor: &u.ID,
+		}); err != nil {
+			erroInterno(w, r, err)
+			return
+		}
+	}
 	if err := tx.Commit(ctx); err != nil {
 		erroInterno(w, r, err)
 		return
 	}
 
 	s.auditar(ctx, r, &u.ID, "cliente_criado", "cliente", idTexto(cliente.ID),
-		map[string]any{"nome": cliente.Nome, "cotas": len(ids)})
+		map[string]any{"nome": cliente.Nome, "cotas": len(ids), "servicos": ativos(servicosDoNovo)})
 	s.responderCliente(w, r, cliente.ID, http.StatusCreated)
 }
 
@@ -259,6 +278,84 @@ func (s *Servidor) atualizarCliente(w http.ResponseWriter, r *http.Request, u *U
 	}
 	s.auditar(r.Context(), r, &u.ID, "cliente_editado", "cliente", idTexto(c.ID), map[string]any{"nome": c.Nome})
 	s.responderCliente(w, r, c.ID, http.StatusOK)
+}
+
+// servicosPedidos traduz a lista do formulário num mapa serviço → ativo. Lista ausente (null)
+// liga todos: é o que a plataforma fazia antes de a ativação existir.
+func servicosPedidos(pedidos []string) (map[string]bool, error) {
+	escolhidos := map[string]bool{}
+	if pedidos == nil {
+		for _, id := range servicos.IDs() {
+			escolhidos[id] = true
+		}
+		return escolhidos, nil
+	}
+	for _, id := range pedidos {
+		if !servicos.Valido(id) {
+			return nil, cadastro.Erro{Mensagem: fmt.Sprintf("serviço desconhecido: %s", id)}
+		}
+		escolhidos[id] = true
+	}
+	return escolhidos, nil
+}
+
+// ativos lista, em ordem de catálogo, os serviços marcados — para a auditoria.
+func ativos(escolhidos map[string]bool) []string {
+	lista := make([]string, 0, len(escolhidos))
+	for _, id := range servicos.IDs() {
+		if escolhidos[id] {
+			lista = append(lista, id)
+		}
+	}
+	return lista
+}
+
+// definirServicoDoCliente liga ou desliga um serviço para um cliente. Desligar não mexe em
+// cota nem apaga histórico: as cotas simplesmente param de entrar nas execuções daquele
+// serviço, e a resposta diz quantas são para a tela poder avisar.
+func (s *Servidor) definirServicoDoCliente(w http.ResponseWriter, r *http.Request, u *UsuarioSessao) {
+	id, ok := idDoCaminho(r)
+	if !ok {
+		responderErro(w, http.StatusNotFound, "cliente não encontrado")
+		return
+	}
+	servico := r.PathValue("servico")
+	if !servicos.Valido(servico) {
+		responderErro(w, http.StatusBadRequest, fmt.Sprintf("serviço desconhecido: %s", servico))
+		return
+	}
+	var p struct {
+		Ativo *bool `json:"ativo"`
+	}
+	if err := lerJSON(w, r, &p, 1<<10); err != nil || p.Ativo == nil {
+		responderErro(w, http.StatusBadRequest, `envie {"ativo": true} ou {"ativo": false}`)
+		return
+	}
+
+	ctx := r.Context()
+	cliente, err := s.q.BuscarCliente(ctx, id)
+	if errors.Is(err, pgx.ErrNoRows) {
+		responderErro(w, http.StatusNotFound, "cliente não encontrado")
+		return
+	}
+	if err != nil {
+		erroInterno(w, r, err)
+		return
+	}
+	cotasAtivas, err := s.q.ContarCotasAtivasDoCliente(ctx, id)
+	if err != nil {
+		erroInterno(w, r, err)
+		return
+	}
+	if _, err := s.q.DefinirServicoDoCliente(ctx, db.DefinirServicoDoClienteParams{
+		ClienteID: id, Servico: servico, Ativo: *p.Ativo, AlteradoPor: &u.ID,
+	}); err != nil {
+		erroInterno(w, r, err)
+		return
+	}
+	s.auditar(ctx, r, &u.ID, "cliente_servico_alterado", "cliente", idTexto(id),
+		map[string]any{"nome": cliente.Nome, "servico": servico, "ativo": *p.Ativo, "cotas_ativas": cotasAtivas})
+	s.responderCliente(w, r, id, http.StatusOK)
 }
 
 func (s *Servidor) excluirCliente(w http.ResponseWriter, r *http.Request, u *UsuarioSessao) {
@@ -464,9 +561,15 @@ func (s *Servidor) responderCliente(w http.ResponseWriter, r *http.Request, id i
 		erroInterno(w, r, err)
 		return
 	}
+	servicosDoCliente, err := s.servicosDoCliente(ctx, id)
+	if err != nil {
+		erroInterno(w, r, err)
+		return
+	}
 	responderJSON(w, status, map[string]any{
-		"cliente": clienteJSON{c.ID, c.Nome, c.Telefone, c.Email, c.CpfCnpj, c.Origem, c.CriadoEm, c.AtualizadoEm},
-		"cotas":   cotasParaJSON(cotas),
+		"cliente":  clienteJSON{c.ID, c.Nome, c.Telefone, c.Email, c.CpfCnpj, c.Origem, c.CriadoEm, c.AtualizadoEm},
+		"cotas":    cotasParaJSON(cotas),
+		"servicos": servicosDoCliente,
 	})
 }
 

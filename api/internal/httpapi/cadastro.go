@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net/http"
@@ -11,6 +12,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/joaofelipe93/travus-plataforma/api/internal/db"
+	"github.com/joaofelipe93/travus-plataforma/api/internal/servicos"
 )
 
 type clienteResumoJSON struct {
@@ -22,6 +24,20 @@ type clienteResumoJSON struct {
 	CpfCnpj     *string `json:"cpf_cnpj"`
 	TotalCotas  int32   `json:"total_cotas"`
 	CotasAtivas int32   `json:"cotas_ativas"`
+	// Serviços em que o cliente está ativo (migração 00018), para a lista marcar cada um.
+	Servicos []string `json:"servicos"`
+}
+
+// servicoDoClienteJSON é um serviço do catálogo com a situação daquele cliente nele. A API
+// manda sempre o catálogo inteiro: a tela desenha um interruptor por serviço, inclusive os
+// que nunca foram tocados para aquele cliente.
+type servicoDoClienteJSON struct {
+	ID              string     `json:"id"`
+	Nome            string     `json:"nome"`
+	Descricao       string     `json:"descricao"`
+	Ativo           bool       `json:"ativo"`
+	AtualizadoEm    *time.Time `json:"atualizado_em"`
+	AlteradoPorNome *string    `json:"alterado_por_nome"`
 }
 
 type clienteJSON struct {
@@ -68,16 +84,59 @@ func busca(r *http.Request) *string {
 }
 
 func (s *Servidor) listarClientes(w http.ResponseWriter, r *http.Request, _ *UsuarioSessao) {
-	rows, err := s.q.ListarClientes(r.Context(), busca(r))
+	// ?servico=canopus: só quem está ativo naquele serviço. Sem ele, a carteira inteira.
+	var servico *string
+	if v := strings.TrimSpace(r.URL.Query().Get("servico")); v != "" {
+		if !servicos.Valido(v) {
+			responderErro(w, http.StatusBadRequest, fmt.Sprintf("serviço desconhecido: %s", v))
+			return
+		}
+		servico = &v
+	}
+	rows, err := s.q.ListarClientes(r.Context(), db.ListarClientesParams{Busca: busca(r), Servico: servico})
 	if err != nil {
 		erroInterno(w, r, err)
 		return
 	}
 	out := make([]clienteResumoJSON, 0, len(rows))
 	for _, c := range rows {
-		out = append(out, clienteResumoJSON{c.ID, c.Nome, c.Telefone, c.Email, c.CpfCnpj, c.TotalCotas, c.CotasAtivas})
+		servicosAtivos := c.Servicos
+		if servicosAtivos == nil {
+			servicosAtivos = []string{}
+		}
+		out = append(out, clienteResumoJSON{c.ID, c.Nome, c.Telefone, c.Email, c.CpfCnpj, c.TotalCotas, c.CotasAtivas, servicosAtivos})
 	}
 	responderJSON(w, http.StatusOK, map[string]any{"clientes": out})
+}
+
+// listarServicos devolve o catálogo de serviços que agem sobre um cliente. A tela usa para
+// montar os interruptores sem repetir a lista no código dela.
+func (s *Servidor) listarServicos(w http.ResponseWriter, _ *http.Request, _ *UsuarioSessao) {
+	responderJSON(w, http.StatusOK, map[string]any{"servicos": servicos.Todos})
+}
+
+// servicosDoCliente junta o catálogo com o que está gravado para aquele cliente.
+func (s *Servidor) servicosDoCliente(ctx context.Context, clienteID int64) ([]servicoDoClienteJSON, error) {
+	rows, err := s.q.ListarServicosDoCliente(ctx, clienteID)
+	if err != nil {
+		return nil, err
+	}
+	gravados := make(map[string]db.ListarServicosDoClienteRow, len(rows))
+	for _, row := range rows {
+		gravados[row.Servico] = row
+	}
+	out := make([]servicoDoClienteJSON, 0, len(servicos.Todos))
+	for _, cat := range servicos.Todos {
+		item := servicoDoClienteJSON{ID: cat.ID, Nome: cat.Nome, Descricao: cat.Descricao}
+		if row, ok := gravados[cat.ID]; ok {
+			item.Ativo = row.Ativo
+			atualizado := row.AtualizadoEm
+			item.AtualizadoEm = &atualizado
+			item.AlteradoPorNome = row.AlteradoPorNome
+		}
+		out = append(out, item)
+	}
+	return out, nil
 }
 
 func (s *Servidor) buscarCliente(w http.ResponseWriter, r *http.Request, _ *UsuarioSessao) {
@@ -119,10 +178,16 @@ func (s *Servidor) buscarCliente(w http.ResponseWriter, r *http.Request, _ *Usua
 			DriveStatus: l.DriveStatus, DriveLink: l.DriveLink, DriveErro: l.DriveErro, RegistradoEm: l.RegistradoEm, ExecucaoID: l.ExecucaoID,
 		})
 	}
+	servicosDoCliente, err := s.servicosDoCliente(r.Context(), id)
+	if err != nil {
+		erroInterno(w, r, err)
+		return
+	}
 	responderJSON(w, http.StatusOK, map[string]any{
-		"cliente": clienteJSON{c.ID, c.Nome, c.Telefone, c.Email, c.CpfCnpj, c.Origem, c.CriadoEm, c.AtualizadoEm},
-		"cotas":   cotasParaJSON(cotas),
-		"lances":  lances,
+		"cliente":  clienteJSON{c.ID, c.Nome, c.Telefone, c.Email, c.CpfCnpj, c.Origem, c.CriadoEm, c.AtualizadoEm},
+		"cotas":    cotasParaJSON(cotas),
+		"lances":   lances,
+		"servicos": servicosDoCliente,
 	})
 }
 

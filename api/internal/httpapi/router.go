@@ -184,12 +184,15 @@ func (s *Servidor) Rotas() http.Handler {
 	mux.Handle("DELETE /perfil/credenciais/{credencial}", s.autenticado(s.apagarMinhaCredencial))
 	mux.Handle("GET /credenciais", s.autenticado(exigirPerfil(s.panoramaCredenciais, admins...)))
 
-	// CRM do Canopus (crm.go): o cadastro é digitado, não mais importado de planilha.
+	// Cadastro de clientes (crm.go): um só para a plataforma inteira, digitado, não mais
+	// importado de planilha. O que separa um serviço do outro é a ativação por cliente.
 	mux.Handle("GET /clientes", s.autenticado(s.listarClientes))
 	mux.Handle("POST /clientes", s.autenticado(exigirPerfil(s.criarCliente, editores...)))
 	mux.Handle("GET /clientes/{id}", s.autenticado(s.buscarCliente))
 	mux.Handle("PATCH /clientes/{id}", s.autenticado(exigirPerfil(s.atualizarCliente, editores...)))
 	mux.Handle("DELETE /clientes/{id}", s.autenticado(exigirPerfil(s.excluirCliente, editores...)))
+	mux.Handle("PUT /clientes/{id}/servicos/{servico}", s.autenticado(exigirPerfil(s.definirServicoDoCliente, editores...)))
+	mux.Handle("GET /servicos", s.autenticado(s.listarServicos))
 	mux.Handle("GET /cotas", s.autenticado(s.listarCotas))
 	mux.Handle("POST /cotas", s.autenticado(exigirPerfil(s.criarCota, editores...)))
 	mux.Handle("GET /cotas/grupos", s.autenticado(s.listarGrupos))

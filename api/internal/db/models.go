@@ -254,6 +254,15 @@ type Cliente struct {
 	CpfCnpj         *string
 }
 
+type ClienteServico struct {
+	ClienteID    int64
+	Servico      string
+	Ativo        bool
+	AlteradoPor  *int64
+	CriadoEm     time.Time
+	AtualizadoEm time.Time
+}
+
 type ConfiguracaoCanopus struct {
 	ID                      bool
 	DryRunAutomatico        bool

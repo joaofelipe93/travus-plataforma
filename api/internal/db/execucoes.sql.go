@@ -256,11 +256,13 @@ SELECT q.id
 FROM cotas q
 JOIN clientes c ON c.id = q.cliente_id
 WHERE q.ativa
+  AND EXISTS (SELECT 1 FROM cliente_servicos cs
+              WHERE cs.cliente_id = c.id AND cs.servico = 'canopus' AND cs.ativo)
 ORDER BY c.nome, q.grupo, q.cota, q.versao
 `
 
 // ===== Dry-run automático (agendamento.go) =====
-// Todas as cotas ativas, na ordem em que a execução as processa.
+// Todas as cotas ativas de cliente ativo no Canopus, na ordem em que a execução as processa.
 func (q *Queries) CotasAtivasIDs(ctx context.Context) ([]int64, error) {
 	rows, err := q.db.Query(ctx, cotasAtivasIDs)
 	if err != nil {
@@ -789,6 +791,8 @@ SELECT $1::bigint, q.id,
 FROM cotas q
 JOIN clientes c ON c.id = q.cliente_id
 WHERE q.id = ANY($2::bigint[]) AND q.ativa
+  AND EXISTS (SELECT 1 FROM cliente_servicos cs
+              WHERE cs.cliente_id = c.id AND cs.servico = 'canopus' AND cs.ativo)
 `
 
 type InserirCotasNaExecucaoParams struct {
@@ -796,7 +800,9 @@ type InserirCotasNaExecucaoParams struct {
 	CotaIds    []int64
 }
 
-// Só cotas ativas entram. Ordem: cliente, grupo, cota, versão.
+// Só cotas ativas de cliente ativo no Canopus entram (migração 00018). Ordem: cliente, grupo,
+// cota, versão. O handler compara o que entrou com o que foi pedido e recusa a execução
+// inteira se faltar alguma: cota some da lista em silêncio, nunca.
 func (q *Queries) InserirCotasNaExecucao(ctx context.Context, arg InserirCotasNaExecucaoParams) (int64, error) {
 	result, err := q.db.Exec(ctx, inserirCotasNaExecucao, arg.ExecucaoID, arg.CotaIds)
 	if err != nil {
