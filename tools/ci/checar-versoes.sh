@@ -3,7 +3,7 @@
 # automática (Dependabot) ou manual passa em um lugar e esquece o outro, e o erro só aparece
 # no build ou, pior, em produção.
 #
-#   1. Node: web/Dockerfile, workers/checkin-whatsapp/Dockerfile e NODE_VERSION da CI;
+#   1. Node: web/Dockerfile, os Dockerfiles dos serviços em TypeScript e NODE_VERSION da CI;
 #   2. Go: api/Dockerfile, o serviço api-teste do compose e GO_VERSION da CI (e a linha "go"
 #      do go.mod não pode ser maior);
 #   3. Playwright: a tag da imagem de CADA worker que usa navegador e o pacote no
@@ -28,7 +28,7 @@ ci_node=$(sed -nE 's/^ *NODE_VERSION: *"([^"]+)".*/\1/p' .github/workflows/ci.ym
 ci_go=$(sed -nE 's/^ *GO_VERSION: *"([^"]+)".*/\1/p' .github/workflows/ci.yml | head -1)
 [ -n "$ci_node" ] && [ -n "$ci_go" ] || { echo "x não achei NODE_VERSION/GO_VERSION em .github/workflows/ci.yml"; exit 1; }
 
-for arquivo in web/Dockerfile workers/checkin-whatsapp/Dockerfile; do
+for arquivo in web/Dockerfile workers/checkin-whatsapp/Dockerfile workers/boletos-whatsapp/Dockerfile; do
   for versao in $(sed -nE 's/^FROM node:([0-9.]+)-.*/\1/p' "$arquivo" | sort -u); do
     conferir "Node da CI e do $arquivo" "$ci_node" "$versao" "$arquivo"
   done
@@ -61,6 +61,12 @@ done
 pw_canopus=$(sed -nE 's#^FROM mcr\.microsoft\.com/playwright:v([0-9.]+-[a-z]+).*#\1#p' workers/canopus/Dockerfile | head -1)
 pw_boletos=$(sed -nE 's#^FROM mcr\.microsoft\.com/playwright:v([0-9.]+-[a-z]+).*#\1#p' workers/boletos-canopus/Dockerfile | head -1)
 conferir "Imagem do Playwright igual nos dois workers" "$pw_canopus" "$pw_boletos" "workers/boletos-canopus/Dockerfile"
+
+# baileys fixo e igual nos dois serviços de WhatsApp (a 7.x tem quedas silenciosas de conexão).
+for servico in checkin-whatsapp boletos-whatsapp; do
+  versao_baileys=$(node -p "require('./workers/$servico/package-lock.json').packages['node_modules/baileys'].version" 2> /dev/null || echo "?")
+  conferir "baileys do $servico fixo em 6.7.24" "6.7.24" "$versao_baileys" "workers/$servico/package-lock.json"
+done
 
 if [ "$falhas" -gt 0 ]; then
   echo "$falhas versão(ões) fora de sincronia."

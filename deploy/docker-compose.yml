@@ -36,6 +36,8 @@ x-api: &api-base
     WORKER_TOKEN: ${WORKER_TOKEN:?defina WORKER_TOKEN em deploy/.env (make up gera)}
     CHAVE_CRIPTOGRAFIA: ${CHAVE_CRIPTOGRAFIA:?defina CHAVE_CRIPTOGRAFIA em deploy/.env (make up gera)}
     LANCE_REAL_HABILITADO: ${LANCE_REAL_HABILITADO:-false}
+    # Envio dos boletos no WhatsApp dos clientes: desligada, a rodada só monta a fila (ensaio).
+    BOLETOS_ENVIO_HABILITADO: ${BOLETOS_ENVIO_HABILITADO:-false}
     # Google Drive (opcional): sem os três, os comprovantes ficam só na plataforma.
     GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
     GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
@@ -50,9 +52,15 @@ x-api: &api-base
     VIGIA_PING_URL: ${VIGIA_PING_URL:-}
     # Notificador de check-in (tela WhatsApp): a API chama as rotas de administração dele.
     CHECKIN_URL: http://checkin-whatsapp:3000
+    # Serviço de boletos no WhatsApp (tela de boletos: QR, teste, desconectar).
+    BOLETOS_WHATSAPP_URL: http://boletos-whatsapp:3000
+    BOLETOS_ADMIN_TOKEN: ${BOLETOS_ADMIN_TOKEN:?defina BOLETOS_ADMIN_TOKEN em deploy/.env (make up gera)}
     CHECKIN_ADMIN_TOKEN: ${CHECKIN_ADMIN_TOKEN:?defina CHECKIN_ADMIN_TOKEN em deploy/.env (make up gera)}
     # Senha do papel checkin no Postgres: `api migrate up` liga o login com ela.
     CHECKIN_DB_SENHA: ${CHECKIN_DB_SENHA:?defina CHECKIN_DB_SENHA em deploy/.env (make up gera)}
+    # BOLETOS_DB_SENHA: papel `boletos` no Postgres (`api migrate up` liga o login), usado pelo
+    # serviço que manda os boletos no WhatsApp.
+    BOLETOS_DB_SENHA: ${BOLETOS_DB_SENHA:?defina BOLETOS_DB_SENHA em deploy/.env (make up gera)}
     # Assistente da tela inicial. Sem ANTHROPIC_API_KEY, a tela avisa que ele não está configurado.
     # ASSISTENTE_DB_SENHA: papel só leitura `assistente` no Postgres (`api migrate up` liga o login).
     ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
@@ -223,6 +231,57 @@ services:
     networks: [interna]
     logging: *logs
     mem_limit: 1536m
+
+  # Serviço que manda os boletos no WhatsApp DE CADA CLIENTE. **Outro número e outra sessão**
+  # que o notificador de check-in: nunca compartilhe o volume da sessão entre os dois. Perfil
+  # boletos (make boletos); em produção fica ligado pelo compose de produção.
+  boletos-whatsapp:
+    build:
+      context: ../workers/boletos-whatsapp
+      args: *versao
+    image: travus/boletos-whatsapp:dev
+    profiles: [boletos]
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgres://boletos:${BOLETOS_DB_SENHA:?defina BOLETOS_DB_SENHA em deploy/.env (make up gera)}@postgres:5432/${POSTGRES_DB:-travus}?sslmode=disable
+      ADMIN_TOKEN: ${BOLETOS_ADMIN_TOKEN:?defina BOLETOS_ADMIN_TOKEN em deploy/.env (make up gera)}
+      # Freio de mão do próprio serviço, além da configuração na tela e da chave da API.
+      ENVIO_HABILITADO: ${BOLETOS_ENVIO_SERVICO:-true}
+      LOG_FORMAT: json
+      TZ: America/Sao_Paulo
+    volumes:
+      - boletos-dados:/dados
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
+    # Ao desligar, termina a mensagem atual antes de sair (senão ela sairia duas vezes).
+    stop_grace_period: 60s
+    networks: [interna]
+    logging: *logs
+    mem_limit: 512m
+
+  # Testes do serviço de envio (make test). Mesmo banco de teste dos outros.
+  boletos-teste:
+    build:
+      context: ../workers/boletos-whatsapp
+      target: deps
+    image: travus/boletos-whatsapp-teste:dev
+    profiles: [teste]
+    working_dir: /app
+    command: ["sh", "-c", "npm run typecheck && npm run typecheck:tests && npm test"]
+    environment:
+      TEST_DATABASE_URL: postgres://${POSTGRES_USER:-travus}:${POSTGRES_PASSWORD:?defina POSTGRES_PASSWORD em deploy/.env}@postgres:5432/travus_teste?sslmode=disable
+    volumes:
+      - ../workers/boletos-whatsapp/src:/app/src:ro
+      - ../workers/boletos-whatsapp/tests:/app/tests:ro
+      - ../workers/boletos-whatsapp/tsconfig.json:/app/tsconfig.json:ro
+      - ../workers/boletos-whatsapp/tsconfig.test.json:/app/tsconfig.test.json:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks: [interna]
 
   # Worker de boletos da Canopus: pega a rodada na fila da API, consulta o Boleto Fácil por CPF e
   # guarda as parcelas em aberto e o PDF. SÓ LÊ o site (nada de Newcon, nada de WhatsApp aqui).
@@ -408,5 +467,7 @@ networks:
 volumes:
   postgres-dados:
   checkin-dados:
+  # Sessão do WhatsApp DOS BOLETOS (outro número): separada da do notificador de check-in.
+  boletos-dados:
   go-modulos:
   go-build:

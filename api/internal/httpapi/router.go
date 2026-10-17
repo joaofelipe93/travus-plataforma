@@ -13,6 +13,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/joaofelipe93/travus-plataforma/api/internal/boletoswa"
 	"github.com/joaofelipe93/travus-plataforma/api/internal/checkin"
 	"github.com/joaofelipe93/travus-plataforma/api/internal/cripto"
 	"github.com/joaofelipe93/travus-plataforma/api/internal/db"
@@ -61,6 +62,8 @@ type Config struct {
 	Vigia ConfigVigia
 	// Notificador de check-in (tela WhatsApp). nil: as rotas respondem "indisponível".
 	Checkin *checkin.Cliente
+	// Serviço que manda os boletos no WhatsApp dos clientes (outro número). nil: "indisponível".
+	BoletosWhatsapp *boletoswa.Cliente
 	// Assistente da tela inicial (assistente.go).
 	Assistente ConfigAssistente
 	// Versão publicada (version.txt) e commit, mostrados no /health.
@@ -230,6 +233,11 @@ func (s *Servidor) Rotas() http.Handler {
 
 	// Serviço de boletos da Canopus (boletos.go): rodada de envio (busca os boletos do mês) e de
 	// cobrança. Todo perfil acompanha; admin e operador criam e cancelam.
+	// WhatsApp dos boletos (outro número): o QR dá acesso à conta, então só admin.
+	mux.Handle("GET /integracoes/whatsapp-boletos", s.autenticado(exigirPerfil(s.situacaoWhatsappBoletos, admins...)))
+	mux.Handle("POST /integracoes/whatsapp-boletos/teste", s.autenticado(exigirPerfil(s.testeWhatsappBoletos, admins...)))
+	mux.Handle("POST /integracoes/whatsapp-boletos/desconectar", s.autenticado(exigirPerfil(s.desconectarWhatsappBoletos, admins...)))
+
 	mux.Handle("GET /boletos/configuracao", s.autenticado(s.configuracaoBoletos))
 	mux.Handle("PUT /boletos/configuracao", s.autenticado(exigirPerfil(s.atualizarConfiguracaoBoletos, editores...)))
 	mux.Handle("GET /boletos/rodadas", s.autenticado(s.listarRodadas))

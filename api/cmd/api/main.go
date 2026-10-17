@@ -26,6 +26,7 @@ import (
 	_ "github.com/jackc/pgx/v5/stdlib"
 	"github.com/pressly/goose/v3"
 
+	"github.com/joaofelipe93/travus-plataforma/api/internal/boletoswa"
 	"github.com/joaofelipe93/travus-plataforma/api/internal/checkin"
 	"github.com/joaofelipe93/travus-plataforma/api/internal/cripto"
 	"github.com/joaofelipe93/travus-plataforma/api/internal/httpapi"
@@ -119,8 +120,10 @@ func serve() error {
 		LanceRealHabilitado: os.Getenv("LANCE_REAL_HABILITADO") == "true",
 		// Envio dos boletos no WhatsApp dos clientes: desligada, a rodada só monta a fila.
 		BoletosEnvioHabilitado: os.Getenv("BOLETOS_ENVIO_HABILITADO") == "true",
-		ValidadeDryRun:      2 * time.Hour,
-		Cofre:               cofre,
+		// Serviço que manda os boletos no WhatsApp dos clientes (workers/boletos-whatsapp).
+		BoletosWhatsapp: boletoswa.NovoCliente(os.Getenv("BOLETOS_WHATSAPP_URL"), os.Getenv("BOLETOS_ADMIN_TOKEN")),
+		ValidadeDryRun:  2 * time.Hour,
+		Cofre:           cofre,
 		Google: httpapi.ConfigGoogle{
 			ClientID:     os.Getenv("GOOGLE_CLIENT_ID"),
 			ClientSecret: os.Getenv("GOOGLE_CLIENT_SECRET"),
