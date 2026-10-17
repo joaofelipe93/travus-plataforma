@@ -67,7 +67,7 @@ export default function PaginaCotas() {
   const filtrando = consulta !== "" || tipo !== TODOS || vendedor !== TODOS;
 
   return (
-    <div className="flex flex-col gap-6">
+    <div className="flex flex-col gap-8">
       <ResumoCarteira cotas={lista} filtrado={filtrando} />
 
       <div className="flex flex-wrap items-center gap-2">

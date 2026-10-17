@@ -1,4 +1,5 @@
 import { connection } from "next/server";
+import { Colunas, Pagina, Secao } from "@/components/pagina";
 import { Badge } from "@/components/ui/badge";
 
 type Health = {
@@ -43,9 +44,9 @@ function rotuloVersao(versao: string | undefined) {
 
 function Linha({ rotulo, children }: { rotulo: string; children: React.ReactNode }) {
   return (
-    <div className="flex flex-col gap-0.5 py-2 sm:flex-row sm:gap-4">
-      <dt className="w-40 shrink-0 text-sm text-muted-foreground">{rotulo}</dt>
-      <dd className="text-sm break-all">{children}</dd>
+    <div className="flex flex-col gap-0.5 py-2.5 sm:flex-row sm:gap-4">
+      <dt className="w-44 shrink-0 text-sm text-muted-foreground">{rotulo}</dt>
+      <dd className="min-w-0 text-sm break-all">{children}</dd>
     </div>
   );
 }
@@ -57,50 +58,64 @@ export default async function PaginaStatus() {
   const tudoOk = consulta.ok && consulta.httpStatus === 200 && consulta.corpo.via_gateway;
 
   return (
-    <main className="flex max-w-2xl flex-1 flex-col gap-6 px-8 py-8">
-      <div>
-        <h1 className="text-xl font-semibold tracking-tight">Status da plataforma</h1>
-        <p className="text-sm text-muted-foreground">Consulta feita agora, pelo servidor do app, passando pelo gateway.</p>
-      </div>
-
-      <section className="rounded-lg border p-5">
-        <div className="mb-3 flex items-center justify-between gap-4">
-          <h2 className="font-medium">API pelo gateway</h2>
-          {!consulta.ok ? (
+    <Pagina
+      titulo="Status da plataforma"
+      descricao="Consulta feita agora, pelo servidor do app, passando pelo gateway."
+      meta={[
+        {
+          valor: !consulta.ok ? (
             <Badge variant="destructive">sem resposta</Badge>
           ) : tudoOk ? (
             <Badge variant="secondary">ok</Badge>
           ) : (
             <Badge variant="outline">{consulta.corpo.status}</Badge>
-          )}
-        </div>
-
-        <dl className="divide-y">
-          <Linha rotulo="Versão do app">
-            {rotuloVersao(process.env.NEXT_PUBLIC_VERSAO)} (commit {(process.env.NEXT_PUBLIC_COMMIT ?? "desconhecido").slice(0, 7)})
-          </Linha>
-          <Linha rotulo="Endereço consultado">
-            <code className="font-mono">{consulta.url}</code>
-          </Linha>
-          {consulta.ok ? (
-            <>
-              <Linha rotulo="HTTP">
-                {consulta.httpStatus} em {consulta.latenciaMs} ms
+          ),
+          rotulo: "API pelo gateway",
+        },
+        ...(consulta.ok
+          ? [
+              { valor: `${consulta.latenciaMs} ms`, rotulo: "resposta" },
+              { valor: rotuloVersao(consulta.corpo.versao), rotulo: "versão da API" },
+            ]
+          : []),
+        { valor: rotuloVersao(process.env.NEXT_PUBLIC_VERSAO), rotulo: "versão do app" },
+      ]}
+    >
+      <Colunas
+        lateral={
+          <Secao titulo="Este app">
+            <dl className="divide-y">
+              <Linha rotulo="Versão">{rotuloVersao(process.env.NEXT_PUBLIC_VERSAO)}</Linha>
+              <Linha rotulo="Commit">{(process.env.NEXT_PUBLIC_COMMIT ?? "desconhecido").slice(0, 7)}</Linha>
+              <Linha rotulo="Endereço consultado">
+                <code className="font-mono">{consulta.url}</code>
               </Linha>
-              <Linha rotulo="Passou pelo Traefik">
-                {consulta.corpo.via_gateway ? `sim (host ${consulta.corpo.host})` : "não"}
-              </Linha>
-              <Linha rotulo="Banco (Postgres)">{consulta.corpo.banco}</Linha>
-              <Linha rotulo="Horário da API">{consulta.corpo.horario}</Linha>
-              <Linha rotulo="Versão da API">
-                {rotuloVersao(consulta.corpo.versao)} (commit {(consulta.corpo.commit ?? "desconhecido").slice(0, 7)})
-              </Linha>
-            </>
-          ) : (
-            <Linha rotulo="Erro">{consulta.erro}</Linha>
-          )}
-        </dl>
-      </section>
-    </main>
+            </dl>
+          </Secao>
+        }
+      >
+        <Secao titulo="API pelo gateway" className="max-w-3xl">
+          <dl className="divide-y">
+            {consulta.ok ? (
+              <>
+                <Linha rotulo="HTTP">
+                  {consulta.httpStatus} em {consulta.latenciaMs} ms
+                </Linha>
+                <Linha rotulo="Passou pelo Traefik">
+                  {consulta.corpo.via_gateway ? `sim (host ${consulta.corpo.host})` : "não"}
+                </Linha>
+                <Linha rotulo="Banco (Postgres)">{consulta.corpo.banco}</Linha>
+                <Linha rotulo="Horário da API">{consulta.corpo.horario}</Linha>
+                <Linha rotulo="Versão da API">
+                  {rotuloVersao(consulta.corpo.versao)} (commit {(consulta.corpo.commit ?? "desconhecido").slice(0, 7)})
+                </Linha>
+              </>
+            ) : (
+              <Linha rotulo="Erro">{consulta.erro}</Linha>
+            )}
+          </dl>
+        </Secao>
+      </Colunas>
+    </Pagina>
   );
 }

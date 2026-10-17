@@ -25,7 +25,8 @@ const versaoDoApp = process.env.NEXT_PUBLIC_VERSAO ? `v${process.env.NEXT_PUBLIC
 const commitDoApp = (process.env.NEXT_PUBLIC_COMMIT ?? "desconhecido").slice(0, 7);
 
 // Trilho à esquerda: um serviço por linha. O serviço aberto é o único ponto em ouro da tela
-// (a barra à esquerda do nome); o resto do trilho fica quieto.
+// (a barra à esquerda do nome); o resto do trilho fica quieto. O trilho e a faixa do topo têm
+// a mesma cor: o alto e a lateral da tela são uma moldura só em volta do conteúdo.
 export function Trilho({ usuario }: { usuario: Usuario }) {
   const caminho = usePathname();
   const sair = useMutation({
@@ -40,57 +41,44 @@ export function Trilho({ usuario }: { usuario: Usuario }) {
   });
 
   return (
-    <aside className="sticky top-0 flex h-svh w-56 shrink-0 flex-col border-r bg-sidebar">
-      <Link href="/" className="flex h-16 items-center px-5 outline-none focus-visible:ring-2 focus-visible:ring-ring">
+    <aside className="sticky top-0 flex h-svh w-60 shrink-0 flex-col border-r bg-sidebar">
+      <Link
+        href="/"
+        className="flex items-center px-5 pt-7 pb-8 outline-none focus-visible:ring-2 focus-visible:ring-ring"
+      >
         <Marca />
       </Link>
 
-      <nav aria-label="Serviços" className="flex flex-col gap-0.5 px-2 pt-2">
-        {/* Início (assistente e, depois, os blocos que cada pessoa escolher), separado dos serviços. */}
-        <Link
-          href="/"
-          aria-current={caminho === "/" ? "page" : undefined}
-          className={cn(
-            "relative mb-1 rounded-md py-2 pr-3 pl-4 font-heading text-[0.95rem] text-muted-foreground transition-colors outline-none hover:bg-sidebar-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring",
-            caminho === "/" && "bg-sidebar-accent text-foreground",
-          )}
-        >
-          {caminho === "/" && <span aria-hidden className="absolute inset-y-1.5 left-0 w-[3px] rounded-full bg-ouro" />}
+      <nav aria-label="Serviços" className="flex flex-col gap-0.5 px-3">
+        <ItemTrilho href="/" atual={caminho === "/"}>
           Início
-        </Link>
-        <p className="px-4 pt-3 pb-1 text-[0.7rem] font-medium tracking-wider text-muted-foreground/70 uppercase">Serviços</p>
-        {servicosVisiveis(usuario.perfil).map((s) => {
-          const ativo = caminho === `/${s.id}` || caminho.startsWith(`/${s.id}/`);
-          return (
-            <Link
-              key={s.id}
-              href={abasVisiveis(s, usuario.perfil)[0].href}
-              aria-current={ativo ? "page" : undefined}
-              className={cn(
-                "relative rounded-md py-2 pr-3 pl-4 font-heading text-[0.95rem] text-muted-foreground transition-colors outline-none hover:bg-sidebar-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring",
-                ativo && "bg-sidebar-accent text-foreground",
-              )}
-            >
-              {ativo && <span aria-hidden className="absolute inset-y-1.5 left-0 w-[3px] rounded-full bg-ouro" />}
-              {s.nome}
-            </Link>
-          );
-        })}
+        </ItemTrilho>
+
+        <p className="px-3 pt-6 pb-1.5 text-xs text-muted-foreground/80">Serviços</p>
+        {servicosVisiveis(usuario.perfil).map((s) => (
+          <ItemTrilho
+            key={s.id}
+            href={abasVisiveis(s, usuario.perfil)[0].href}
+            atual={caminho === `/${s.id}` || caminho.startsWith(`/${s.id}/`)}
+          >
+            {s.nome}
+          </ItemTrilho>
+        ))}
       </nav>
 
-      <div className="mt-auto flex flex-col gap-0.5 border-t px-2 py-3">
+      <div className="mt-auto flex flex-col gap-0.5 border-t px-3 py-3">
         <Link
           href="/status"
           aria-current={caminho === "/status" ? "page" : undefined}
           className={cn(
-            "rounded-md px-4 py-2 text-sm text-muted-foreground transition-colors outline-none hover:bg-sidebar-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring",
+            "rounded-md px-3 py-2 text-sm text-muted-foreground transition-colors outline-none hover:bg-sidebar-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring",
             caminho === "/status" && "bg-sidebar-accent text-foreground",
           )}
         >
           Status da plataforma
         </Link>
         <DropdownMenu>
-          <DropdownMenuTrigger className="flex w-full items-center gap-2 rounded-md px-4 py-2 text-left outline-none hover:bg-sidebar-accent focus-visible:ring-2 focus-visible:ring-ring">
+          <DropdownMenuTrigger className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left outline-none hover:bg-sidebar-accent focus-visible:ring-2 focus-visible:ring-ring">
             <span className="min-w-0 flex-1">
               <span className="block truncate text-sm">{usuario.nome}</span>
               <span className="block text-xs text-muted-foreground">{nomePerfil[usuario.perfil]}</span>
@@ -113,5 +101,21 @@ export function Trilho({ usuario }: { usuario: Usuario }) {
         </DropdownMenu>
       </div>
     </aside>
+  );
+}
+
+function ItemTrilho({ href, atual, children }: { href: string; atual: boolean; children: React.ReactNode }) {
+  return (
+    <Link
+      href={href}
+      aria-current={atual ? "page" : undefined}
+      className={cn(
+        "relative rounded-md py-2 pr-3 pl-4 font-heading text-[0.95rem] text-muted-foreground transition-colors outline-none hover:bg-sidebar-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring",
+        atual && "bg-sidebar-accent text-foreground",
+      )}
+    >
+      {atual && <span aria-hidden className="absolute inset-y-1.5 left-0 w-[3px] rounded-full bg-ouro" />}
+      {children}
+    </Link>
   );
 }

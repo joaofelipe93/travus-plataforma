@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
 import { useState } from "react";
 import { toast } from "sonner";
+import { Colunas, Secao } from "@/components/pagina";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -51,25 +52,18 @@ export default function PaginaBoletos() {
   const podeCriar = (config.data?.pode_editar ?? false) && sessao.data?.usuario.perfil !== "leitura";
 
   return (
-    <div className="flex flex-col gap-8">
+    <div className="flex flex-col gap-12">
       {config.isError && (
-        <Alert variant="destructive">
+        <Alert variant="destructive" className="max-w-2xl">
           <AlertDescription>{config.error.message}</AlertDescription>
         </Alert>
       )}
 
-      {config.data && <AvisoEnsaio dados={config.data} />}
-
-      <section className="flex flex-col gap-3">
-        <div className="flex flex-wrap items-end justify-between gap-3">
-          <div>
-            <h2 className="font-heading text-lg font-semibold">Rodadas</h2>
-            <p className="text-sm text-muted-foreground">
-              Uma rodada percorre os clientes com CPF/CNPJ cadastrado e consulta o Boleto Fácil.
-            </p>
-          </div>
-          {podeCriar && <NovaRodada />}
-        </div>
+      <Secao
+        titulo="Rodadas"
+        descricao="Uma rodada percorre os clientes com CPF/CNPJ cadastrado e consulta o Boleto Fácil."
+        acoes={podeCriar && <NovaRodada />}
+      >
         {rodadas.isError ? (
           <Alert variant="destructive">
             <AlertDescription>{rodadas.error.message}</AlertDescription>
@@ -79,16 +73,20 @@ export default function PaginaBoletos() {
         ) : (
           <Skeleton className="h-40 w-full" />
         )}
-      </section>
+      </Secao>
 
+      {/* O aviso de ensaio fica ao lado da configuração: é ela que o explica — e é lá que se
+          liga ou desliga o envio. */}
       {config.data && (
-        <Configuracao
-          // Configuração salva remonta o formulário com os valores novos, sem efeito.
-          key={JSON.stringify(config.data.configuracao)}
-          dados={config.data}
-          podeEditar={podeCriar}
-          podeLigarEnvio={config.data.pode_ligar_envio && sessao.data?.usuario.perfil === "admin"}
-        />
+        <Colunas lateral={<AvisoEnsaio dados={config.data} />}>
+          <Configuracao
+            // Configuração salva remonta o formulário com os valores novos, sem efeito.
+            key={JSON.stringify(config.data.configuracao)}
+            dados={config.data}
+            podeEditar={podeCriar}
+            podeLigarEnvio={config.data.pode_ligar_envio && sessao.data?.usuario.perfil === "admin"}
+          />
+        </Colunas>
       )}
     </div>
   );
@@ -310,16 +308,15 @@ function Configuracao({
   );
 
   return (
-    <section className="flex max-w-3xl flex-col gap-5 border-t pt-6">
-      <div>
-        <h2 className="font-heading text-lg font-semibold">Configuração</h2>
-        <p className="text-sm text-muted-foreground">
-          {podeEditar
-            ? "Admin e operador ajustam o agendamento; ligar o envio no WhatsApp é só do admin."
-            : "Você pode ver a configuração, mas não alterá-la."}
-        </p>
-      </div>
-
+    <Secao
+      titulo="Configuração"
+      descricao={
+        podeEditar
+          ? "Admin e operador ajustam o agendamento; ligar o envio no WhatsApp é só do admin."
+          : "Você pode ver a configuração, mas não alterá-la."
+      }
+      className="max-w-[46rem]"
+    >
       <div className="flex flex-col gap-4 rounded-lg border p-4">
         <Label className="flex items-center gap-3 font-normal">
           <Switch
@@ -426,6 +423,6 @@ function Configuracao({
           )}
         </div>
       )}
-    </section>
+    </Secao>
   );
 }
