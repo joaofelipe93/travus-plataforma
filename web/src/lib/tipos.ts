@@ -68,6 +68,19 @@ export type ClienteResumo = {
   cpf_cnpj: string | null;
   total_cotas: number;
   cotas_ativas: number;
+  // Ids dos serviços em que o cliente está ativo ("lances", "boletos").
+  servicos: string[];
+};
+
+// Um serviço do catálogo com a situação deste cliente nele. A API manda sempre o catálogo
+// inteiro, então a tela desenha um interruptor por serviço, ligado ou não.
+export type ServicoDoCliente = {
+  id: string;
+  nome: string;
+  descricao: string;
+  ativo: boolean;
+  atualizado_em: string | null;
+  alterado_por_nome: string | null;
 };
 
 export type Cliente = {

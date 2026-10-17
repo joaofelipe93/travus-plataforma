@@ -61,7 +61,7 @@ export default function PaginaBoletos() {
 
       <Secao
         titulo="Rodadas"
-        descricao="Uma rodada percorre os clientes com CPF/CNPJ cadastrado e consulta o Boleto Fácil."
+        descricao="Uma rodada percorre os clientes ativos em Boletos que têm CPF/CNPJ cadastrado e consulta o Boleto Fácil."
         acoes={podeCriar && <NovaRodada />}
       >
         {rodadas.isError ? (
@@ -190,7 +190,7 @@ function TabelaRodadas({ rodadas }: { rodadas: RodadaResumo[] }) {
         {rodadas.map((r) => (
           <TableRow key={r.id}>
             <TableCell>
-              <Link href={`/canopus/boletos/${r.id}`} className="font-medium underline-offset-4 hover:underline">
+              <Link href={`/boletos/rodadas/${r.id}`} className="font-medium underline-offset-4 hover:underline">
                 nº {r.id} · {rotuloTipoRodada[r.tipo]}
               </Link>
               {r.origem === "agendada" && <span className="ml-2 text-xs text-muted-foreground">automática</span>}

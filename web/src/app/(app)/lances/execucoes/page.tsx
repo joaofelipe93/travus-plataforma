@@ -34,7 +34,7 @@ export default function PaginaExecucoes() {
       }
       acoes={
         podeEditar(sessao.data?.usuario.perfil) && (
-          <Link href="/canopus/execucoes/nova" className={buttonVariants()}>
+          <Link href="/lances/execucoes/nova" className={buttonVariants()}>
             Dar Lance
           </Link>
         )
@@ -76,7 +76,7 @@ export default function PaginaExecucoes() {
               {lista.map((e) => (
                 <TableRow key={e.id}>
                   <TableCell className="tabular-nums">
-                    <Link className="font-medium hover:underline" href={`/canopus/execucoes/${e.id}`}>
+                    <Link className="font-medium hover:underline" href={`/lances/execucoes/${e.id}`}>
                       {e.id}
                     </Link>
                   </TableCell>

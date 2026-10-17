@@ -1,7 +1,7 @@
 "use client";
 
 // Painel de detalhe do cliente: contato, cotas e lances, com as ações do cadastro. É o lado
-// direito do espaço de Clientes e também o que a rota /canopus/clientes/[id] mostra.
+// direito do espaço de Clientes e também o que a rota /clientes/[id] mostra.
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRouter } from "next/navigation";
@@ -34,9 +34,119 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { api } from "@/lib/api";
 import { pausarConsultasDeCota, desfazer, tirarCotaDoCache } from "@/lib/cache-cadastro";
 import { dataHora, documento, tagCota } from "@/lib/sessao";
-import type { Cliente, Cota, LanceCliente } from "@/lib/tipos";
+import type { Cliente, Cota, LanceCliente, ServicoDoCliente } from "@/lib/tipos";
 
-type Detalhe = { cliente: Cliente; cotas: Cota[]; lances: LanceCliente[] };
+type Detalhe = { cliente: Cliente; cotas: Cota[]; lances: LanceCliente[]; servicos: ServicoDoCliente[] };
+
+// O cadastro é um só; é aqui que se escolhe em que serviços este cliente entra. Desligar não
+// apaga nada: as cotas e o histórico continuam, o cliente é que sai da fila daquele serviço.
+function ServicosDoCliente({
+  clienteID,
+  nome,
+  servicos,
+  cotasAtivas,
+  temDocumento,
+  editavel,
+}: {
+  clienteID: number;
+  nome: string;
+  servicos: ServicoDoCliente[];
+  cotasAtivas: number;
+  temDocumento: boolean;
+  editavel: boolean;
+}) {
+  const queryClient = useQueryClient();
+  // O serviço que está esperando confirmação para ser desligado.
+  const [desligando, setDesligando] = useState<ServicoDoCliente | null>(null);
+
+  const alterar = useMutation({
+    mutationFn: ({ servico, ativo }: { servico: string; ativo: boolean }) =>
+      api(`/clientes/${clienteID}/servicos/${servico}`, { metodo: "PUT", json: { ativo } }),
+    onSuccess: (_, { servico, ativo }) => {
+      setDesligando(null);
+      const rotulo = servicos.find((s) => s.id === servico)?.nome ?? servico;
+      toast.success(ativo ? `${rotulo} ligado para ${nome}` : `${rotulo} desligado para ${nome}`);
+      void queryClient.invalidateQueries({ queryKey: ["cliente", String(clienteID)] });
+      void queryClient.invalidateQueries({ queryKey: ["clientes"] });
+    },
+    onError: (e) => {
+      setDesligando(null);
+      toast.error(e.message);
+    },
+  });
+
+  // O que o cliente perde ao sair de cada serviço, com o número que importa.
+  const consequencia = (servico: ServicoDoCliente) => {
+    if (servico.id === "lances") {
+      return cotasAtivas > 0
+        ? `As ${cotasAtivas} cota(s) ativas dele param de entrar nos dry-runs e nos lances do Newcon.`
+        : "Ele não tem cota ativa, então nada muda nas execuções por enquanto.";
+    }
+    if (servico.id === "boletos") {
+      return temDocumento
+        ? "Ele para de entrar nas rodadas do mês: não recebe mais o boleto nem a cobrança no WhatsApp."
+        : "Ele está sem CPF/CNPJ, então já não entrava nas rodadas.";
+    }
+    return "Ele sai da fila desse serviço.";
+  };
+
+  return (
+    <section className="flex flex-col gap-3">
+      <div>
+        <h3 className="font-medium">Serviços</h3>
+        <p className="mt-0.5 text-sm text-muted-foreground">
+          Em que o cadastro deste cliente é usado. Desligar não apaga cota nem histórico.
+        </p>
+      </div>
+      <ul className="grid gap-3 sm:grid-cols-2">
+        {servicos.map((s) => (
+          <li key={s.id} className="flex items-start gap-3 rounded-lg border p-4">
+            <Switch
+              className="mt-0.5"
+              checked={s.ativo}
+              disabled={!editavel || alterar.isPending}
+              onCheckedChange={(ligar) =>
+                ligar ? alterar.mutate({ servico: s.id, ativo: true }) : setDesligando(s)
+              }
+              aria-label={`${s.ativo ? "Desligar" : "Ligar"} ${s.nome} para ${nome}`}
+            />
+            <div className="min-w-0">
+              <p className="font-medium">{s.nome}</p>
+              <p className="mt-0.5 text-sm text-muted-foreground">{s.descricao}</p>
+              {s.atualizado_em && (
+                <p className="mt-1.5 text-xs text-muted-foreground">
+                  {s.ativo ? "Ligado" : "Desligado"}
+                  {s.alterado_por_nome ? ` por ${s.alterado_por_nome}` : ""} em {dataHora(s.atualizado_em)}
+                </p>
+              )}
+            </div>
+          </li>
+        ))}
+      </ul>
+
+      <AlertDialog open={desligando !== null} onOpenChange={(aberto) => !alterar.isPending && !aberto && setDesligando(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Desligar {desligando?.nome} para {nome}?</AlertDialogTitle>
+            <AlertDialogDescription>
+              {desligando && consequencia(desligando)} O cadastro continua como está e dá para ligar de novo
+              quando quiser.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={alterar.isPending}>Voltar</AlertDialogCancel>
+            <AlertDialogAction
+              disabled={alterar.isPending}
+              onClick={() => desligando && alterar.mutate({ servico: desligando.id, ativo: false })}
+            >
+              {alterar.isPending ? "Desligando…" : "Desligar"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </section>
+  );
+}
 
 function descreverOrigem(origem: string) {
   const importacao = /^importacao:(\d+)$/.exec(origem);
@@ -109,6 +219,17 @@ export function PainelCliente({ id, editavel }: { id: number; editavel: boolean 
         )}
       </header>
 
+      {dados.data && (
+        <ServicosDoCliente
+          clienteID={id}
+          nome={dados.data.cliente.nome}
+          servicos={dados.data.servicos}
+          cotasAtivas={ativas}
+          temDocumento={dados.data.cliente.cpf_cnpj !== null}
+          editavel={editavel}
+        />
+      )}
+
       <section className="flex flex-col gap-3">
         <div className="flex items-center justify-between">
           <h3 className="font-medium">Cotas</h3>
@@ -170,7 +291,7 @@ function ExcluirCliente({ cliente, temCotas }: { cliente: Cliente; temCotas: boo
     onSuccess: () => {
       invalidar();
       toast.success(`${cliente.nome} excluído`);
-      router.push("/canopus/clientes");
+      router.push("/clientes");
     },
     onError: (e) => toast.error(e.message),
   });
@@ -286,7 +407,7 @@ function HistoricoLances({ lances, carregando, editavel }: { lances?: LanceClien
               <TableCell className="tabular-nums">{tagCota(l)}</TableCell>
               <TableCell className="tabular-nums">
                 {l.execucao_id ? (
-                  <Link className="hover:underline" href={`/canopus/execucoes/${l.execucao_id}`}>
+                  <Link className="hover:underline" href={`/lances/execucoes/${l.execucao_id}`}>
                     {l.protocolo}
                   </Link>
                 ) : (
@@ -336,7 +457,7 @@ function useReimpressao() {
     // Sem enviar_drive, o PDF fica só na plataforma (dá para enviar ao Drive depois, no comprovante).
     mutationFn: (corpo: { cota_id: number; protocolo: string; enviar_drive?: boolean }) =>
       api<{ id: number }>("/execucoes/reimpressoes", { metodo: "POST", json: corpo }),
-    onSuccess: ({ id }) => router.push(`/canopus/execucoes/${id}`),
+    onSuccess: ({ id }) => router.push(`/lances/execucoes/${id}`),
   });
 }
 

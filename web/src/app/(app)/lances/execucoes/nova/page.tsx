@@ -54,7 +54,7 @@ export default function PaginaNovaExecucao() {
     mutationFn: () => api<{ id: number }>("/execucoes", { metodo: "POST", json: { tipo: "dry_run", cota_ids: selecionadas.map((c) => c.id) } }),
     onSuccess: ({ id }) => {
       queryClient.invalidateQueries({ queryKey: ["execucoes"] });
-      router.push(`/canopus/execucoes/${id}`);
+      router.push(`/lances/execucoes/${id}`);
     },
   });
 

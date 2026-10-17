@@ -262,7 +262,7 @@ func TestAvisoDoDryRunFalaDoLanceRealAutomatico(t *testing.T) {
 		t.Fatal("o resumo do dry-run não foi enviado")
 	}
 	corpo := email.mensagens[0].Corpo
-	for _, trecho := range []string{"LANCE DE VERDADE", "1 cota(s)", "/canopus/configuracao"} {
+	for _, trecho := range []string{"LANCE DE VERDADE", "1 cota(s)", "/lances/configuracao"} {
 		if !strings.Contains(corpo, trecho) {
 			t.Errorf("o aviso devia conter %q: %s", trecho, corpo)
 		}

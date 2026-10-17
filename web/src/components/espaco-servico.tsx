@@ -17,7 +17,10 @@ export function EspacoServico({ id, children }: { id: string; children: React.Re
   // O layout (app) só renderiza os filhos com a sessão carregada.
   const perfil = useSessao().data!.usuario.perfil;
   const abas = abasVisiveis(servico, perfil);
-  const abaAtual = servico.abas.find((a) => caminho === a.href || caminho.startsWith(`${a.href}/`));
+  // A aba atual é a de endereço mais longo que casa: com /x e /x/y, /x/y é a certa.
+  const abaAtual = [...servico.abas]
+    .sort((a, b) => b.href.length - a.href.length)
+    .find((a) => caminho === a.href || caminho.startsWith(`${a.href}/`));
   const semPermissao = abas.length === 0 || (abaAtual !== undefined && !abas.includes(abaAtual));
 
   return (

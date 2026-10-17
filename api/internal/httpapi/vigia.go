@@ -151,7 +151,7 @@ func (s *Servidor) verificarBanco(ctx context.Context) []achado {
 			out = append(out, achado{
 				Chave:  fmt.Sprintf("apos-confirmar:%d", c.ID),
 				Titulo: fmt.Sprintf("Cota %s-%s-%s (execução nº %d): erro depois de clicar em Confirmar", c.Grupo, c.Cota, c.Versao, c.ExecucaoID),
-				Detalhe: fmt.Sprintf("%s\nConfira no Histórico do Newcon se o lance foi registrado: %s/canopus/execucoes/%d",
+				Detalhe: fmt.Sprintf("%s\nConfira no Histórico do Newcon se o lance foi registrado: %s/lances/execucoes/%d",
 					valorOuVazio(c.Erro), s.cfg.AppOrigin, c.ExecucaoID),
 				Evento: true,
 			})

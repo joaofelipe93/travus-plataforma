@@ -122,7 +122,7 @@ ssh -t travus@<ip> 'cd /opt/travus/atual && make usuario args="criar --email ana
 ssh -t travus@<ip> 'cd /opt/travus/atual && make alerta-teste'
 ```
 
-- **Cadastro**: a produção começa com o banco vazio. Cadastre os clientes e as cotas pela tela (Canopus → Clientes → Novo cliente, `/canopus/clientes/novo`).
+- **Cadastro**: a produção começa com o banco vazio. Cadastre os clientes e as cotas pela tela (Clientes → Novo cliente, `/clientes`).
 - **Google Drive** (opcional): preencha `GOOGLE_*` no `.env`, publique e importe o token:
   ```bash
   scp workers/canopus/token.json travus@<ip>:/opt/travus/atual/workers/canopus/token.json

@@ -29,7 +29,7 @@ const sugestoesGerais = [
   "Quantos dry-runs foram feitos este mês e como terminaram?",
   "Quantos PDFs de comprovante já foram enviados ao Google Drive?",
   "Tem algum alerta ativo na plataforma agora?",
-  "Quais foram as últimas execuções do Canopus?",
+  "Quais foram as últimas execuções de lance?",
 ];
 const sugestoesReservas = ["Quais reservas têm check-in amanhã?", "Quantas reservas chegaram hoje?"];
 
@@ -141,7 +141,7 @@ export function Assistente() {
               Assistente
             </h2>
             <p className="truncate text-xs text-muted-foreground">
-              Pergunte sobre o Canopus{estado.data?.reservas ? ", as reservas" : ""} e a saúde da plataforma. Ele só consulta.
+              Pergunte sobre os lances, os boletos{estado.data?.reservas ? ", as reservas" : ""} e a saúde da plataforma. Ele só consulta.
             </p>
           </div>
         </div>

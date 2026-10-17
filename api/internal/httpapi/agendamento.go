@@ -387,7 +387,7 @@ func (s *Servidor) avisoLanceRealAutomatico(ctx context.Context, dryRunID int64,
 		return fmt.Sprintf("\nATENÇÃO: o lance real automático está ligado e %d cota(s) ficaram liberadas, acima do teto de %d: nenhum lance será registrado. Confira o cadastro e aprove à mão se for o caso.\n",
 			liberadas, cfg.LanceRealMaxCotas)
 	}
-	return fmt.Sprintf("\nATENÇÃO: o lance real automático está ligado. A partir de %s a plataforma vai registrar LANCE DE VERDADE em %d cota(s), sem ninguém aprovar.\nPara impedir: desligue em %s/canopus/configuracao, ou cancele a execução real quando ela aparecer em %s/canopus/execucoes\n",
+	return fmt.Sprintf("\nATENÇÃO: o lance real automático está ligado. A partir de %s a plataforma vai registrar LANCE DE VERDADE em %d cota(s), sem ninguém aprovar.\nPara impedir: desligue em %s/lances/configuracao, ou cancele a execução real quando ela aparecer em %s/lances/execucoes\n",
 		finalizadaEm.Add(cfg.LanceRealEspera).In(fusoCanopus).Format("02/01/2006 15:04"), liberadas,
 		s.cfg.AppOrigin, s.cfg.AppOrigin)
 }
@@ -425,7 +425,7 @@ func (s *Servidor) verificarLanceRealAutomatico(ctx context.Context) []achado {
 	return []achado{{
 		Chave:   fmt.Sprintf("lance-real-automatico:%d", ultima.ID),
 		Titulo:  fmt.Sprintf("O lance real automático do dry-run nº %d não registrou lance", ultima.ID),
-		Detalhe: detalhe + " Log da execução: " + s.cfg.AppOrigin + "/canopus/execucoes/" + idTexto(ultima.ID),
+		Detalhe: detalhe + " Log da execução: " + s.cfg.AppOrigin + "/lances/execucoes/" + idTexto(ultima.ID),
 	}}
 }
 
@@ -455,7 +455,7 @@ func (s *Servidor) resumoExecucaoAgendada(ctx context.Context, e db.ExecucoesAge
 		if e.AposConfirmar > 0 {
 			corpo += fmt.Sprintf("\nATENÇÃO: %d cota(s) pararam depois do clique em Confirmar: o lance pode ter sido registrado no Newcon. Confira no Histórico da cota antes de tentar de novo — a plataforma não repete esse passo.\n", e.AposConfirmar)
 		}
-		corpo += fmt.Sprintf("\nProtocolos, comprovantes e situação no Google Drive: %s/canopus/execucoes/%d\n", s.cfg.AppOrigin, e.ID)
+		corpo += fmt.Sprintf("\nProtocolos, comprovantes e situação no Google Drive: %s/lances/execucoes/%d\n", s.cfg.AppOrigin, e.ID)
 		resumo := fmt.Sprintf("%d lance(s)", e.Sucesso)
 		if e.ComErro > 0 {
 			resumo += fmt.Sprintf(", %d com erro", e.ComErro)
@@ -471,7 +471,7 @@ func (s *Servidor) resumoExecucaoAgendada(ctx context.Context, e db.ExecucoesAge
 	if e.Erro != nil && *e.Erro != "" {
 		corpo += "Erro da execução: " + *e.Erro + "\n"
 	}
-	corpo += fmt.Sprintf("\nDetalhes, screenshots e log: %s/canopus/execucoes/%d\n", s.cfg.AppOrigin, e.ID)
+	corpo += fmt.Sprintf("\nDetalhes, screenshots e log: %s/lances/execucoes/%d\n", s.cfg.AppOrigin, e.ID)
 	corpo += "Nenhum lance foi confirmado: um dry-run só confere as telas do Newcon.\n"
 	corpo += s.avisoLanceRealAutomatico(ctx, e.ID, e.FinalizadaEm)
 
@@ -527,8 +527,8 @@ func (s *Servidor) verificarAgendamento(ctx context.Context, agora time.Time) []
 		return nil
 	}
 	detalhe := map[string]string{
-		disparoSemCotas:       "Nenhuma cota ativa no cadastro: não havia o que conferir. Ative as cotas em " + s.cfg.AppOrigin + "/canopus/cotas",
-		disparoSemResponsavel: "A configuração do agendamento está sem a pessoa que a alterou (escrita direta no banco?). Salve a configuração de novo em " + s.cfg.AppOrigin + "/canopus/configuracao",
+		disparoSemCotas:       "Nenhuma cota ativa de cliente ativo no serviço de Lances: não havia o que conferir. Confira as cotas em " + s.cfg.AppOrigin + "/lances/cotas e os serviços do cliente em " + s.cfg.AppOrigin + "/clientes",
+		disparoSemResponsavel: "A configuração do agendamento está sem a pessoa que a alterou (escrita direta no banco?). Salve a configuração de novo em " + s.cfg.AppOrigin + "/lances/configuracao",
 		disparoAtrasada:       "A API não estava de pé na hora marcada e o atraso passou de " + textoTempo(toleranciaAgendamento) + ": o dry-run não foi criado atrasado. Crie um dry-run à mão se ainda dá tempo da assembleia.",
 	}[resultado]
 	if !marcada {
