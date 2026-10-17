@@ -84,7 +84,8 @@ function Whatsapp() {
   }, [dados?.estado]);
 
   return (
-    <div className="flex max-w-3xl flex-col gap-6">
+    // A conexão (com o QR, quando precisa parear) fica na coluna larga; grupo e fila ao lado.
+    <div className="grid items-start gap-8 xl:grid-cols-[minmax(0,32rem)_minmax(0,26rem)]">
       {situacao.isError ? (
         <Alert variant="destructive">
           <AlertDescription>{situacao.error.message}</AlertDescription>
@@ -94,8 +95,10 @@ function Whatsapp() {
       ) : (
         <>
           <Conexao dados={dados} />
-          {dados.disponivel && <GrupoDestino dados={dados} />}
-          {dados.disponivel && <Fila fila={dados.fila} />}
+          <div className="flex flex-col gap-8">
+            {dados.disponivel && <GrupoDestino dados={dados} />}
+            {dados.disponivel && <Fila fila={dados.fila} />}
+          </div>
         </>
       )}
     </div>

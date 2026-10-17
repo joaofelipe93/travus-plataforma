@@ -41,11 +41,12 @@ export function EspacoClientes({ selecionadoId }: { selecionadoId?: number }) {
   const lista = clientes.data?.clientes ?? [];
 
   return (
-    <div className="flex flex-col gap-6">
+    <div className="flex flex-col gap-8">
       <ResumoCarteira cotas={cotas.data?.cotas} clientes={clientes.data?.clientes.length} />
 
-      <div className="grid gap-6 lg:grid-cols-[19rem_1fr] lg:items-start">
-        <aside className="flex flex-col gap-3 lg:sticky lg:top-6">
+      {/* A lista acompanha a rolagem (o topo do serviço é fixo, por isso o deslocamento). */}
+      <div className="grid gap-8 lg:grid-cols-[20rem_minmax(0,1fr)] lg:items-start xl:grid-cols-[23rem_minmax(0,1fr)] xl:gap-12">
+        <aside className="flex flex-col gap-3 lg:sticky lg:top-[10.5rem]">
           <div className="flex gap-2">
             <Input
               className="flex-1"
@@ -71,7 +72,7 @@ export function EspacoClientes({ selecionadoId }: { selecionadoId?: number }) {
                 {clientes.isPending ? " " : `${lista.length} ${lista.length === 1 ? "cliente" : "clientes"}`}
                 {buscaAdiada && lista.length > 0 && " encontrados"}
               </p>
-              <ul className="flex max-h-[32rem] flex-col gap-1 overflow-y-auto rounded-lg border p-1 lg:max-h-[calc(100svh-14rem)]">
+              <ul className="flex max-h-[32rem] flex-col gap-1 overflow-y-auto rounded-lg border p-1 lg:max-h-[calc(100svh-19rem)]">
                 {clientes.isPending &&
                   Array.from({ length: 6 }, (_, i) => (
                     <li key={i} className="px-3 py-2.5">
@@ -148,7 +149,7 @@ function NenhumSelecionado({
   aoCadastrar: () => void;
 }) {
   return (
-    <div className="flex min-h-64 flex-col items-start justify-center gap-3 rounded-xl border border-dashed p-8">
+    <div className="flex max-w-xl flex-col items-start gap-3 rounded-xl border border-dashed p-8">
       <h2 className="font-heading text-lg">{temClientes ? "Escolha um cliente" : "A carteira começa aqui"}</h2>
       <p className="max-w-prose text-sm text-muted-foreground">
         {temClientes

@@ -3,6 +3,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
+import { Colunas, Painel } from "@/components/pagina";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -69,107 +70,132 @@ export default function PaginaNovaExecucao() {
   }
 
   return (
-    <div className="flex flex-col gap-5">
-      <div>
-        <h1 className="text-xl font-semibold tracking-tight">Novo dry-run</h1>
-        <p className="text-sm text-muted-foreground">Escolha as cotas. Só cotas ativas aparecem aqui.</p>
+    <div className="flex flex-col gap-6">
+      <div className="border-b pb-5">
+        <h2 className="font-heading text-xl font-semibold">Novo dry-run</h2>
+        <p className="mt-0.5 text-sm text-muted-foreground">Escolha as cotas. Só cotas ativas aparecem aqui.</p>
       </div>
 
-      <Alert>
-        <AlertTitle>Nenhum lance é confirmado</AlertTitle>
-        <AlertDescription>
-          Para cada cota, o worker entra no Newcon, abre o credenciamento, marca &quot;2º Fixo&quot;, tira um screenshot e lê o Histórico para mostrar se a
-          cota já tem lance nesta assembleia. Ele não clica em Confirmar.
-        </AlertDescription>
-      </Alert>
+      {/* A lista é longa: o que foi escolhido e o botão ficam à vista, à direita, em vez de
+          numa barra colada no rodapé da tela. */}
+      <Colunas
+        lateralFixa
+        lateral={
+          <>
+            <Painel className="flex flex-col gap-4">
+              <p className="text-sm">
+                <span className="font-heading text-2xl leading-none tabular-nums">{selecionadas.length}</span> cota(s) de{" "}
+                <span className="font-medium tabular-nums">{clientes}</span> cliente(s)
+              </p>
+              <Button
+                className="w-full"
+                onClick={() => iniciar.mutate()}
+                disabled={!selecionadas.length || iniciar.isPending || iniciar.isSuccess}
+              >
+                {iniciar.isPending || iniciar.isSuccess ? "Iniciando…" : "Iniciar dry-run"}
+              </Button>
+              {iniciar.isError && (
+                <Alert variant="destructive">
+                  <AlertDescription>{iniciar.error.message}</AlertDescription>
+                </Alert>
+              )}
+            </Painel>
 
-      <div className="flex flex-wrap items-center gap-2">
-        <Input className="sm:max-w-xs" placeholder="Filtrar por cliente ou cota" value={busca} onChange={(e) => setBusca(e.target.value)} />
-        <Select items={opcoesGrupo} value={grupo} onValueChange={(v) => setGrupo(v ?? "todos")}>
-          <SelectTrigger className="w-44">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            {opcoesGrupo.map((o) => (
-              <SelectItem key={o.value} value={o.value}>
-                {o.label}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-        <Button variant="outline" size="sm" onClick={() => alternar(visiveis.map((c) => c.id), true)} disabled={!visiveis.length}>
-          Marcar visíveis
-        </Button>
-        <Button variant="outline" size="sm" onClick={() => alternar(visiveis.map((c) => c.id), false)} disabled={!visiveis.length}>
-          Desmarcar visíveis
-        </Button>
-      </div>
+            <Alert>
+              <AlertTitle>Nenhum lance é confirmado</AlertTitle>
+              <AlertDescription>
+                Para cada cota, o worker entra no Newcon, abre o credenciamento, marca a modalidade cadastrada na cota, tira
+                um screenshot e lê o Histórico para mostrar se a cota já tem lance nesta assembleia. Ele não clica em
+                Confirmar.
+              </AlertDescription>
+            </Alert>
+          </>
+        }
+      >
+        <div className="flex flex-col gap-4">
+          <div className="flex flex-wrap items-center gap-2">
+            <Input
+              className="sm:max-w-xs"
+              placeholder="Filtrar por cliente ou cota"
+              value={busca}
+              onChange={(e) => setBusca(e.target.value)}
+            />
+            <Select items={opcoesGrupo} value={grupo} onValueChange={(v) => setGrupo(v ?? "todos")}>
+              <SelectTrigger className="w-44">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {opcoesGrupo.map((o) => (
+                  <SelectItem key={o.value} value={o.value}>
+                    {o.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <Button variant="outline" size="sm" onClick={() => alternar(visiveis.map((c) => c.id), true)} disabled={!visiveis.length}>
+              Marcar visíveis
+            </Button>
+            <Button variant="outline" size="sm" onClick={() => alternar(visiveis.map((c) => c.id), false)} disabled={!visiveis.length}>
+              Desmarcar visíveis
+            </Button>
+            <p className="ml-auto text-sm text-muted-foreground" aria-live="polite">
+              {visiveis.length} cota(s) na lista
+            </p>
+          </div>
 
-      <div className="rounded-lg border">
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead className="w-10" />
-              <TableHead>Cliente</TableHead>
-              <TableHead>Cota</TableHead>
-              <TableHead>Tipo</TableHead>
-              <TableHead>Modalidade</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {cotas.isPending &&
-              Array.from({ length: 6 }, (_, i) => (
-                <TableRow key={i}>
-                  <TableCell colSpan={5}>
-                    <Skeleton className="h-5 w-full" />
-                  </TableCell>
+          <div className="rounded-lg border">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead className="w-10" />
+                  <TableHead>Cliente</TableHead>
+                  <TableHead>Cota</TableHead>
+                  <TableHead>Tipo</TableHead>
+                  <TableHead>Modalidade</TableHead>
                 </TableRow>
-              ))}
-            {cotas.isSuccess && visiveis.length === 0 && (
-              <TableRow>
-                <TableCell colSpan={5} className="py-8 text-center text-muted-foreground">
-                  {todas.length ? "Nenhuma cota com esse filtro." : "Nenhuma cota ativa. Cadastre cotas no cliente ou ative as que estão inativas."}
-                </TableCell>
-              </TableRow>
-            )}
-            {visiveis.map((c) => {
-              const marcada = !desmarcadas.has(c.id);
-              return (
-                <TableRow key={c.id} className={marcada ? undefined : "text-muted-foreground"}>
-                  <TableCell>
-                    <input
-                      type="checkbox"
-                      className="size-4 accent-primary"
-                      checked={marcada}
-                      onChange={(e) => alternar([c.id], e.target.checked)}
-                      aria-label={`Incluir a cota ${tagCota(c)}`}
-                    />
-                  </TableCell>
-                  <TableCell>{c.cliente_nome}</TableCell>
-                  <TableCell className="tabular-nums">{tagCota(c)}</TableCell>
-                  <TableCell>{c.tipo_consorcio ?? "—"}</TableCell>
-                  <TableCell>{nomeModalidade[c.modalidade_padrao] ?? c.modalidade_padrao}</TableCell>
-                </TableRow>
-              );
-            })}
-          </TableBody>
-        </Table>
-      </div>
+              </TableHeader>
+              <TableBody>
+                {cotas.isPending &&
+                  Array.from({ length: 6 }, (_, i) => (
+                    <TableRow key={i}>
+                      <TableCell colSpan={5}>
+                        <Skeleton className="h-5 w-full" />
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                {cotas.isSuccess && visiveis.length === 0 && (
+                  <TableRow>
+                    <TableCell colSpan={5} className="py-8 text-center text-muted-foreground">
+                      {todas.length ? "Nenhuma cota com esse filtro." : "Nenhuma cota ativa. Cadastre cotas no cliente ou ative as que estão inativas."}
+                    </TableCell>
+                  </TableRow>
+                )}
+                {visiveis.map((c) => {
+                  const marcada = !desmarcadas.has(c.id);
+                  return (
+                    <TableRow key={c.id} className={marcada ? undefined : "text-muted-foreground"}>
+                      <TableCell>
+                        <input
+                          type="checkbox"
+                          className="size-4 accent-primary"
+                          checked={marcada}
+                          onChange={(e) => alternar([c.id], e.target.checked)}
+                          aria-label={`Incluir a cota ${tagCota(c)}`}
+                        />
+                      </TableCell>
+                      <TableCell>{c.cliente_nome}</TableCell>
+                      <TableCell className="tabular-nums">{tagCota(c)}</TableCell>
+                      <TableCell>{c.tipo_consorcio ?? "—"}</TableCell>
+                      <TableCell>{nomeModalidade[c.modalidade_padrao] ?? c.modalidade_padrao}</TableCell>
+                    </TableRow>
+                  );
+                })}
+              </TableBody>
+            </Table>
+          </div>
 
-      {iniciar.isError && (
-        <Alert variant="destructive">
-          <AlertDescription>{iniciar.error.message}</AlertDescription>
-        </Alert>
-      )}
-
-      <div className="sticky bottom-0 -mx-4 flex flex-wrap items-center justify-between gap-3 border-t bg-background px-4 py-3">
-        <p className="text-sm">
-          <span className="font-medium">{selecionadas.length}</span> cota(s) de <span className="font-medium">{clientes}</span> cliente(s)
-        </p>
-        <Button onClick={() => iniciar.mutate()} disabled={!selecionadas.length || iniciar.isPending || iniciar.isSuccess}>
-          {iniciar.isPending || iniciar.isSuccess ? "Iniciando…" : "Iniciar dry-run"}
-        </Button>
-      </div>
+        </div>
+      </Colunas>
     </div>
   );
 }

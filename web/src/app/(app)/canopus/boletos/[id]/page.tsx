@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { toast } from "sonner";
+import { Colunas, Secao } from "@/components/pagina";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -120,127 +121,134 @@ export default function PaginaRodada() {
         </Alert>
       )}
 
-      <section className="flex flex-col gap-3">
-        <h3 className="font-heading font-semibold">Mensagens ({mensagens.length})</h3>
-        {mensagens.length === 0 ? (
-          <p className="text-sm text-muted-foreground">
-            Nenhuma mensagem montada{emAndamento ? " ainda: elas são montadas quando a rodada termina." : "."}
-          </p>
-        ) : (
-          <div className="flex flex-col gap-3">
-            {mensagens.map((m) => (
-              <article key={m.id} className="rounded-lg border p-3">
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <span className="font-medium">{m.destino_nome}</span>
-                  <span className="flex items-center gap-2 text-xs text-muted-foreground">
-                    <Badge variant={m.status === "enviada" ? "default" : m.status === "falhou" ? "destructive" : "outline"}>
-                      {rotuloStatusMensagem[m.status]}
-                    </Badge>
-                    {m.pdf_id && (
-                      <a href={`/api/arquivos/${m.pdf_id}`} target="_blank" rel="noreferrer" className="underline-offset-4 hover:underline">
-                        boleto anexado
-                      </a>
-                    )}
-                    {m.enviada_em && <span>em {dataHora(m.enviada_em)}</span>}
+      {/* O log corre ao lado: dá para ler o que o worker fez sem perder de vista as mensagens
+          e os boletos que ele encontrou. */}
+      <Colunas
+        lateral={
+          <Secao titulo="Log">
+            <ol className="flex max-h-[34rem] flex-col gap-1.5 overflow-y-auto text-sm">
+              {eventos.map((e) => (
+                <li key={e.id} className="flex flex-col">
+                  <span className="text-xs text-muted-foreground tabular-nums">{dataHora(e.criado_em)}</span>
+                  <span className={e.nivel === "erro" ? "text-destructive" : e.nivel === "aviso" ? "text-amber-500" : ""}>
+                    {e.mensagem}
                   </span>
-                </div>
-                <pre className="mt-2 whitespace-pre-wrap font-sans text-sm text-muted-foreground">{m.texto}</pre>
-                {m.ultimo_erro && <p className="mt-2 text-xs text-destructive">{m.ultimo_erro}</p>}
-              </article>
-            ))}
-          </div>
-        )}
-      </section>
+                </li>
+              ))}
+              {eventos.length === 0 && <li className="text-sm text-muted-foreground">Nenhum evento ainda.</li>}
+            </ol>
+          </Secao>
+        }
+      >
+        <section className="flex flex-col gap-3">
+          <h3 className="font-heading font-semibold">Mensagens ({mensagens.length})</h3>
+          {mensagens.length === 0 ? (
+            <p className="text-sm text-muted-foreground">
+              Nenhuma mensagem montada{emAndamento ? " ainda: elas são montadas quando a rodada termina." : "."}
+            </p>
+          ) : (
+            <div className="flex flex-col gap-3">
+              {mensagens.map((m) => (
+                <article key={m.id} className="rounded-lg border p-3">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <span className="font-medium">{m.destino_nome}</span>
+                    <span className="flex items-center gap-2 text-xs text-muted-foreground">
+                      <Badge variant={m.status === "enviada" ? "default" : m.status === "falhou" ? "destructive" : "outline"}>
+                        {rotuloStatusMensagem[m.status]}
+                      </Badge>
+                      {m.pdf_id && (
+                        <a href={`/api/arquivos/${m.pdf_id}`} target="_blank" rel="noreferrer" className="underline-offset-4 hover:underline">
+                          boleto anexado
+                        </a>
+                      )}
+                      {m.enviada_em && <span>em {dataHora(m.enviada_em)}</span>}
+                    </span>
+                  </div>
+                  <pre className="mt-2 whitespace-pre-wrap font-sans text-sm text-muted-foreground">{m.texto}</pre>
+                  {m.ultimo_erro && <p className="mt-2 text-xs text-destructive">{m.ultimo_erro}</p>}
+                </article>
+              ))}
+            </div>
+          )}
+        </section>
 
-      <section className="flex flex-col gap-3">
-        <h3 className="font-heading font-semibold">Boletos encontrados ({parcelas.length})</h3>
-        {parcelas.length === 0 ? (
-          <p className="text-sm text-muted-foreground">Nenhuma parcela em aberto.</p>
-        ) : (
+        <section className="flex flex-col gap-3">
+          <h3 className="font-heading font-semibold">Boletos encontrados ({parcelas.length})</h3>
+          {parcelas.length === 0 ? (
+            <p className="text-sm text-muted-foreground">Nenhuma parcela em aberto.</p>
+          ) : (
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Cliente</TableHead>
+                  <TableHead>Cota</TableHead>
+                  <TableHead>Parcela</TableHead>
+                  <TableHead>Vencimento</TableHead>
+                  <TableHead className="text-right">Valor</TableHead>
+                  <TableHead>Boleto</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {parcelas.map((p) => (
+                  <TableRow key={p.id}>
+                    <TableCell>{nomeDoCliente(p.rodada_cliente_id)}</TableCell>
+                    <TableCell className="tabular-nums">
+                      {p.grupo}-{p.cota}-{p.versao}
+                    </TableCell>
+                    <TableCell className="tabular-nums">{p.parcela}</TableCell>
+                    <TableCell className="tabular-nums">{vencimento(p.vencimento)}</TableCell>
+                    <TableCell className="text-right tabular-nums">{valor(p.valor_centavos)}</TableCell>
+                    <TableCell>
+                      {p.pdf_id ? (
+                        <a href={`/api/arquivos/${p.pdf_id}`} target="_blank" rel="noreferrer" className="underline-offset-4 hover:underline">
+                          abrir PDF
+                        </a>
+                      ) : (
+                        <span className="text-xs text-muted-foreground">sem PDF</span>
+                      )}
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          )}
+        </section>
+
+        <section className="flex flex-col gap-3">
+          <h3 className="font-heading font-semibold">Clientes ({clientes.length})</h3>
           <Table>
             <TableHeader>
               <TableRow>
                 <TableHead>Cliente</TableHead>
-                <TableHead>Cota</TableHead>
-                <TableHead>Parcela</TableHead>
-                <TableHead>Vencimento</TableHead>
-                <TableHead className="text-right">Valor</TableHead>
-                <TableHead>Boleto</TableHead>
+                <TableHead>Situação</TableHead>
+                <TableHead className="text-right">Cotas no site</TableHead>
+                <TableHead className="text-right">No cadastro</TableHead>
+                <TableHead>Observação</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
-              {parcelas.map((p) => (
-                <TableRow key={p.id}>
-                  <TableCell>{nomeDoCliente(p.rodada_cliente_id)}</TableCell>
-                  <TableCell className="tabular-nums">
-                    {p.grupo}-{p.cota}-{p.versao}
-                  </TableCell>
-                  <TableCell className="tabular-nums">{p.parcela}</TableCell>
-                  <TableCell className="tabular-nums">{vencimento(p.vencimento)}</TableCell>
-                  <TableCell className="text-right tabular-nums">{valor(p.valor_centavos)}</TableCell>
+              {clientes.map((c) => (
+                <TableRow key={c.id}>
                   <TableCell>
-                    {p.pdf_id ? (
-                      <a href={`/api/arquivos/${p.pdf_id}`} target="_blank" rel="noreferrer" className="underline-offset-4 hover:underline">
-                        abrir PDF
-                      </a>
-                    ) : (
-                      <span className="text-xs text-muted-foreground">sem PDF</span>
-                    )}
+                    <Link href={`/canopus/clientes/${c.cliente_id}`} className="underline-offset-4 hover:underline">
+                      {c.cliente_nome}
+                    </Link>
                   </TableCell>
+                  <TableCell>
+                    <Badge variant={c.status === "erro" ? "destructive" : c.status === "consultado" ? "default" : "outline"}>
+                      {rotuloStatusCliente[c.status]}
+                    </Badge>
+                  </TableCell>
+                  <TableCell className="text-right tabular-nums">{c.cotas_no_site}</TableCell>
+                  <TableCell className="text-right tabular-nums">{c.cotas_casadas}</TableCell>
+                  <TableCell className="text-sm text-muted-foreground">{c.erro ?? "—"}</TableCell>
                 </TableRow>
               ))}
             </TableBody>
           </Table>
-        )}
-      </section>
+        </section>
 
-      <section className="flex flex-col gap-3">
-        <h3 className="font-heading font-semibold">Clientes ({clientes.length})</h3>
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>Cliente</TableHead>
-              <TableHead>Situação</TableHead>
-              <TableHead className="text-right">Cotas no site</TableHead>
-              <TableHead className="text-right">No cadastro</TableHead>
-              <TableHead>Observação</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {clientes.map((c) => (
-              <TableRow key={c.id}>
-                <TableCell>
-                  <Link href={`/canopus/clientes/${c.cliente_id}`} className="underline-offset-4 hover:underline">
-                    {c.cliente_nome}
-                  </Link>
-                </TableCell>
-                <TableCell>
-                  <Badge variant={c.status === "erro" ? "destructive" : c.status === "consultado" ? "default" : "outline"}>
-                    {rotuloStatusCliente[c.status]}
-                  </Badge>
-                </TableCell>
-                <TableCell className="text-right tabular-nums">{c.cotas_no_site}</TableCell>
-                <TableCell className="text-right tabular-nums">{c.cotas_casadas}</TableCell>
-                <TableCell className="text-sm text-muted-foreground">{c.erro ?? "—"}</TableCell>
-              </TableRow>
-            ))}
-          </TableBody>
-        </Table>
-      </section>
-
-      <section className="flex flex-col gap-2">
-        <h3 className="font-heading font-semibold">Log</h3>
-        <ol className="flex flex-col gap-1 text-sm">
-          {eventos.map((e) => (
-            <li key={e.id} className="flex gap-2">
-              <span className="shrink-0 text-xs text-muted-foreground tabular-nums">{dataHora(e.criado_em)}</span>
-              <span className={e.nivel === "erro" ? "text-destructive" : e.nivel === "aviso" ? "text-amber-500" : ""}>
-                {e.mensagem}
-              </span>
-            </li>
-          ))}
-        </ol>
-      </section>
+      </Colunas>
     </div>
   );
 }

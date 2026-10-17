@@ -148,283 +148,288 @@ function Configuracao({
 
   return (
     <form
-      className="flex max-w-3xl flex-col gap-6"
+      className="flex flex-col gap-8"
       onSubmit={(e) => {
         e.preventDefault();
         salvar.mutate();
       }}
     >
-      <p className="text-sm text-muted-foreground">
+      <p className="max-w-prose text-sm text-muted-foreground">
         O que o serviço Canopus faz sozinho e onde ele guarda os comprovantes. Vale para todos: quem usa a plataforma vê o
         mesmo agendamento.
       </p>
 
-      <Secao
-        titulo="Dry-run automático"
-        acao={
-          <Badge variant={form.automatico ? "secondary" : "outline"}>{form.automatico ? "ligado" : "desligado"}</Badge>
-        }
-      >
-        <div className="flex flex-col gap-4">
-          <Label className="flex items-center gap-3">
-            <Switch
-              checked={form.automatico}
-              disabled={!podeEditar}
-              onCheckedChange={(v) => mudar({ automatico: v })}
-              aria-label="Ligar o dry-run automático"
-            />
-            Rodar um dry-run todo mês, sem ninguém pedir
-          </Label>
+      {/* Quatro assuntos independentes, dois a dois: ninguém precisa rolar a tela inteira para
+          achar a pasta do Drive. */}
+      <div className="grid items-start gap-8 xl:max-w-[92rem] xl:grid-cols-2 xl:gap-10">
+        <Secao
+          titulo="Dry-run automático"
+          acao={
+            <Badge variant={form.automatico ? "secondary" : "outline"}>{form.automatico ? "ligado" : "desligado"}</Badge>
+          }
+        >
+          <div className="flex flex-col gap-4">
+            <Label className="flex items-center gap-3">
+              <Switch
+                checked={form.automatico}
+                disabled={!podeEditar}
+                onCheckedChange={(v) => mudar({ automatico: v })}
+                aria-label="Ligar o dry-run automático"
+              />
+              Rodar um dry-run todo mês, sem ninguém pedir
+            </Label>
 
-          <div className="grid gap-4 sm:grid-cols-3">
-            <Campo id="dia" rotulo="Dia do mês" dica="Mês sem esse dia (31 em fevereiro) usa o último dia.">
-              <Select items={dias.map((d) => ({ value: d, label: d }))} value={form.dia} onValueChange={(v) => mudar({ dia: v ?? "10" })} disabled={!podeEditar}>
-                <SelectTrigger id="dia">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {dias.map((d) => (
-                    <SelectItem key={d} value={d}>
-                      {d}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </Campo>
-            <Campo id="hora" rotulo="Hora" dica="Horário de Brasília.">
-              <Select items={horas.map((h) => ({ value: h, label: `${h} h` }))} value={form.hora} onValueChange={(v) => mudar({ hora: v ?? "08" })} disabled={!podeEditar}>
-                <SelectTrigger id="hora">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {horas.map((h) => (
-                    <SelectItem key={h} value={h}>
-                      {h} h
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </Campo>
-            <Campo id="minuto" rotulo="Minuto">
-              <Select items={minutos.map((m) => ({ value: m, label: m }))} value={form.minuto} onValueChange={(v) => mudar({ minuto: v ?? "00" })} disabled={!podeEditar}>
-                <SelectTrigger id="minuto">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {minutos.map((m) => (
-                    <SelectItem key={m} value={m}>
-                      {m}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </Campo>
+            <div className="grid gap-4 sm:grid-cols-3">
+              <Campo id="dia" rotulo="Dia do mês" dica="Mês sem esse dia (31 em fevereiro) usa o último dia.">
+                <Select items={dias.map((d) => ({ value: d, label: d }))} value={form.dia} onValueChange={(v) => mudar({ dia: v ?? "10" })} disabled={!podeEditar}>
+                  <SelectTrigger id="dia">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {dias.map((d) => (
+                      <SelectItem key={d} value={d}>
+                        {d}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </Campo>
+              <Campo id="hora" rotulo="Hora" dica="Horário de Brasília.">
+                <Select items={horas.map((h) => ({ value: h, label: `${h} h` }))} value={form.hora} onValueChange={(v) => mudar({ hora: v ?? "08" })} disabled={!podeEditar}>
+                  <SelectTrigger id="hora">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {horas.map((h) => (
+                      <SelectItem key={h} value={h}>
+                        {h} h
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </Campo>
+              <Campo id="minuto" rotulo="Minuto">
+                <Select items={minutos.map((m) => ({ value: m, label: m }))} value={form.minuto} onValueChange={(v) => mudar({ minuto: v ?? "00" })} disabled={!podeEditar}>
+                  <SelectTrigger id="minuto">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {minutos.map((m) => (
+                      <SelectItem key={m} value={m}>
+                        {m}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </Campo>
+            </div>
+
+            {form.automatico ? (
+              <Alert>
+                <AlertTitle>No dia marcado, o robô entra no Newcon sozinho</AlertTitle>
+                <AlertDescription>
+                  Ele abre a tela de credenciamento de <strong>todas as cotas ativas</strong>, marca 2º Fixo, tira os
+                  screenshots e <strong>não confirma nada</strong>.{" "}
+                  {form.lanceRealAutomatico
+                    ? "O lance de verdade vem depois, pelo lance real automático (abaixo)."
+                    : "O lance real continua passando pela revisão e por um administrador."}
+                  {!mudou && (
+                    <>
+                      <br />
+                      Próximo: <strong>{dataHora(c.proximo_dry_run)}</strong>.
+                    </>
+                  )}
+                </AlertDescription>
+              </Alert>
+            ) : (
+              <p className="text-sm text-muted-foreground">
+                Desligado, nada roda sem alguém pedir em Execuções → Novo dry-run. Ligando com estes valores, o primeiro
+                seria em {dataHora(c.proximo_dry_run)}.
+              </p>
+            )}
+
+            <Label className="flex items-center gap-3">
+              <Switch
+                checked={form.avisoEmail}
+                disabled={!podeEditar}
+                onCheckedChange={(v) => mudar({ avisoEmail: v })}
+                aria-label="Avisar por e-mail quando o dry-run automático terminar"
+              />
+              Avisar por e-mail quando ele terminar
+            </Label>
+            {form.avisoEmail && !dados.email_configurado && (
+              <p className="text-sm text-muted-foreground">
+                O servidor ainda não tem SMTP configurado (SMTP_*): até lá, o resumo fica só no log da plataforma.
+              </p>
+            )}
+
+            {c.ultimo_disparo_em && (
+              <p className="text-sm text-muted-foreground">
+                Última vez: {dataHora(c.ultimo_disparo_em)} —{" "}
+                {c.ultimo_disparo_resultado ? resultadoDisparo[c.ultimo_disparo_resultado] : "sem registro"}.
+              </p>
+            )}
           </div>
+        </Secao>
 
-          {form.automatico ? (
-            <Alert>
-              <AlertTitle>No dia marcado, o robô entra no Newcon sozinho</AlertTitle>
-              <AlertDescription>
-                Ele abre a tela de credenciamento de <strong>todas as cotas ativas</strong>, marca 2º Fixo, tira os
-                screenshots e <strong>não confirma nada</strong>.{" "}
-                {form.lanceRealAutomatico
-                  ? "O lance de verdade vem depois, pelo lance real automático (abaixo)."
-                  : "O lance real continua passando pela revisão e por um administrador."}
-                {!mudou && (
-                  <>
-                    <br />
-                    Próximo: <strong>{dataHora(c.proximo_dry_run)}</strong>.
-                  </>
-                )}
-              </AlertDescription>
-            </Alert>
-          ) : (
+        <Secao
+          titulo="Lance real automático"
+          destaque
+          acao={
+            <Badge variant={form.lanceRealAutomatico ? "destructive" : "outline"}>
+              {form.lanceRealAutomatico ? "ligado" : "desligado"}
+            </Badge>
+          }
+        >
+          <div className="flex flex-col gap-4">
+            <Label className="flex items-center gap-3">
+              <Switch
+                checked={form.lanceRealAutomatico}
+                disabled={!podeEditarLanceReal}
+                onCheckedChange={(v) => mudar({ lanceRealAutomatico: v })}
+                aria-label="Ligar o lance real automático"
+              />
+              Registrar o lance de verdade depois do dry-run automático, sem ninguém aprovar
+            </Label>
+
+            {form.lanceRealAutomatico ? (
+              <Alert variant="destructive">
+                <AlertTitle>A plataforma vai registrar lance de verdade sozinha</AlertTitle>
+                <AlertDescription>
+                  Terminado o dry-run automático, a plataforma espera <strong>{form.lanceRealEsperaMinutos} min</strong>,
+                  avisa por e-mail e então <strong>registra o lance</strong> das cotas liberadas — sem revisão e sem
+                  ninguém aprovar. O Newcon aceita lance repetido na mesma assembleia:{" "}
+                  <strong>lance registrado não se desfaz</strong>. Cota que já tem lance na assembleia é pulada, e nada é
+                  registrado acima do teto abaixo.
+                  {!dados.lance_real_habilitado && (
+                    <>
+                      <br />
+                      Hoje a chave <span className="font-mono text-xs">LANCE_REAL_HABILITADO</span> está desligada no
+                      servidor: nenhum lance será registrado até alguém ligá-la.
+                    </>
+                  )}
+                </AlertDescription>
+              </Alert>
+            ) : (
+              <p className="text-sm text-muted-foreground">
+                Desligado, o dry-run automático para na revisão: um administrador abre a execução, confere as cotas e
+                aprova o lance real à mão.
+              </p>
+            )}
+
+            <div className="grid gap-4 sm:grid-cols-2">
+              <Campo
+                id="teto"
+                rotulo="Teto de cotas por execução"
+                dica="Acima disso a plataforma não registra nada e avisa: erro de cadastro não vira lance em massa (de 1 a 500)."
+              >
+                <Input
+                  id="teto"
+                  inputMode="numeric"
+                  disabled={!podeEditarLanceReal}
+                  aria-invalid={!numeroValido(form.lanceRealMaxCotas, 1, 500)}
+                  value={form.lanceRealMaxCotas}
+                  onChange={(e) => mudar({ lanceRealMaxCotas: e.target.value })}
+                />
+              </Campo>
+              <Campo
+                id="espera"
+                rotulo="Esperar antes de registrar (minutos)"
+                dica="Janela entre o aviso por e-mail e o lance, para dar tempo de desligar ou cancelar a execução (de 5 a 1440)."
+              >
+                <Input
+                  id="espera"
+                  inputMode="numeric"
+                  disabled={!podeEditarLanceReal}
+                  aria-invalid={!numeroValido(form.lanceRealEsperaMinutos, 5, 1440)}
+                  value={form.lanceRealEsperaMinutos}
+                  onChange={(e) => mudar({ lanceRealEsperaMinutos: e.target.value })}
+                />
+              </Campo>
+            </div>
+
+            {form.lanceRealAutomatico && !dados.email_configurado && (
+              <p className="text-sm text-muted-foreground">
+                Sem SMTP no servidor, o aviso que antecede o lance fica só no log: ninguém é avisado antes.
+              </p>
+            )}
+            {!podeEditarLanceReal ? (
+              <p className="text-sm text-muted-foreground">
+                Só administradores mudam esta parte — na tela, lance real também só admin aprova.
+                {c.lance_real_automatico_por_nome && ` Ligado por ${c.lance_real_automatico_por_nome}.`}
+              </p>
+            ) : (
+              c.lance_real_automatico &&
+              c.lance_real_automatico_por_nome && (
+                <p className="text-sm text-muted-foreground">Ligado por {c.lance_real_automatico_por_nome}.</p>
+              )
+            )}
+          </div>
+        </Secao>
+
+        <Secao titulo="Google Drive">
+          <div className="flex flex-col gap-4">
+            <Campo
+              id="pasta"
+              rotulo="Pasta dos comprovantes"
+              dica='Cole o endereço da pasta ("https://drive.google.com/drive/folders/…") ou só o id. Em branco, vale a pasta definida no servidor.'
+            >
+              <Input
+                id="pasta"
+                autoComplete="off"
+                spellCheck={false}
+                placeholder="1AbCdEfGhIjKlMnOpQr"
+                disabled={!podeEditar}
+                value={form.pasta}
+                onChange={(e) => mudar({ pasta: e.target.value })}
+              />
+            </Campo>
             <p className="text-sm text-muted-foreground">
-              Desligado, nada roda sem alguém pedir em Execuções → Novo dry-run. Ligando com estes valores, o primeiro
-              seria em {dataHora(c.proximo_dry_run)}.
+              {c.drive_pasta_origem === "nenhuma" ? (
+                "Nenhuma pasta escolhida: os comprovantes de lance real ficam no banco e não sobem para o Drive."
+              ) : (
+                <>
+                  Em uso: <span className="font-mono text-xs">{c.drive_pasta_em_vigor}</span>
+                  {c.drive_pasta_origem === "ambiente" && " (definida no servidor, em GOOGLE_DRIVE_PASTA_ID)"}
+                </>
+              )}
             </p>
-          )}
+          </div>
+        </Secao>
 
-          <Label className="flex items-center gap-3">
-            <Switch
-              checked={form.avisoEmail}
-              disabled={!podeEditar}
-              onCheckedChange={(v) => mudar({ avisoEmail: v })}
-              aria-label="Avisar por e-mail quando o dry-run automático terminar"
-            />
-            Avisar por e-mail quando ele terminar
-          </Label>
-          {form.avisoEmail && !dados.email_configurado && (
-            <p className="text-sm text-muted-foreground">
-              O servidor ainda não tem SMTP configurado (SMTP_*): até lá, o resumo fica só no log da plataforma.
-            </p>
-          )}
-
-          {c.ultimo_disparo_em && (
-            <p className="text-sm text-muted-foreground">
-              Última vez: {dataHora(c.ultimo_disparo_em)} —{" "}
-              {c.ultimo_disparo_resultado ? resultadoDisparo[c.ultimo_disparo_resultado] : "sem registro"}.
-            </p>
-          )}
-        </div>
-      </Secao>
-
-      <Secao
-        titulo="Lance real automático"
-        acao={
-          <Badge variant={form.lanceRealAutomatico ? "destructive" : "outline"}>
-            {form.lanceRealAutomatico ? "ligado" : "desligado"}
-          </Badge>
-        }
-      >
-        <div className="flex flex-col gap-4">
-          <Label className="flex items-center gap-3">
-            <Switch
-              checked={form.lanceRealAutomatico}
-              disabled={!podeEditarLanceReal}
-              onCheckedChange={(v) => mudar({ lanceRealAutomatico: v })}
-              aria-label="Ligar o lance real automático"
-            />
-            Registrar o lance de verdade depois do dry-run automático, sem ninguém aprovar
-          </Label>
-
-          {form.lanceRealAutomatico ? (
-            <Alert variant="destructive">
-              <AlertTitle>A plataforma vai registrar lance de verdade sozinha</AlertTitle>
-              <AlertDescription>
-                Terminado o dry-run automático, a plataforma espera <strong>{form.lanceRealEsperaMinutos} min</strong>,
-                avisa por e-mail e então <strong>registra o lance</strong> das cotas liberadas — sem revisão e sem
-                ninguém aprovar. O Newcon aceita lance repetido na mesma assembleia:{" "}
-                <strong>lance registrado não se desfaz</strong>. Cota que já tem lance na assembleia é pulada, e nada é
-                registrado acima do teto abaixo.
-                {!dados.lance_real_habilitado && (
-                  <>
-                    <br />
-                    Hoje a chave <span className="font-mono text-xs">LANCE_REAL_HABILITADO</span> está desligada no
-                    servidor: nenhum lance será registrado até alguém ligá-la.
-                  </>
-                )}
-              </AlertDescription>
-            </Alert>
-          ) : (
-            <p className="text-sm text-muted-foreground">
-              Desligado, o dry-run automático para na revisão: um administrador abre a execução, confere as cotas e
-              aprova o lance real à mão.
-            </p>
-          )}
-
+        <Secao titulo="Prazos">
           <div className="grid gap-4 sm:grid-cols-2">
             <Campo
-              id="teto"
-              rotulo="Teto de cotas por execução"
-              dica="Acima disso a plataforma não registra nada e avisa: erro de cadastro não vira lance em massa (de 1 a 500)."
+              id="validade"
+              rotulo="Prazo para aprovar o lance real (minutos)"
+              dica="Contado do fim do dry-run. Passado o prazo, a revisão pede um dry-run novo (de 30 a 1440)."
             >
               <Input
-                id="teto"
+                id="validade"
                 inputMode="numeric"
-                disabled={!podeEditarLanceReal}
-                aria-invalid={!numeroValido(form.lanceRealMaxCotas, 1, 500)}
-                value={form.lanceRealMaxCotas}
-                onChange={(e) => mudar({ lanceRealMaxCotas: e.target.value })}
+                disabled={!podeEditar}
+                aria-invalid={!numeroValido(form.validadeMinutos, 30, 1440)}
+                value={form.validadeMinutos}
+                onChange={(e) => mudar({ validadeMinutos: e.target.value })}
               />
             </Campo>
             <Campo
-              id="espera"
-              rotulo="Esperar antes de registrar (minutos)"
-              dica="Janela entre o aviso por e-mail e o lance, para dar tempo de desligar ou cancelar a execução (de 5 a 1440)."
+              id="retencao"
+              rotulo="Guardar screenshots por (dias)"
+              dica="Screenshots têm dados de clientes e são apagados depois do prazo (de 1 a 365). Comprovantes em PDF não expiram."
             >
               <Input
-                id="espera"
+                id="retencao"
                 inputMode="numeric"
-                disabled={!podeEditarLanceReal}
-                aria-invalid={!numeroValido(form.lanceRealEsperaMinutos, 5, 1440)}
-                value={form.lanceRealEsperaMinutos}
-                onChange={(e) => mudar({ lanceRealEsperaMinutos: e.target.value })}
+                disabled={!podeEditar}
+                aria-invalid={!numeroValido(form.retencaoDias, 1, 365)}
+                value={form.retencaoDias}
+                onChange={(e) => mudar({ retencaoDias: e.target.value })}
               />
             </Campo>
           </div>
-
-          {form.lanceRealAutomatico && !dados.email_configurado && (
-            <p className="text-sm text-muted-foreground">
-              Sem SMTP no servidor, o aviso que antecede o lance fica só no log: ninguém é avisado antes.
-            </p>
-          )}
-          {!podeEditarLanceReal ? (
-            <p className="text-sm text-muted-foreground">
-              Só administradores mudam esta parte — na tela, lance real também só admin aprova.
-              {c.lance_real_automatico_por_nome && ` Ligado por ${c.lance_real_automatico_por_nome}.`}
-            </p>
-          ) : (
-            c.lance_real_automatico &&
-            c.lance_real_automatico_por_nome && (
-              <p className="text-sm text-muted-foreground">Ligado por {c.lance_real_automatico_por_nome}.</p>
-            )
-          )}
-        </div>
-      </Secao>
-
-      <Secao titulo="Google Drive">
-        <div className="flex flex-col gap-4">
-          <Campo
-            id="pasta"
-            rotulo="Pasta dos comprovantes"
-            dica='Cole o endereço da pasta ("https://drive.google.com/drive/folders/…") ou só o id. Em branco, vale a pasta definida no servidor.'
-          >
-            <Input
-              id="pasta"
-              autoComplete="off"
-              spellCheck={false}
-              placeholder="1AbCdEfGhIjKlMnOpQr"
-              disabled={!podeEditar}
-              value={form.pasta}
-              onChange={(e) => mudar({ pasta: e.target.value })}
-            />
-          </Campo>
-          <p className="text-sm text-muted-foreground">
-            {c.drive_pasta_origem === "nenhuma" ? (
-              "Nenhuma pasta escolhida: os comprovantes de lance real ficam no banco e não sobem para o Drive."
-            ) : (
-              <>
-                Em uso: <span className="font-mono text-xs">{c.drive_pasta_em_vigor}</span>
-                {c.drive_pasta_origem === "ambiente" && " (definida no servidor, em GOOGLE_DRIVE_PASTA_ID)"}
-              </>
-            )}
-          </p>
-        </div>
-      </Secao>
-
-      <Secao titulo="Prazos">
-        <div className="grid gap-4 sm:grid-cols-2">
-          <Campo
-            id="validade"
-            rotulo="Prazo para aprovar o lance real (minutos)"
-            dica="Contado do fim do dry-run. Passado o prazo, a revisão pede um dry-run novo (de 30 a 1440)."
-          >
-            <Input
-              id="validade"
-              inputMode="numeric"
-              disabled={!podeEditar}
-              aria-invalid={!numeroValido(form.validadeMinutos, 30, 1440)}
-              value={form.validadeMinutos}
-              onChange={(e) => mudar({ validadeMinutos: e.target.value })}
-            />
-          </Campo>
-          <Campo
-            id="retencao"
-            rotulo="Guardar screenshots por (dias)"
-            dica="Screenshots têm dados de clientes e são apagados depois do prazo (de 1 a 365). Comprovantes em PDF não expiram."
-          >
-            <Input
-              id="retencao"
-              inputMode="numeric"
-              disabled={!podeEditar}
-              aria-invalid={!numeroValido(form.retencaoDias, 1, 365)}
-              value={form.retencaoDias}
-              onChange={(e) => mudar({ retencaoDias: e.target.value })}
-            />
-          </Campo>
-        </div>
-      </Secao>
+        </Secao>
+      </div>
 
       {podeEditar ? (
         <div className="flex flex-wrap items-center gap-3">
@@ -454,9 +459,20 @@ function Configuracao({
   );
 }
 
-function Secao({ titulo, acao, children }: { titulo: string; acao?: React.ReactNode; children: React.ReactNode }) {
+function Secao({
+  titulo,
+  acao,
+  destaque,
+  children,
+}: {
+  titulo: string;
+  acao?: React.ReactNode;
+  /** A única seção que faz a plataforma registrar lance sozinha fica cercada de vermelho. */
+  destaque?: boolean;
+  children: React.ReactNode;
+}) {
   return (
-    <section className="rounded-lg border p-5">
+    <section className={destaque ? "rounded-lg border border-destructive/50 p-5" : "rounded-lg border p-5"}>
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
         <h2 className="font-medium">{titulo}</h2>
         {acao}

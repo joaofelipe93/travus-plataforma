@@ -13,6 +13,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import { Colunas, Painel } from "@/components/pagina";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -79,6 +80,8 @@ export default function PaginaRevisao() {
   const selecionadas = dados.cotas.filter(incluida);
   const comAutorizacao = selecionadas.filter((c) => c.exige_autorizacao).length;
   const assembleias = [...new Set(selecionadas.map((c) => `${c.assembleia_data}${c.assembleia_numero ? ` (nº ${c.assembleia_numero})` : ""}`))];
+  // A modalidade é a de cada cota (não mais "2º Fixo" para todas): o resumo diz quais vão.
+  const modalidades = [...new Set(selecionadas.map((c) => nomeModalidade[c.modalidade] ?? c.modalidade))];
   const ehAdmin = sessao.data?.usuario.perfil === "admin";
   const podeEnviar = dados.pode_aprovar && ehAdmin && selecionadas.length > 0;
 
@@ -87,137 +90,156 @@ export default function PaginaRevisao() {
       <Link href={`/canopus/execucoes/${id}`} className="text-sm text-muted-foreground hover:text-foreground">
         ← Dry-run nº {id}
       </Link>
-      <div>
-        <h1 className="text-xl font-semibold tracking-tight">Revisão para lance real</h1>
-        <p className="text-sm text-muted-foreground">
+      <div className="border-b pb-5">
+        <h2 className="font-heading text-xl font-semibold">Revisão para lance real</h2>
+        <p className="mt-0.5 text-sm text-muted-foreground">
           Dry-run nº {dados.dry_run.id}, concluído em {dataHora(dados.dry_run.finalizada_em)}
           {dados.dry_run.valido_ate && ` · pode ser aprovado até ${dataHora(dados.dry_run.valido_ate)}`}
         </p>
       </div>
 
-      {!ehAdmin && (
-        <Alert>
-          <AlertDescription>Só administradores aprovam lance real. Você pode conferir a revisão.</AlertDescription>
-        </Alert>
-      )}
-      {dados.bloqueio && (
-        <Alert variant="destructive">
-          <AlertTitle>A aprovação está bloqueada</AlertTitle>
-          <AlertDescription>
-            {dados.bloqueio}
-            {dados.dry_run.execucao_real_id && (
-              <>
-                {" "}
-                <Link className="underline" href={`/canopus/execucoes/${dados.dry_run.execucao_real_id}`}>
-                  Ver execução nº {dados.dry_run.execucao_real_id}
-                </Link>
-              </>
-            )}
-          </AlertDescription>
-        </Alert>
-      )}
+      {/* O que vai ser registrado fica ao lado da lista, à vista enquanto se confere cota por
+          cota — e não numa barra colada no rodapé. */}
+      <Colunas
+        lateralFixa
+        lateral={
+          <>
+            <Painel className="flex flex-col gap-4 border-destructive/50">
+              <p className="text-sm">
+                Serão registrados <span className="font-heading text-2xl leading-none tabular-nums">{selecionadas.length}</span>{" "}
+                lance(s) real(is)
+                {modalidades.length > 0 && ` de ${modalidades.join(" e ")}`}
+                {assembleias.length > 0 && ` na(s) assembleia(s) de ${assembleias.join(", ")}`}
+                {comAutorizacao > 0 && `, ${comAutorizacao} em cota que já tem lance`}.
+              </p>
+              <Button
+                variant="destructive"
+                className="w-full"
+                disabled={!podeEnviar}
+                onClick={() => {
+                  setDigitado("");
+                  setConfirmando(true);
+                }}
+              >
+                Aprovar lance real
+              </Button>
+              {aprovar.isError && (
+                <Alert variant="destructive">
+                  <AlertTitle>A execução real não foi criada</AlertTitle>
+                  <AlertDescription>{aprovar.error.message}</AlertDescription>
+                </Alert>
+              )}
+            </Painel>
 
-      <div className="rounded-lg border">
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead className="w-10" />
-              <TableHead>Cliente</TableHead>
-              <TableHead>Cota</TableHead>
-              <TableHead>Assembleia</TableHead>
-              <TableHead>Modalidade</TableHead>
-              <TableHead>Lances nesta assembleia</TableHead>
-              <TableHead className="text-right">Screenshot</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {dados.cotas.length === 0 && (
+            {!ehAdmin && (
+              <Alert>
+                <AlertDescription>Só administradores aprovam lance real. Você pode conferir a revisão.</AlertDescription>
+              </Alert>
+            )}
+            {dados.bloqueio && (
+              <Alert variant="destructive">
+                <AlertTitle>A aprovação está bloqueada</AlertTitle>
+                <AlertDescription>
+                  {dados.bloqueio}
+                  {dados.dry_run.execucao_real_id && (
+                    <>
+                      {" "}
+                      <Link className="underline" href={`/canopus/execucoes/${dados.dry_run.execucao_real_id}`}>
+                        Ver execução nº {dados.dry_run.execucao_real_id}
+                      </Link>
+                    </>
+                  )}
+                </AlertDescription>
+              </Alert>
+            )}
+          </>
+        }
+      >
+        <div className="rounded-lg border">
+          <Table>
+            <TableHeader>
               <TableRow>
-                <TableCell colSpan={7} className="py-8 text-center text-muted-foreground">
-                  Nenhuma cota ficou pronta para confirmar neste dry-run.
-                </TableCell>
+                <TableHead className="w-10" />
+                <TableHead>Cliente</TableHead>
+                <TableHead>Cota</TableHead>
+                <TableHead>Assembleia</TableHead>
+                <TableHead>Modalidade</TableHead>
+                <TableHead>Lances nesta assembleia</TableHead>
+                <TableHead className="text-right">Screenshot</TableHead>
               </TableRow>
-            )}
-            {dados.cotas.map((c) => (
-              <TableRow key={c.execucao_cota_id} className={cn(!incluida(c) && "text-muted-foreground")}>
-                <TableCell>
-                  <input
-                    type="checkbox"
-                    className="size-4 accent-primary"
-                    checked={incluida(c)}
-                    disabled={!!c.bloqueio || (c.exige_autorizacao && !registrar(c))}
-                    onChange={(e) => alterar(c, { incluir: e.target.checked })}
-                    aria-label={`Incluir a cota ${tagCota(c)}`}
-                  />
-                </TableCell>
-                <TableCell>{c.cliente_nome}</TableCell>
-                <TableCell className="whitespace-nowrap tabular-nums">{tagCota(c)}</TableCell>
-                <TableCell className="whitespace-nowrap">
-                  {c.assembleia_data ?? "—"}
-                  {c.assembleia_numero && ` (nº ${c.assembleia_numero})`}
-                </TableCell>
-                <TableCell className="whitespace-nowrap">
-                  {nomeModalidade[c.modalidade] ?? c.modalidade}
-                  {(c.percentual_lance ?? c.percentual_segundo_fixo) && (
-                    <span className="tabular-nums text-muted-foreground"> · {c.percentual_lance ?? c.percentual_segundo_fixo}%</span>
-                  )}
-                </TableCell>
-                <TableCell className="max-w-sm whitespace-normal">
-                  {c.bloqueio && <p className="text-destructive">{c.bloqueio}</p>}
-                  {!c.historico_lido && <p className="text-muted-foreground">Histórico não lido no dry-run (o worker confere de novo antes de confirmar).</p>}
-                  {c.exige_autorizacao ? (
-                    <div className="flex flex-col gap-1">
-                      <p className="text-amber-700 dark:text-amber-400">
-                        Já tem lance: {[...c.lances.map((l) => `${l.protocolo} (${l.modalidade ?? "?"})`), ...c.lances_plataforma.map((p) => `${p} (plataforma)`)].join(", ")}
-                      </p>
-                      <label className="flex items-center gap-2 text-sm">
-                        <input
-                          type="checkbox"
-                          className="size-4 accent-primary"
-                          checked={registrar(c)}
-                          disabled={!!c.bloqueio}
-                          onChange={(e) => alterar(c, { registrar: e.target.checked, incluir: e.target.checked })}
-                        />
-                        Registrar mesmo assim
-                      </label>
-                    </div>
-                  ) : (
-                    c.historico_lido && <span className="text-muted-foreground">Nenhum</span>
-                  )}
-                </TableCell>
-                <TableCell className="text-right">
-                  {c.screenshot_id ? (
-                    <a href={`/api/arquivos/${c.screenshot_id}`} target="_blank" rel="noopener noreferrer" className="inline-block">
-                      {/* eslint-disable-next-line @next/next/no-img-element */}
-                      <img src={`/api/arquivos/${c.screenshot_id}`} alt={`Screenshot da cota ${tagCota(c)}`} className="h-12 w-20 rounded border object-cover object-top" loading="lazy" />
-                    </a>
-                  ) : (
-                    "—"
-                  )}
-                </TableCell>
-              </TableRow>
-            ))}
-          </TableBody>
-        </Table>
-      </div>
+            </TableHeader>
+            <TableBody>
+              {dados.cotas.length === 0 && (
+                <TableRow>
+                  <TableCell colSpan={7} className="py-8 text-center text-muted-foreground">
+                    Nenhuma cota ficou pronta para confirmar neste dry-run.
+                  </TableCell>
+                </TableRow>
+              )}
+              {dados.cotas.map((c) => (
+                <TableRow key={c.execucao_cota_id} className={cn(!incluida(c) && "text-muted-foreground")}>
+                  <TableCell>
+                    <input
+                      type="checkbox"
+                      className="size-4 accent-primary"
+                      checked={incluida(c)}
+                      disabled={!!c.bloqueio || (c.exige_autorizacao && !registrar(c))}
+                      onChange={(e) => alterar(c, { incluir: e.target.checked })}
+                      aria-label={`Incluir a cota ${tagCota(c)}`}
+                    />
+                  </TableCell>
+                  <TableCell>{c.cliente_nome}</TableCell>
+                  <TableCell className="whitespace-nowrap tabular-nums">{tagCota(c)}</TableCell>
+                  <TableCell className="whitespace-nowrap">
+                    {c.assembleia_data ?? "—"}
+                    {c.assembleia_numero && ` (nº ${c.assembleia_numero})`}
+                  </TableCell>
+                  <TableCell className="whitespace-nowrap">
+                    {nomeModalidade[c.modalidade] ?? c.modalidade}
+                    {(c.percentual_lance ?? c.percentual_segundo_fixo) && (
+                      <span className="tabular-nums text-muted-foreground"> · {c.percentual_lance ?? c.percentual_segundo_fixo}%</span>
+                    )}
+                  </TableCell>
+                  <TableCell className="max-w-sm whitespace-normal">
+                    {c.bloqueio && <p className="text-destructive">{c.bloqueio}</p>}
+                    {!c.historico_lido && <p className="text-muted-foreground">Histórico não lido no dry-run (o worker confere de novo antes de confirmar).</p>}
+                    {c.exige_autorizacao ? (
+                      <div className="flex flex-col gap-1">
+                        <p className="text-amber-700 dark:text-amber-400">
+                          Já tem lance: {[...c.lances.map((l) => `${l.protocolo} (${l.modalidade ?? "?"})`), ...c.lances_plataforma.map((p) => `${p} (plataforma)`)].join(", ")}
+                        </p>
+                        <label className="flex items-center gap-2 text-sm">
+                          <input
+                            type="checkbox"
+                            className="size-4 accent-primary"
+                            checked={registrar(c)}
+                            disabled={!!c.bloqueio}
+                            onChange={(e) => alterar(c, { registrar: e.target.checked, incluir: e.target.checked })}
+                          />
+                          Registrar mesmo assim
+                        </label>
+                      </div>
+                    ) : (
+                      c.historico_lido && <span className="text-muted-foreground">Nenhum</span>
+                    )}
+                  </TableCell>
+                  <TableCell className="text-right">
+                    {c.screenshot_id ? (
+                      <a href={`/api/arquivos/${c.screenshot_id}`} target="_blank" rel="noopener noreferrer" className="inline-block">
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img src={`/api/arquivos/${c.screenshot_id}`} alt={`Screenshot da cota ${tagCota(c)}`} className="h-12 w-20 rounded border object-cover object-top" loading="lazy" />
+                      </a>
+                    ) : (
+                      "—"
+                    )}
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </div>
 
-      {aprovar.isError && (
-        <Alert variant="destructive">
-          <AlertTitle>A execução real não foi criada</AlertTitle>
-          <AlertDescription>{aprovar.error.message}</AlertDescription>
-        </Alert>
-      )}
-
-      <div className="sticky bottom-0 -mx-4 flex flex-wrap items-center justify-between gap-3 border-t bg-background px-4 py-3">
-        <p className="text-sm">
-          Serão registrados <span className="font-medium">{selecionadas.length}</span> lance(s) de 2º Lance Fixo
-          {assembleias.length > 0 && ` na(s) assembleia(s) de ${assembleias.join(", ")}`}
-          {comAutorizacao > 0 && `, ${comAutorizacao} em cota que já tem lance`}.
-        </p>
-        <Button variant="destructive" disabled={!podeEnviar} onClick={() => { setDigitado(""); setConfirmando(true); }}>
-          Aprovar lance real
-        </Button>
-      </div>
+      </Colunas>
 
       <AlertDialog open={confirmando} onOpenChange={(aberto) => !aprovar.isPending && setConfirmando(aberto)}>
         <AlertDialogContent>
