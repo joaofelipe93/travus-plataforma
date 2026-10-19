@@ -1,4 +1,4 @@
-FROM node:24.21.0-alpine AS deps
+FROM node:24.22.0-alpine AS deps
 WORKDIR /app
 COPY package.json package-lock.json ./
 # Retentativas de rede: o registry do npm derrubou o deploy e a CI em 15/10/2026 com
@@ -7,7 +7,7 @@ COPY package.json package-lock.json ./
 RUN npm ci --no-audit --no-fund \
     --fetch-retries=5 --fetch-retry-mintimeout=2000 --fetch-retry-maxtimeout=60000 --fetch-timeout=600000
 
-FROM node:24.21.0-alpine AS build
+FROM node:24.22.0-alpine AS build
 WORKDIR /app
 ENV NEXT_TELEMETRY_DISABLED=1
 # Versão (version.txt) e commit, passados pelo compose; o Next embute no build (NEXT_PUBLIC_*).
@@ -20,7 +20,7 @@ COPY . .
 RUN npm run build
 
 # Só o servidor standalone (sem node_modules completo).
-FROM node:24.21.0-alpine
+FROM node:24.22.0-alpine
 WORKDIR /app
 ENV NODE_ENV=production \
     NEXT_TELEMETRY_DISABLED=1 \
