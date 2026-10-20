@@ -49,6 +49,12 @@ chave do servidor e pela configuração). Aqui é o carteiro.
 6. **Nenhum teste fala com o WhatsApp.** O laço recebe o "carteiro" por injeção
    (`rodarUmCiclo(carteiro)`), e os dublês registram o que teria sido enviado — por isso não há
    `mock.module` nem a flag experimental que o notificador de check-in precisa.
+7. **A mensagem de teste (`tipo = 'teste'`) sai em modo ensaio.** Com `envio_habilitado` desligado
+   na configuração, o ciclo manda só as de teste e segura o resto (`pendentes(limite, soTestes)`).
+   Ela é o que responde "este número está pareado?" e vai para um telefone que o admin digitou,
+   não para um cliente — esperar o envio ser ligado tornava o teste inútil justamente quando ele é
+   necessário (a tela dizia que tinha dado certo e nada chegava). O que ela **continua** respeitando:
+   a conexão, a pausa, as tentativas e o freio de mão `ENVIO_HABILITADO` do serviço.
 
 ## Comandos
 
@@ -68,7 +74,7 @@ container `boletos-teste`.
 |---|---|---|
 | `GET` | `/health` | estado do serviço, da conexão e da fila |
 | `GET` | `/whatsapp/status` | conexão, número pareado, **string do QR**, freios e fila |
-| `POST` | `/whatsapp/teste` | mensagem de teste para um telefone (`{"telefone":"5511…"}`). **Vai para um número de verdade** |
+| `POST` | `/whatsapp/teste` | mensagem de teste para um telefone (`{"telefone":"5511…"}`). **Vai para um número de verdade** e **sai mesmo em modo ensaio** (ver abaixo) |
 | `POST` | `/whatsapp/desconectar` | desvincula o aparelho, apaga a sessão e gera QR novo (`{"confirmar":true}`) |
 
 Todas exigem o `ADMIN_TOKEN` (`x-admin-token` ou `Authorization: Bearer`), que só a API tem.
