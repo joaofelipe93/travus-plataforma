@@ -24,7 +24,9 @@ SET agendamento_ativo    = $1,
                                 ELSE envio_habilitado_por END,
     pausa_envio_segundos = $9,
     max_mensagens_rodada = $10,
-    atualizado_por       = $11,
+    texto_envio          = $11,
+    texto_cobranca       = $12,
+    atualizado_por       = $13,
     atualizado_em        = now()
 WHERE id
 `
@@ -40,6 +42,8 @@ type AtualizarConfiguracaoBoletosParams struct {
 	EnvioHabilitadoPor *int64
 	PausaEnvioSegundos int16
 	MaxMensagensRodada int32
+	TextoEnvio         string
+	TextoCobranca      string
 	AtualizadoPor      *int64
 }
 
@@ -55,6 +59,8 @@ func (q *Queries) AtualizarConfiguracaoBoletos(ctx context.Context, arg Atualiza
 		arg.EnvioHabilitadoPor,
 		arg.PausaEnvioSegundos,
 		arg.MaxMensagensRodada,
+		arg.TextoEnvio,
+		arg.TextoCobranca,
 		arg.AtualizadoPor,
 	)
 	return err
@@ -387,7 +393,8 @@ const configuracaoBoletos = `-- name: ConfiguracaoBoletos :one
 
 SELECT c.id, c.agendamento_ativo, c.dia_envio, c.hora_envio, c.dia_cobranca, c.hora_cobranca,
        c.antecipar_dia_util, c.envio_habilitado, c.envio_habilitado_por, c.pausa_envio_segundos,
-       c.max_mensagens_rodada, c.ultimo_envio_dia, c.ultimo_envio_em, c.ultimo_envio_resultado,
+       c.max_mensagens_rodada, c.texto_envio, c.texto_cobranca,
+       c.ultimo_envio_dia, c.ultimo_envio_em, c.ultimo_envio_resultado,
        c.ultima_cobranca_dia, c.ultima_cobranca_em, c.ultima_cobranca_resultado,
        c.atualizado_por, c.atualizado_em,
        u.nome AS atualizado_por_nome, ue.nome AS envio_habilitado_por_nome
@@ -409,6 +416,8 @@ type ConfiguracaoBoletosRow struct {
 	EnvioHabilitadoPor      *int64
 	PausaEnvioSegundos      int16
 	MaxMensagensRodada      int32
+	TextoEnvio              string
+	TextoCobranca           string
 	UltimoEnvioDia          *time.Time
 	UltimoEnvioEm           *time.Time
 	UltimoEnvioResultado    *string
@@ -437,6 +446,8 @@ func (q *Queries) ConfiguracaoBoletos(ctx context.Context) (ConfiguracaoBoletosR
 		&i.EnvioHabilitadoPor,
 		&i.PausaEnvioSegundos,
 		&i.MaxMensagensRodada,
+		&i.TextoEnvio,
+		&i.TextoCobranca,
 		&i.UltimoEnvioDia,
 		&i.UltimoEnvioEm,
 		&i.UltimoEnvioResultado,

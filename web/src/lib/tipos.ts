@@ -558,6 +558,9 @@ export type ConfiguracaoBoletos = {
   envio_habilitado: boolean;
   pausa_envio_segundos: number;
   max_mensagens_rodada: number;
+  // Modelo das mensagens: a mesma para todos, com os campos entre chaves preenchidos no envio.
+  texto_envio: string;
+  texto_cobranca: string;
   envio_habilitado_por_nome: string;
   atualizado_por_nome: string;
   atualizado_em: string;
@@ -576,6 +579,21 @@ export type RespostaConfiguracaoBoletos = {
   // Chave BOLETOS_ENVIO_HABILITADO do servidor: desligada, nada sai.
   envio_habilitado_servidor: boolean;
   fila: { pendentes: number; falharam: number; proxima: string | null };
+  // O que a tela precisa para a ajuda dos campos, a prévia e o "voltar ao texto padrão".
+  mensagens: {
+    campos_envio: CampoMensagem[];
+    campos_cobranca: CampoMensagem[];
+    padrao_envio: string;
+    padrao_cobranca: string;
+    max_caracteres: number;
+  };
+};
+
+// Um campo que a plataforma preenche no texto ({grupo}, {valor}…).
+export type CampoMensagem = {
+  nome: string;
+  descricao: string;
+  exemplo: string;
 };
 
 export type SituacaoWhatsappBoletos = {

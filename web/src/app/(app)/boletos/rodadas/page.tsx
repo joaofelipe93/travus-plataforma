@@ -14,6 +14,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Skeleton } from "@/components/ui/skeleton";
 import { Switch } from "@/components/ui/switch";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Textarea } from "@/components/ui/textarea";
 import { api } from "@/lib/api";
 import { dataHora, useSessao } from "@/lib/sessao";
 import {
@@ -23,6 +24,7 @@ import {
   rotuloTipoRodada,
 } from "@/lib/boletos";
 import type {
+  CampoMensagem,
   DetalheRodada,
   RespostaConfiguracaoBoletos,
   RodadaResumo,
@@ -225,6 +227,8 @@ type Formulario = {
   envio: boolean;
   pausa: string;
   teto: string;
+  textoEnvio: string;
+  textoCobranca: string;
 };
 
 function paraFormulario(c: RespostaConfiguracaoBoletos["configuracao"]): Formulario {
@@ -238,6 +242,8 @@ function paraFormulario(c: RespostaConfiguracaoBoletos["configuracao"]): Formula
     envio: c.envio_habilitado,
     pausa: String(c.pausa_envio_segundos),
     teto: String(c.max_mensagens_rodada),
+    textoEnvio: c.texto_envio,
+    textoCobranca: c.texto_cobranca,
   };
 }
 
@@ -273,6 +279,8 @@ function Configuracao({
           envio_habilitado: form.envio,
           pausa_envio_segundos: Number(form.pausa),
           max_mensagens_rodada: Number(form.teto),
+          texto_envio: form.textoEnvio,
+          texto_cobranca: form.textoCobranca,
         },
       }),
     onSuccess: () => {
@@ -405,6 +413,41 @@ function Configuracao({
         </p>
       </div>
 
+      {/* O texto que chega ao cliente. É uma mensagem só para todos: o que muda são os campos
+          entre chaves, que a plataforma preenche na hora do envio. */}
+      <div className="flex flex-col gap-4">
+        <div>
+          <h3 className="font-medium">Mensagens</h3>
+          <p className="text-sm text-muted-foreground">
+            A mesma mensagem vai para todos os clientes — ninguém edita nada cliente a cliente. Os campos
+            entre chaves são preenchidos no envio. Vale da próxima rodada em diante: mensagem que já está
+            na fila não muda.
+          </p>
+        </div>
+        <ModeloMensagem
+          id="texto-envio"
+          titulo="Boleto (dia do envio)"
+          descricao="Vai junto com o PDF do boleto, uma por cota."
+          valor={form.textoEnvio}
+          campos={dados.mensagens.campos_envio}
+          padrao={dados.mensagens.padrao_envio}
+          max={dados.mensagens.max_caracteres}
+          desabilitado={!podeEditar}
+          aoMudar={(texto) => mudar({ textoEnvio: texto })}
+        />
+        <ModeloMensagem
+          id="texto-cobranca"
+          titulo="Cobrança (dias depois)"
+          descricao="Vai para quem continua com a parcela em aberto, uma por cliente, sem anexo."
+          valor={form.textoCobranca}
+          campos={dados.mensagens.campos_cobranca}
+          padrao={dados.mensagens.padrao_cobranca}
+          max={dados.mensagens.max_caracteres}
+          desabilitado={!podeEditar}
+          aoMudar={(texto) => mudar({ textoCobranca: texto })}
+        />
+      </div>
+
       {dados.fila.pendentes + dados.fila.falharam > 0 && (
         <p className="text-sm text-muted-foreground">
           Fila do WhatsApp: {dados.fila.pendentes} esperando, {dados.fila.falharam} sem entregar.
@@ -425,4 +468,102 @@ function Configuracao({
       )}
     </Secao>
   );
+}
+
+/**
+ * Uma caixa de texto com a lista dos campos e a prévia do que o cliente vai receber.
+ *
+ * A prévia usa os exemplos que a API manda e segue a mesma regra do servidor: um pedaço da
+ * linha que depende de um campo vazio some junto com o separador " · ". Quem valida de verdade
+ * é a API — aqui é só para ninguém salvar às cegas.
+ */
+function ModeloMensagem({
+  id,
+  titulo,
+  descricao,
+  valor,
+  campos,
+  padrao,
+  max,
+  desabilitado,
+  aoMudar,
+}: {
+  id: string;
+  titulo: string;
+  descricao: string;
+  valor: string;
+  campos: CampoMensagem[];
+  padrao: string;
+  max: number;
+  desabilitado: boolean;
+  aoMudar: (texto: string) => void;
+}) {
+  const previa = renderizarPrevia(valor, campos);
+  return (
+    <div className="flex flex-col gap-3 rounded-lg border p-4">
+      <div className="flex flex-wrap items-start justify-between gap-2">
+        <div>
+          <Label htmlFor={id} className="text-base font-medium">
+            {titulo}
+          </Label>
+          <p className="mt-0.5 text-sm text-muted-foreground">{descricao}</p>
+        </div>
+        {!desabilitado && (
+          <Button type="button" variant="ghost" size="sm" disabled={valor === padrao} onClick={() => aoMudar(padrao)}>
+            Voltar ao texto padrão
+          </Button>
+        )}
+      </div>
+
+      <Textarea
+        id={id}
+        rows={9}
+        maxLength={max}
+        value={valor}
+        disabled={desabilitado}
+        onChange={(e) => aoMudar(e.target.value)}
+      />
+
+      <div className="flex flex-col gap-2">
+        <p className="text-xs text-muted-foreground">
+          {valor.length}/{max} caracteres · campos desta mensagem:
+        </p>
+        <ul className="flex flex-wrap gap-x-4 gap-y-1">
+          {campos.map((c) => (
+            <li key={c.nome} className="text-xs text-muted-foreground">
+              <code className="font-mono text-foreground">{`{${c.nome}}`}</code> {c.descricao}
+            </li>
+          ))}
+        </ul>
+      </div>
+
+      <div>
+        <p className="text-xs text-muted-foreground">Prévia, com dados de exemplo</p>
+        <p className="mt-1 rounded-lg bg-muted/40 p-3 text-sm whitespace-pre-wrap">{previa}</p>
+      </div>
+    </div>
+  );
+}
+
+/** Mesma regra do servidor (api/internal/mensagem): campo vazio leva o pedaço e o separador. */
+function renderizarPrevia(modelo: string, campos: CampoMensagem[]): string {
+  const exemplos = new Map(campos.map((c) => [c.nome, c.exemplo]));
+  const linhas: string[] = [];
+  for (const linha of modelo.split("\n")) {
+    const pedacos = linha.split("·");
+    const mantidos: string[] = [];
+    for (const pedaco of pedacos) {
+      let vazio = false;
+      const texto = pedaco.replace(/\{([^{}]*)\}/g, (achado, nome: string) => {
+        const exemplo = exemplos.get(nome.trim());
+        if (exemplo === undefined) return achado;
+        if (exemplo.trim() === "") vazio = true;
+        return exemplo;
+      });
+      if (!vazio) mantidos.push(texto.trim());
+    }
+    if (pedacos.length > 0 && mantidos.length === 0) continue;
+    linhas.push(mantidos.join(" · "));
+  }
+  return linhas.join("\n").replace(/\n{3,}/g, "\n\n").trim();
 }

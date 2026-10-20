@@ -237,7 +237,8 @@ WHERE id = @id AND worker = @worker AND status = 'em_andamento';
 -- name: ConfiguracaoBoletos :one
 SELECT c.id, c.agendamento_ativo, c.dia_envio, c.hora_envio, c.dia_cobranca, c.hora_cobranca,
        c.antecipar_dia_util, c.envio_habilitado, c.envio_habilitado_por, c.pausa_envio_segundos,
-       c.max_mensagens_rodada, c.ultimo_envio_dia, c.ultimo_envio_em, c.ultimo_envio_resultado,
+       c.max_mensagens_rodada, c.texto_envio, c.texto_cobranca,
+       c.ultimo_envio_dia, c.ultimo_envio_em, c.ultimo_envio_resultado,
        c.ultima_cobranca_dia, c.ultima_cobranca_em, c.ultima_cobranca_resultado,
        c.atualizado_por, c.atualizado_em,
        u.nome AS atualizado_por_nome, ue.nome AS envio_habilitado_por_nome
@@ -264,6 +265,8 @@ SET agendamento_ativo    = @agendamento_ativo,
                                 ELSE envio_habilitado_por END,
     pausa_envio_segundos = @pausa_envio_segundos,
     max_mensagens_rodada = @max_mensagens_rodada,
+    texto_envio          = @texto_envio,
+    texto_cobranca       = @texto_cobranca,
     atualizado_por       = sqlc.narg(atualizado_por),
     atualizado_em        = now()
 WHERE id;

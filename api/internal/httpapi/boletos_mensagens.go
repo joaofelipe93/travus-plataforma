@@ -37,6 +37,10 @@ type ConfigBoletos struct {
 	EnvioHabilitadoPor   *int64
 	PausaEnvio           time.Duration
 	MaxMensagensRodada   int
+	// Modelos das mensagens (migração 00019): uma mensagem só para todos, com os campos entre
+	// chaves preenchidos no envio. Ver api/internal/mensagem.
+	TextoEnvio    string
+	TextoCobranca string
 	UltimoEnvioDia       *time.Time
 	UltimaCobrancaDia    *time.Time
 	AtualizadoPorNome    string
@@ -49,6 +53,7 @@ func padroesBoletos() ConfigBoletos {
 	return ConfigBoletos{
 		DiaEnvio: 8, HoraEnvio: 9, DiaCobranca: 14, HoraCobranca: 9,
 		AnteciparDiaUtil: true, PausaEnvio: 20 * time.Second, MaxMensagensRodada: 200,
+		TextoEnvio: mensagem.PadraoEnvio, TextoCobranca: mensagem.PadraoCobranca,
 	}
 }
 
@@ -83,6 +88,8 @@ func configBoletosDaLinha(l db.ConfiguracaoBoletosRow) ConfigBoletos {
 		EnvioHabilitadoPor:   l.EnvioHabilitadoPor,
 		PausaEnvio:           time.Duration(l.PausaEnvioSegundos) * time.Second,
 		MaxMensagensRodada:   int(l.MaxMensagensRodada),
+		TextoEnvio:           l.TextoEnvio,
+		TextoCobranca:        l.TextoCobranca,
 		UltimoEnvioDia:       l.UltimoEnvioDia,
 		UltimaCobrancaDia:    l.UltimaCobrancaDia,
 		AtualizadoPorNome:    valorOuVazio(l.AtualizadoPorNome),
@@ -155,7 +162,7 @@ func (s *Servidor) montarMensagens(ctx context.Context, qtx *db.Queries, rodadaI
 				aviso("%s: a parcela %s da cota %s-%s está sem PDF e não vai por WhatsApp.", l.ClienteNome, l.Parcela, l.Grupo, l.Cota)
 				continue
 			}
-			texto := mensagem.Envio(mensagem.Boleto{
+			texto := mensagem.Envio(cfg.TextoEnvio, mensagem.Boleto{
 				Nome: l.ClienteNome, Grupo: l.Grupo, Cota: l.Cota, Parcela: l.Parcela,
 				Vencimento: l.Vencimento, Centavos: l.ValorCentavos,
 			})
@@ -184,7 +191,7 @@ func (s *Servidor) montarMensagens(ctx context.Context, qtx *db.Queries, rodadaI
 			if err := enfileirar(db.CriarMensagemBoletoParams{
 				RodadaID: &rodadaID, RodadaClienteID: &clienteID, Tipo: "cobranca",
 				DestinoTelefone: telefone, DestinoNome: l.ClienteNome,
-				Texto: mensagem.Cobranca(l.ClienteNome),
+				Texto: mensagem.Cobranca(cfg.TextoCobranca, l.ClienteNome),
 			}); err != nil {
 				return r, err
 			}
