@@ -63,6 +63,25 @@ export function cotaPreenchida(c: CotaFormulario) {
   return c.grupo.trim() !== "" && c.cota.trim() !== "";
 }
 
+/**
+ * Alguém começou a preencher esta cota? O cadastro de cliente novo mostra um bloco de cota em
+ * branco, e um bloco intocado é ignorado no envio — por isso ele também não pode ser cobrado
+ * pelo navegador, senão não dá para cadastrar cliente sem cota.
+ */
+export function cotaIniciada(c: CotaFormulario) {
+  return (
+    c.grupo.trim() !== "" ||
+    c.cota.trim() !== "" ||
+    c.versao.trim() !== "" ||
+    c.tipo_consorcio.trim() !== "" ||
+    c.vendedor.trim() !== "" ||
+    c.forma_pagamento.trim() !== "" ||
+    c.contratacao.trim() !== "" ||
+    c.vencimento_parcela !== null ||
+    c.dia_assembleia !== null
+  );
+}
+
 type Campo = { id: string; rotulo: string; dica?: string };
 
 function Campo({ id, rotulo, dica, children }: Campo & { children: React.ReactNode }) {
@@ -141,6 +160,7 @@ export function CamposCota({
   aoMudar,
   prefixo,
   travarIdentidade = false,
+  exigirIdentidade = true,
   colunas = 4,
 }: {
   valor: CotaFormulario;
@@ -148,6 +168,8 @@ export function CamposCota({
   prefixo: string;
   /** Cota com lance ou execução: a API recusa mudar administradora, grupo, cota e versão. */
   travarIdentidade?: boolean;
+  /** false num bloco de cota em branco que o envio vai ignorar (ver cotaIniciada). */
+  exigirIdentidade?: boolean;
   /** 2 no painel lateral, 4 numa página larga. */
   colunas?: 2 | 4;
 }) {
@@ -157,7 +179,7 @@ export function CamposCota({
       <Campo id={`${prefixo}-grupo`} rotulo="Grupo" dica="Só números; os zeros à esquerda entram sozinhos.">
         <Input
           id={`${prefixo}-grupo`}
-          required
+          required={exigirIdentidade}
           inputMode="numeric"
           disabled={travarIdentidade}
           value={valor.grupo}
@@ -167,7 +189,7 @@ export function CamposCota({
       <Campo id={`${prefixo}-cota`} rotulo="Cota">
         <Input
           id={`${prefixo}-cota`}
-          required
+          required={exigirIdentidade}
           inputMode="numeric"
           disabled={travarIdentidade}
           value={valor.cota}
