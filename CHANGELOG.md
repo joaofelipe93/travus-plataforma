@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.16.1](https://github.com/joaofelipe93/travus-plataforma/compare/v0.16.0...v0.16.1) (2026-10-20)
+
+
+### Correções
+
+* **boletos:** a mensagem de teste do WhatsApp sai em modo ensaio ([#92](https://github.com/joaofelipe93/travus-plataforma/issues/92)) ([8f371ba](https://github.com/joaofelipe93/travus-plataforma/commit/8f371ba0f42c8dff30d3838cfdc0a4736b0c02f3))
+
 ## [0.16.0](https://github.com/joaofelipe93/travus-plataforma/compare/v0.15.0...v0.16.0) (2026-10-20)
 
 
