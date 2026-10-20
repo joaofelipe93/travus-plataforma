@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.18.0](https://github.com/joaofelipe93/travus-plataforma/compare/v0.17.0...v0.18.0) (2026-10-20)
+
+
+### Novidades
+
+* **web:** painel, configurações e conexões em cada serviço ([#96](https://github.com/joaofelipe93/travus-plataforma/issues/96)) ([793186a](https://github.com/joaofelipe93/travus-plataforma/commit/793186a10d48d02821d3eca6955d267e5b57e777))
+
 ## [0.17.0](https://github.com/joaofelipe93/travus-plataforma/compare/v0.16.1...v0.17.0) (2026-10-20)
 
 
