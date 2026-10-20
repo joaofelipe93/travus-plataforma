@@ -86,7 +86,7 @@ function WhatsappBoletos() {
     mutationFn: () => api<{ enfileirada: number }>("/integracoes/whatsapp-boletos/teste", { metodo: "POST", json: { telefone } }),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["whatsapp-boletos"] });
-      toast.success("Mensagem de teste na fila");
+      toast.success("Mensagem de teste na fila: deve chegar em alguns segundos");
     },
     onError: (e) => toast.error(e.message),
   });
@@ -188,7 +188,8 @@ function WhatsappBoletos() {
             <div>
               <h2 className="font-heading font-semibold">Situação do envio</h2>
               <p className="text-sm text-muted-foreground">
-                Três chaves precisam estar ligadas para uma mensagem sair.
+                Três chaves precisam estar ligadas para um boleto sair. A mensagem de teste aqui embaixo não
+                depende delas: basta o número estar conectado.
               </p>
             </div>
             <ul className="flex flex-col gap-1 text-sm">
@@ -219,8 +220,8 @@ function WhatsappBoletos() {
             <div>
               <h2 className="font-heading font-semibold">Mensagem de teste</h2>
               <p className="text-sm text-muted-foreground">
-                Vai para um número de verdade (use o seu). Entra na mesma fila do envio, então respeita a
-                pausa e as chaves acima.
+                Vai para um número de verdade (use o seu). Sai mesmo em modo ensaio — é com ela que se
+                confere o pareamento —, mas passa pela fila: chega em alguns segundos.
               </p>
             </div>
             <div className="flex flex-wrap items-end gap-2">

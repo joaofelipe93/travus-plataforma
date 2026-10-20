@@ -47,16 +47,20 @@ export async function configuracaoEnvio(): Promise<ConfiguracaoEnvio> {
 /**
  * Pendentes na hora de envio, em ordem. Sem trava: existe um processo só (uma sessão do
  * Baileys), e o laço não sobrepõe ciclos.
+ *
+ * `apenasTeste` é o modo ensaio: nenhum boleto sai, mas a mensagem de teste continua saindo —
+ * ela é o que responde "este número está pareado?", e vai para um telefone que o admin digitou.
  */
-export async function pendentes(limite: number): Promise<MensagemFila[]> {
+export async function pendentes(limite: number, apenasTeste = false): Promise<MensagemFila[]> {
   const { rows } = await pool.query<MensagemFila>(
     `SELECT id, rodada_id, tipo, parcela_id, destino_telefone, destino_nome, texto,
             anexo_pdf, anexo_nome, status, tentativas, proxima_tentativa_em, criada_em
      FROM boletos.mensagens
      WHERE status = 'pendente' AND proxima_tentativa_em <= now()
+       AND ($2::boolean IS NOT TRUE OR tipo = 'teste')
      ORDER BY id ASC
      LIMIT $1`,
-    [limite],
+    [limite, apenasTeste],
   )
   return rows
 }

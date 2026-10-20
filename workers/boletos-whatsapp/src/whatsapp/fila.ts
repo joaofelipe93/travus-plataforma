@@ -124,13 +124,18 @@ async function ciclo(carteiro: Carteiro = carteiroPadrao) {
 
     // Freio de mão do próprio serviço: a plataforma só põe na fila o que está liberado, mas se
     // o envio for desligado na tela no meio de uma rodada, o que já está na fila para aqui.
+    //
+    // A mensagem de TESTE é a exceção, e por um bom motivo: ela existe para responder "este
+    // número está pareado?", vai para um telefone que o admin acabou de digitar (não para um
+    // cliente) e é justamente em modo ensaio que alguém precisa conferir o pareamento. Antes
+    // ela ficava presa na fila para sempre e a tela dizia que tinha dado certo.
     const cfg = await configuracaoEnvio()
-    if (!cfg.envio_habilitado) {
+    const soTestes = !cfg.envio_habilitado
+    if (soTestes) {
       const fila = await contarPendentes()
       if (fila > 0) {
-        log.warn({ fila }, 'envio desligado na configuração — a fila espera')
+        log.warn({ fila }, 'envio desligado na configuração — só a mensagem de teste sai; o resto espera')
       }
-      return
     }
 
     for (const id of enviadasSemRegistro) {
@@ -139,7 +144,7 @@ async function ciclo(carteiro: Carteiro = carteiroPadrao) {
       log.info({ mensagem: id }, 'envio registrado depois da falha no banco')
     }
 
-    const lote = await pendentes(env.LOTE)
+    const lote = await pendentes(env.LOTE, soTestes)
     for (const [i, m] of lote.entries()) {
       if (i > 0) await esperar(cfg.pausa_envio_segundos * 1000)
       if (!carteiro.conectado()) break
