@@ -6,7 +6,7 @@ Roteiro para colocar a Travus Plataforma numa VM e mantê-la. Decisões do usuá
 - **Domínio**: a definir (`app.<domínio>` e `api.<domínio>`).
 - **Backup do Postgres**: na própria VM, com cópia manual para fora (`make backup-baixar`).
 - **Alertas**: e-mail (vigia da API) + monitor externo.
-- **Notificador de check-in (WhatsApp)**: sai da VM `appairbnb` e passa a rodar nesta VM, com fila e eventos no mesmo Postgres. O número é **pareado de novo** pela tela WhatsApp (sem copiar a sessão nem o histórico da `appairbnb`). Roteiro na seção 9.
+- **Notificador de check-in (WhatsApp)**: sai da VM `appairbnb` e passa a rodar nesta VM, com fila e eventos no mesmo Postgres. O número é **pareado de novo** pela tela Reservas → Conexões (sem copiar a sessão nem o histórico da `appairbnb`). Roteiro na seção 9.
 
 Nada disso roda sem pedido: criar a VM, mexer no DNS, publicar e ligar o lance real são decisões do usuário, na hora.
 
@@ -152,16 +152,16 @@ O notificador (`workers/checkin-whatsapp`) sobe junto com a plataforma, desde o 
 
 Só com o ok do usuário, com a plataforma já no ar pela seção 5 e um usuário admin criado.
 
-1. **Parear** (admin, pela tela): `https://app.<domínio>/reservas/whatsapp` (Reservas → WhatsApp) → aparece o QR. No celular do **chip dedicado** (o mesmo da `appairbnb`): WhatsApp → Configurações → Dispositivos conectados → Conectar dispositivo → escaneie. A tela mostra "conectado como +55 …". O aparelho novo aparece no celular como **Travus Plataforma**; o da `appairbnb` continua lá como **Check-in Notifier** (cada um tem a própria sessão, os dois funcionam ao mesmo tempo).
-2. **Grupo**: "Escolher grupo" → o mesmo grupo que recebe as notificações hoje → "Usar este grupo". Se ele não aparece na lista, o número não participa do grupo.
-3. **Teste**: "Enviar mensagem de teste" (todos do grupo recebem; avise antes).
+1. **Parear** (admin, pela tela): `https://app.<domínio>/reservas/conexoes` (Reservas → Conexões) → aparece o QR. No celular do **chip dedicado** (o mesmo da `appairbnb`): WhatsApp → Configurações → Dispositivos conectados → Conectar dispositivo → escaneie. A tela mostra "conectado como +55 …". O aparelho novo aparece no celular como **Travus Plataforma**; o da `appairbnb` continua lá como **Check-in Notifier** (cada um tem a própria sessão, os dois funcionam ao mesmo tempo).
+2. **Grupo** (em Reservas → Configurações): "Escolher grupo" → o mesmo grupo que recebe as notificações hoje → "Usar este grupo". Se ele não aparece na lista, o número não participa do grupo.
+3. **Teste** (em Conexões): "Enviar mensagem de teste" (todos do grupo recebem; avise antes).
 4. **Token do webhook** (novo, diferente do da `appairbnb`):
    ```bash
    ssh travus@<ip> 'grep ^CHECKIN_WEBHOOK_SECRET= /opt/travus/compartilhado/.env'
    ```
 5. **Trocar no PMS** (usuário): URL do webhook `https://api.<domínio>/webhooks/nova-reserva`, cabeçalho `x-webhook-token: <token do passo 4>` (ou `Authorization: Bearer <token>`), o mesmo formato de hoje. Só `POST` nessa rota chega ao notificador.
    - **Não reprocesse reservas antigas no PMS logo depois da troca**: o banco novo não conhece as que a `appairbnb` já notificou e mandaria de novo ao grupo.
-6. **Conferir** na próxima reserva ou cancelamento real: a mensagem chega **uma vez** no grupo e a tela WhatsApp mostra "Enviadas: 1". Se algo der errado, volte a URL e o token antigos no PMS: a `appairbnb` ainda está de pé.
+6. **Conferir** na próxima reserva ou cancelamento real: a mensagem chega **uma vez** no grupo e a tela Conexões mostra "Enviadas: 1". Se algo der errado, volte a URL e o token antigos no PMS: a `appairbnb` ainda está de pé.
 7. **Desligar a `appairbnb`** (usuário, depois de alguns dias sem problema): pare o notificador antigo na `appairbnb` (instalada pelo `bootstrap-vps.sh` do projeto airbnb: `sudo -iu checkin pm2 stop checkin-notifier && sudo -iu checkin pm2 save`) e, no celular, em Dispositivos conectados, **remova o "Check-in Notifier"** (nunca o "Travus Plataforma"). Destruir a VM é decisão sua, depois; o `data/` dela tem o histórico antigo de reservas.
 
 Depois da migração:
@@ -203,7 +203,7 @@ Para revogar a chave: apague a linha `restrict,command="/opt/travus/bin/entrada-
 | Publicar | merge do PR de versão → aprovar o job Produção no GitHub (seção 10). Plano B: `make deploy VM=travus@<ip>` |
 | Voltar uma versão | workflow **Voltar versão** no GitHub, ou `make deploy-voltar VM=travus@<ip>`. **Migrações não são desfeitas** (backup antes de cada deploy em `backups/antes-do-deploy`) |
 | Logs | `ssh -t travus@<ip> 'cd /opt/travus/atual && make logs s=api'` (api, worker-canopus, checkin-whatsapp, traefik, backup…) |
-| WhatsApp do notificador | tela `https://app.<domínio>/reservas/whatsapp` (só admin): conexão, QR, grupo, teste, fila |
+| WhatsApp do notificador | telas `https://app.<domínio>/reservas/conexoes` (conexão, QR, teste, fila) e `/reservas/configuracao` (grupo), só admin |
 | Estado | `ssh travus@<ip> 'cd /opt/travus/atual && make ps'` |
 | Cópia do backup | `make backup-baixar VM=travus@<ip>` (semanal; vai para `deploy/backups/`, fora do git; tem dados de clientes) |
 | Testar a restauração | `ssh -t travus@<ip> 'cd /opt/travus/atual && make restaurar-teste'` (mensal) |
