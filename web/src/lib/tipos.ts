@@ -423,6 +423,20 @@ export type RespostaConfiguracaoCanopus = {
   lance_real_habilitado: boolean;
 };
 
+// Conta do Google que recebe os comprovantes de lance (GET /integracoes/google-drive, só admin).
+// O token fica cifrado no banco e é importado no servidor (make google-token): aqui só se sabe
+// se ele existe e de quando é.
+export type SituacaoGoogleDrive = {
+  lance_real_habilitado: boolean;
+  // Sem CHAVE_CRIPTOGRAFIA na API o token não decifra: não há envio ao Drive.
+  cofre_configurado: boolean;
+  client_configurado: boolean;
+  pasta_configurada: boolean;
+  pasta_origem: "configuracao" | "ambiente" | "nenhuma";
+  token_importado: boolean;
+  token_atualizado_em: string | null;
+};
+
 
 // ===== Serviço de boletos da Canopus (issue #48) =====
 

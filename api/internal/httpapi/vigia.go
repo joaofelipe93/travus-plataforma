@@ -187,7 +187,7 @@ func (s *Servidor) verificarCheckin(ctx context.Context, agora time.Time, bancoO
 		return nil
 	}
 	var out []achado
-	tela := s.cfg.AppOrigin + "/reservas/whatsapp"
+	tela := s.cfg.AppOrigin + "/reservas/conexoes"
 
 	ctxStatus, cancel := context.WithTimeout(ctx, 15*time.Second)
 	st, err := s.cfg.Checkin.Status(ctxStatus)
