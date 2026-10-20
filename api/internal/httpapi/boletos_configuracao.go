@@ -9,10 +9,12 @@ package httpapi
 
 import (
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/joaofelipe93/travus-plataforma/api/internal/calendario"
 	"github.com/joaofelipe93/travus-plataforma/api/internal/db"
+	"github.com/joaofelipe93/travus-plataforma/api/internal/mensagem"
 )
 
 type pedidoConfigBoletos struct {
@@ -25,18 +27,23 @@ type pedidoConfigBoletos struct {
 	EnvioHabilitado    *bool `json:"envio_habilitado"`
 	PausaEnvioSegundos *int  `json:"pausa_envio_segundos"`
 	MaxMensagensRodada *int  `json:"max_mensagens_rodada"`
+	// Modelos das mensagens: a mesma para todos, com os campos entre chaves.
+	TextoEnvio    *string `json:"texto_envio"`
+	TextoCobranca *string `json:"texto_cobranca"`
 }
 
 type configBoletosJSON struct {
-	AgendamentoAtivo   bool `json:"agendamento_ativo"`
-	DiaEnvio           int  `json:"dia_envio"`
-	HoraEnvio          int  `json:"hora_envio"`
-	DiaCobranca        int  `json:"dia_cobranca"`
-	HoraCobranca       int  `json:"hora_cobranca"`
-	AnteciparDiaUtil   bool `json:"antecipar_dia_util"`
-	EnvioHabilitado    bool `json:"envio_habilitado"`
-	PausaEnvioSegundos int  `json:"pausa_envio_segundos"`
-	MaxMensagensRodada int  `json:"max_mensagens_rodada"`
+	AgendamentoAtivo   bool   `json:"agendamento_ativo"`
+	DiaEnvio           int    `json:"dia_envio"`
+	HoraEnvio          int    `json:"hora_envio"`
+	DiaCobranca        int    `json:"dia_cobranca"`
+	HoraCobranca       int    `json:"hora_cobranca"`
+	AnteciparDiaUtil   bool   `json:"antecipar_dia_util"`
+	EnvioHabilitado    bool   `json:"envio_habilitado"`
+	PausaEnvioSegundos int    `json:"pausa_envio_segundos"`
+	MaxMensagensRodada int    `json:"max_mensagens_rodada"`
+	TextoEnvio         string `json:"texto_envio"`
+	TextoCobranca      string `json:"texto_cobranca"`
 	// Nomes de quem mexeu, para a tela não precisar buscar usuário.
 	EnvioHabilitadoPorNome string    `json:"envio_habilitado_por_nome"`
 	AtualizadoPorNome      string    `json:"atualizado_por_nome"`
@@ -64,6 +71,14 @@ func (s *Servidor) configuracaoBoletos(w http.ResponseWriter, r *http.Request, u
 		"pode_ligar_envio": u.Perfil == db.PerfilUsuarioAdmin,
 		// Chave do servidor: desligada, nada sai nem com a opção ligada.
 		"envio_habilitado_servidor": s.cfg.BoletosEnvioHabilitado,
+		// O que a tela precisa para montar a ajuda dos campos, a prévia e o "voltar ao padrão".
+		"mensagens": map[string]any{
+			"campos_envio":    mensagem.CamposEnvio,
+			"campos_cobranca": mensagem.CamposCobranca,
+			"padrao_envio":    mensagem.PadraoEnvio,
+			"padrao_cobranca": mensagem.PadraoCobranca,
+			"max_caracteres":  mensagem.MaxTexto,
+		},
 		"fila": map[string]any{
 			"pendentes": fila.Pendentes, "falharam": fila.Falharam, "proxima": fila.Proxima,
 		},
@@ -80,6 +95,7 @@ func (s *Servidor) configBoletosParaJSON(c ConfigBoletos) configBoletosJSON {
 		DiaCobranca: c.DiaCobranca, HoraCobranca: c.HoraCobranca,
 		AnteciparDiaUtil: c.AnteciparDiaUtil, EnvioHabilitado: c.EnvioHabilitado,
 		PausaEnvioSegundos: int(c.PausaEnvio / time.Second), MaxMensagensRodada: c.MaxMensagensRodada,
+		TextoEnvio: c.TextoEnvio, TextoCobranca: c.TextoCobranca,
 		EnvioHabilitadoPorNome: c.EnvioHabilitadoPorNm, AtualizadoPorNome: c.AtualizadoPorNome,
 		AtualizadoEm: c.AtualizadoEm,
 	}
@@ -138,7 +154,8 @@ func (s *Servidor) atualizarConfiguracaoBoletos(w http.ResponseWriter, r *http.R
 	// Formulário inteiro: PUT parcial desligaria o que não veio.
 	faltando := p.AgendamentoAtivo == nil || p.DiaEnvio == nil || p.HoraEnvio == nil ||
 		p.DiaCobranca == nil || p.HoraCobranca == nil || p.AnteciparDiaUtil == nil ||
-		p.EnvioHabilitado == nil || p.PausaEnvioSegundos == nil || p.MaxMensagensRodada == nil
+		p.EnvioHabilitado == nil || p.PausaEnvioSegundos == nil || p.MaxMensagensRodada == nil ||
+		p.TextoEnvio == nil || p.TextoCobranca == nil
 	if faltando {
 		responderErro(w, http.StatusBadRequest, "mande a configuração inteira: um PUT parcial desligaria o que não veio")
 		return
@@ -162,6 +179,15 @@ func (s *Servidor) atualizarConfiguracaoBoletos(w http.ResponseWriter, r *http.R
 	}
 	if *p.MaxMensagensRodada < 1 || *p.MaxMensagensRodada > 5000 {
 		responderErro(w, http.StatusBadRequest, "o teto de mensagens por rodada precisa ficar entre 1 e 5000")
+		return
+	}
+	// O texto chega a um cliente: campo inventado ({nmoe}) é recusado aqui, não descoberto lá.
+	if err := mensagem.Validar(*p.TextoEnvio, mensagem.CamposEnvio); err != nil {
+		responderErro(w, http.StatusBadRequest, "mensagem do boleto: "+err.Error())
+		return
+	}
+	if err := mensagem.Validar(*p.TextoCobranca, mensagem.CamposCobranca); err != nil {
+		responderErro(w, http.StatusBadRequest, "mensagem da cobrança: "+err.Error())
 		return
 	}
 
@@ -191,6 +217,8 @@ func (s *Servidor) atualizarConfiguracaoBoletos(w http.ResponseWriter, r *http.R
 		EnvioHabilitadoPor: &u.ID,
 		PausaEnvioSegundos: int16(*p.PausaEnvioSegundos),
 		MaxMensagensRodada: int32(*p.MaxMensagensRodada),
+		TextoEnvio:         strings.TrimSpace(*p.TextoEnvio),
+		TextoCobranca:      strings.TrimSpace(*p.TextoCobranca),
 		AtualizadoPor:      &u.ID,
 	}); err != nil {
 		erroInterno(w, r, err)
@@ -209,6 +237,14 @@ func (s *Servidor) atualizarConfiguracaoBoletos(w http.ResponseWriter, r *http.R
 	}
 	if *p.DiaCobranca != atual.DiaCobranca || *p.HoraCobranca != atual.HoraCobranca {
 		mudou["cobranca"] = map[string]int{"dia": *p.DiaCobranca, "hora": *p.HoraCobranca}
+	}
+	// O texto inteiro não vai para a auditoria (é longo e aparece na rodada): fica o aviso de
+	// que alguém mexeu na mensagem que chega ao cliente.
+	if strings.TrimSpace(*p.TextoEnvio) != atual.TextoEnvio {
+		mudou["texto_envio"] = "alterado"
+	}
+	if strings.TrimSpace(*p.TextoCobranca) != atual.TextoCobranca {
+		mudou["texto_cobranca"] = "alterado"
 	}
 	s.auditar(ctx, r, &u.ID, "boletos_configuracao_atualizada", "boletos_configuracao", "1", mudou)
 

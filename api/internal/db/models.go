@@ -106,6 +106,8 @@ type BoletosConfiguracao struct {
 	UltimaCobrancaResultado *string
 	AtualizadoPor           *int64
 	AtualizadoEm            time.Time
+	TextoEnvio              string
+	TextoCobranca           string
 }
 
 type BoletosEvento struct {
