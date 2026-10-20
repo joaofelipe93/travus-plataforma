@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.16.0](https://github.com/joaofelipe93/travus-plataforma/compare/v0.15.0...v0.16.0) (2026-10-20)
+
+
+### Novidades
+
+* **web:** escolher os serviços do cliente no cadastro ([#90](https://github.com/joaofelipe93/travus-plataforma/issues/90)) ([40b0d6e](https://github.com/joaofelipe93/travus-plataforma/commit/40b0d6e200519b1b253c32474cdd311adfc98528))
+
 ## [0.15.0](https://github.com/joaofelipe93/travus-plataforma/compare/v0.14.0...v0.15.0) (2026-10-17)
 
 
