@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.17.0](https://github.com/joaofelipe93/travus-plataforma/compare/v0.16.1...v0.17.0) (2026-10-20)
+
+
+### Novidades
+
+* **boletos:** texto do boleto e da cobrança configurável na tela ([#94](https://github.com/joaofelipe93/travus-plataforma/issues/94)) ([aa70e75](https://github.com/joaofelipe93/travus-plataforma/commit/aa70e7507c39010812239af317f1040cf1009aee))
+
 ## [0.16.1](https://github.com/joaofelipe93/travus-plataforma/compare/v0.16.0...v0.16.1) (2026-10-20)
 
 
