@@ -13,6 +13,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/joaofelipe93/travus-plataforma/api/internal/assistente"
 	"github.com/joaofelipe93/travus-plataforma/api/internal/boletoswa"
 	"github.com/joaofelipe93/travus-plataforma/api/internal/checkin"
 	"github.com/joaofelipe93/travus-plataforma/api/internal/cripto"
@@ -66,6 +67,13 @@ type Config struct {
 	BoletosWhatsapp *boletoswa.Cliente
 	// Assistente da tela inicial (assistente.go).
 	Assistente ConfigAssistente
+
+	// Atendimento (atendimento_agente.go, issue #100). Cada bot escolhe o modelo dele, então
+	// aqui vai uma fábrica em vez de um modelo pronto; nil (sem ANTHROPIC_API_KEY) deixa o
+	// serviço indisponível. `AtendimentoEnvioHabilitado` é a chave mestra do servidor: sem ela
+	// a resposta é composta e gravada, e nada sai (ensaio).
+	ModeloAtendimento          func(nome string) assistente.Modelo
+	AtendimentoEnvioHabilitado bool
 	// Versão publicada (version.txt) e commit, mostrados no /health.
 	Versao string
 	Commit string

@@ -65,6 +65,8 @@ func (s *Servidor) RotasInternas() http.Handler {
 	mux.HandleFunc("POST /internal/execucao-cotas/{id}/concluir-reimpressao", s.concluirReimpressao)
 	// Serviço de boletos (interno_boletos.go): outro worker, o mesmo token de serviço.
 	s.rotasInternasBoletos(mux)
+	// Serviço de Atendimento (interno_atendimento.go): o worker do WhatsApp dos bots.
+	s.rotasInternasAtendimento(mux)
 	return recuperar(s.exigirTokenWorker(mux))
 }
 

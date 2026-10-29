@@ -51,3 +51,15 @@ func assistenteDoAmbiente(ctx context.Context, principal *pgxpool.Config) (httpa
 	cfg.Consultor = &assistente.Consultor{Pool: pool}
 	return cfg, nil
 }
+
+// modeloAtendimentoDoAmbiente devolve a fábrica de modelo dos bots do serviço de Atendimento
+// (issue #100). A chave é a MESMA do assistente — decisão do usuário em 29/10/2026: uma chave da
+// plataforma, com o modelo escolhido por bot na tela. Sem a chave devolve nil, e a API responde
+// que o serviço está indisponível em vez de falhar na cara de um cliente no WhatsApp.
+func modeloAtendimentoDoAmbiente() func(string) assistente.Modelo {
+	chave := os.Getenv("ANTHROPIC_API_KEY")
+	if chave == "" {
+		return nil
+	}
+	return func(nome string) assistente.Modelo { return assistente.NovoModeloAnthropic(chave, nome) }
+}

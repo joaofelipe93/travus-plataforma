@@ -122,8 +122,12 @@ func serve() error {
 		BoletosEnvioHabilitado: os.Getenv("BOLETOS_ENVIO_HABILITADO") == "true",
 		// Serviço que manda os boletos no WhatsApp dos clientes (workers/boletos-whatsapp).
 		BoletosWhatsapp: boletoswa.NovoCliente(os.Getenv("BOLETOS_WHATSAPP_URL"), os.Getenv("BOLETOS_ADMIN_TOKEN")),
-		ValidadeDryRun:  2 * time.Hour,
-		Cofre:           cofre,
+		// Serviço de Atendimento (issue #100): a fábrica de modelo por bot e a chave mestra do
+		// envio. Desligada, o bot compõe a resposta e nada sai (ensaio).
+		ModeloAtendimento:          modeloAtendimentoDoAmbiente(),
+		AtendimentoEnvioHabilitado: os.Getenv("ATENDIMENTO_ENVIO_HABILITADO") == "true",
+		ValidadeDryRun:             2 * time.Hour,
+		Cofre:                      cofre,
 		Google: httpapi.ConfigGoogle{
 			ClientID:     os.Getenv("GOOGLE_CLIENT_ID"),
 			ClientSecret: os.Getenv("GOOGLE_CLIENT_SECRET"),

@@ -79,3 +79,80 @@ DELETE FROM atendimento.etapas WHERE bot_id = @bot_id;
 INSERT INTO atendimento.etapas (bot_id, ordem, nome, objetivo, instrucoes, campos)
 VALUES (@bot_id, @ordem, @nome, @objetivo, sqlc.narg(instrucoes), @campos)
 RETURNING *;
+
+-- ===== Etapa B: a conversa =====
+-- O worker só transporta: quem abre conversa, chama o modelo, grava coleta e enfileira resposta
+-- é a API. Nenhuma destas consultas sabe que existe WhatsApp.
+
+-- Abre a conversa ou continua a que está aberta (o índice parcial garante uma por telefone em
+-- cada bot). O nome do contato é atualizado quando vem, e não se apaga quando não vem.
+-- name: AbrirOuContinuarConversa :one
+INSERT INTO atendimento.conversas (bot_id, telefone, contato_nome, etapa_id)
+VALUES (@bot_id, @telefone, sqlc.narg(contato_nome), sqlc.narg(etapa_id))
+ON CONFLICT (bot_id, telefone) WHERE status = 'aberta' DO UPDATE SET
+    contato_nome = coalesce(EXCLUDED.contato_nome, atendimento.conversas.contato_nome),
+    ultima_em    = now()
+RETURNING *;
+
+-- name: RegistrarMensagemRecebida :one
+INSERT INTO atendimento.mensagens (conversa_id, direcao, texto, status)
+VALUES (@conversa_id, 'recebida', @texto, 'recebida')
+RETURNING *;
+
+-- A resposta entra na fila como 'pendente'; em ensaio (ou barrada por teto) entra 'cancelada'
+-- com o motivo, e é assim que a tela mostra o que teria saído.
+-- name: EnfileirarResposta :one
+INSERT INTO atendimento.mensagens (conversa_id, direcao, texto, status, motivo)
+VALUES (@conversa_id, 'enviada', @texto, @status, sqlc.narg(motivo))
+RETURNING *;
+
+-- name: HistoricoDaConversa :many
+SELECT direcao, texto FROM atendimento.mensagens
+WHERE conversa_id = @conversa_id AND status <> 'cancelada'
+ORDER BY id DESC
+LIMIT @limite;
+
+-- name: SalvarColeta :exec
+INSERT INTO atendimento.coletas (conversa_id, etapa_id, campo, valor)
+VALUES (@conversa_id, sqlc.narg(etapa_id), @campo, @valor)
+ON CONFLICT (conversa_id, campo) DO UPDATE SET
+    valor = EXCLUDED.valor, etapa_id = EXCLUDED.etapa_id, atualizado_em = now();
+
+-- name: ColetasDaConversa :many
+SELECT campo, valor FROM atendimento.coletas WHERE conversa_id = @conversa_id ORDER BY campo;
+
+-- name: DefinirEtapaDaConversa :one
+UPDATE atendimento.conversas SET etapa_id = sqlc.narg(etapa_id), ultima_em = now()
+WHERE id = @id RETURNING *;
+
+-- name: EncerrarConversa :one
+UPDATE atendimento.conversas SET
+    status = @status, motivo = sqlc.narg(motivo), ultima_em = now(), encerrada_em = now()
+WHERE id = @id RETURNING *;
+
+-- O teto de tokens é por conversa: somado a cada resposta, é o que a próxima rodada compara.
+-- name: SomarTokensDaConversa :one
+UPDATE atendimento.conversas SET
+    tokens_entrada = tokens_entrada + @tokens_entrada,
+    tokens_saida   = tokens_saida + @tokens_saida,
+    ultima_em      = now()
+WHERE id = @id RETURNING tokens_entrada, tokens_saida;
+
+-- Teto de mensagens por hora, por bot: conta o que saiu e o que está na fila. Protege contra
+-- laço de resposta (o outro lado também é automático) e contra bloqueio do número.
+-- name: ContarRespostasDaHora :one
+SELECT count(*)::int FROM atendimento.mensagens m
+JOIN atendimento.conversas c ON c.id = m.conversa_id
+WHERE c.bot_id = @bot_id AND m.direcao = 'enviada'
+  AND m.status IN ('pendente', 'enviada')
+  AND m.criada_em > now() - interval '1 hour';
+
+-- name: PrimeiraEtapaDoBot :one
+SELECT * FROM atendimento.etapas WHERE bot_id = @bot_id ORDER BY ordem LIMIT 1;
+
+-- name: EtapaSeguinte :one
+SELECT * FROM atendimento.etapas
+WHERE bot_id = @bot_id AND ordem > @ordem ORDER BY ordem LIMIT 1;
+
+-- name: BuscarEtapa :one
+SELECT * FROM atendimento.etapas WHERE id = @id;
