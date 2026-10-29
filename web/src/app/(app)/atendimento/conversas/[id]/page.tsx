@@ -51,7 +51,7 @@ export default function PaginaConversa() {
     return <Skeleton className="h-96 w-full max-w-4xl" />;
   }
 
-  const { conversa: c, mensagens, dados } = consulta.data;
+  const { conversa: c, mensagens, dados, lead } = consulta.data;
   const naoSaiu = mensagens.filter((m) => m.status === "cancelada" || m.status === "falhou").length;
 
   return (
@@ -84,6 +84,24 @@ export default function PaginaConversa() {
               ]}
             />
           </Bloco>
+          {lead && (
+            <Bloco
+              titulo="O lead desta conversa"
+              tom={lead.status === "novo" ? "destaque" : "ok"}
+              descricao={
+                lead.status === "novo"
+                  ? "Esperando alguém revisar e decidir."
+                  : lead.status === "aproveitado"
+                    ? "Já virou cliente no cadastro."
+                    : "Foi descartado, com motivo."
+              }
+              acoes={
+                <Link href="/atendimento/leads" className={buttonVariants({ variant: "outline", size: "sm" })}>
+                  Revisar
+                </Link>
+              }
+            />
+          )}
           <Bloco
             titulo="O bot"
             acoes={
@@ -134,7 +152,11 @@ export default function PaginaConversa() {
 
       <Secao
         titulo="Dados coletados"
-        descricao="O que esta conversa rendeu. É daqui que sai o lead (etapa E da issue #100)."
+        descricao={
+          lead
+            ? "O que esta conversa rendeu. O lead abaixo saiu daqui."
+            : "O que esta conversa rendeu. Quando ela encerrar, isto vira um lead para alguém revisar."
+        }
       >
         {dados.length === 0 ? (
           <Vazio>Nada coletado ainda nesta conversa.</Vazio>

@@ -8,6 +8,7 @@ package httpapi
 // que fez a tela de Reservas ficar sem o perfil leitura. Contar conversas não é ler conversas.
 
 import (
+	"errors"
 	"net/http"
 	"strconv"
 	"strings"
@@ -38,6 +39,12 @@ func (s *Servidor) resumoAtendimento(w http.ResponseWriter, r *http.Request, _ *
 		erroInterno(w, r, err)
 		return
 	}
+	// Leads (etapa E): é o que o serviço produziu de aproveitável.
+	leads, err := s.q.ContarLeads(r.Context(), inicioDoMes)
+	if err != nil {
+		erroInterno(w, r, err)
+		return
+	}
 	responderJSON(w, http.StatusOK, map[string]any{
 		"bots": map[string]int64{
 			"total": resumo.Bots, "ativos": resumo.BotsAtivos, "com_envio": resumo.BotsComEnvio,
@@ -49,6 +56,10 @@ func (s *Servidor) resumoAtendimento(w http.ResponseWriter, r *http.Request, _ *
 		"fila": map[string]any{
 			"pendentes": resumo.FilaPendentes, "falharam": resumo.FilaFalharam,
 			"canceladas_mes": resumo.CanceladasMes, "proxima": resumo.ProximaDaFila,
+		},
+		"leads": map[string]int64{
+			"novos": leads.Novos, "aproveitados": leads.Aproveitados,
+			"descartados": leads.Descartados, "no_mes": leads.NoMes,
 		},
 		"dados_coletados_mes": resumo.DadosMes,
 		"tokens_mes":          resumo.TokensMes,
@@ -141,7 +152,7 @@ func (s *Servidor) buscarConversa(w http.ResponseWriter, r *http.Request, _ *Usu
 	}
 	ctx := r.Context()
 	c, err := s.q.BuscarConversa(ctx, id)
-	if err == pgx.ErrNoRows {
+	if errors.Is(err, pgx.ErrNoRows) {
 		responderErro(w, http.StatusNotFound, "conversa não encontrada")
 		return
 	}
@@ -193,7 +204,17 @@ func (s *Servidor) buscarConversa(w http.ResponseWriter, r *http.Request, _ *Usu
 		})
 	}
 
+	// O lead que esta conversa originou (etapa E), para a tela pular direto para a revisão.
+	var lead any
+	if l, err := s.q.BuscarLeadDaConversa(ctx, id); err == nil {
+		lead = map[string]any{"id": l.ID, "status": l.Status, "cliente_id": l.ClienteID}
+	} else if !errors.Is(err, pgx.ErrNoRows) {
+		erroInterno(w, r, err)
+		return
+	}
+
 	responderJSON(w, http.StatusOK, map[string]any{
+		"lead": lead,
 		"conversa": map[string]any{
 			"id": c.ID, "bot_id": c.BotID, "bot_nome": c.BotNome, "bot_slug": c.BotSlug,
 			"telefone": c.Telefone, "contato_nome": c.ContatoNome,

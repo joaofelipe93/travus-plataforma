@@ -19,17 +19,24 @@ import (
 var navegadoresDaTela = map[string]*navegador{}
 var seqNavegadorDaTela int
 
+// navegadorDoPerfil devolve uma sessão daquele perfil, criada uma vez por servidor e reusada
+// entre as chamadas do mesmo teste (criar usuário a cada requisição só gastaria argon2id).
+func navegadorDoPerfil(t *testing.T, s *Servidor, perfil db.PerfilUsuario) *navegador {
+	t.Helper()
+	chave := fmt.Sprintf("%p|%s", s, perfil)
+	if nav, ok := navegadoresDaTela[chave]; ok {
+		return nav
+	}
+	seqNavegadorDaTela++
+	nav := entrarComo(t, s, fmt.Sprintf("tela%d-%s@teste", seqNavegadorDaTela, perfil), perfil)
+	navegadoresDaTela[chave] = nav
+	return nav
+}
+
 // pegar faz um GET autenticado com o perfil pedido.
 func pegar(t *testing.T, s *Servidor, perfil db.PerfilUsuario, caminho string) *httptest.ResponseRecorder {
 	t.Helper()
-	chave := fmt.Sprintf("%p|%s", s, perfil)
-	nav, ok := navegadoresDaTela[chave]
-	if !ok {
-		seqNavegadorDaTela++
-		nav = entrarComo(t, s, fmt.Sprintf("tela%d-%s@teste", seqNavegadorDaTela, perfil), perfil)
-		navegadoresDaTela[chave] = nav
-	}
-	return nav.req(http.MethodGet, caminho, nil, nil)
+	return navegadorDoPerfil(t, s, perfil).req(http.MethodGet, caminho, nil, nil)
 }
 
 // decodificarEm lê o JSON da resposta no destino (o decodificar[T] da casa é por tipo; aqui a

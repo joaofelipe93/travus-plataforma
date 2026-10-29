@@ -280,6 +280,8 @@ func (s *Servidor) responderAtendimento(ctx context.Context, bot db.AtendimentoB
 		res.Status, res.Motivo, res.Encerrada = "sem_resposta", "teto de tokens da conversa", true
 		slog.Warn("atendimento: conversa encerrada pelo teto de tokens",
 			"bot", bot.Slug, "conversa_id", conversa.ID, "tokens", res.TokensGasto)
+		// Encerrou pelo teto, mas o que ela já tinha colhido não se joga fora (etapa E).
+		s.criarLeadSePreciso(ctx, bot, conversa.ID, "teto_tokens")
 		return res, nil
 	}
 
@@ -370,6 +372,9 @@ func (s *Servidor) responderAtendimento(ctx context.Context, bot db.AtendimentoB
 		if res.Motivo == "" {
 			res.Motivo = z.motivo
 		}
+		// Conversa encerrada que colheu algo vira lead para alguém revisar (etapa E). Falha aqui
+		// não derruba o atendimento: a pessoa já foi respondida.
+		s.criarLeadSePreciso(ctx, bot, conversa.ID, z.motivo)
 	}
 	return res, nil
 }

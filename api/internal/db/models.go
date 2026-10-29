@@ -132,6 +132,23 @@ type AtendimentoEtapa struct {
 	AtualizadoEm time.Time
 }
 
+type AtendimentoLead struct {
+	ID             int64
+	ConversaID     int64
+	BotID          int64
+	Status         string
+	Nome           *string
+	Telefone       *string
+	Email          *string
+	Observacoes    *string
+	Dados          []byte
+	ClienteID      *int64
+	MotivoDescarte *string
+	RevisadoPor    *int64
+	RevisadoEm     *time.Time
+	CriadoEm       time.Time
+}
+
 type AtendimentoMensagen struct {
 	ID                 int64
 	ConversaID         int64

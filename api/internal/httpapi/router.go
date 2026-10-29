@@ -227,6 +227,13 @@ func (s *Servidor) Rotas() http.Handler {
 	mux.Handle("GET /atendimento/resumo", s.autenticado(s.resumoAtendimento))
 	mux.Handle("GET /atendimento/conversas", s.autenticado(exigirPerfil(s.listarConversas, editores...)))
 	mux.Handle("GET /atendimento/conversas/{id}", s.autenticado(exigirPerfil(s.buscarConversa, editores...)))
+	// Etapa E: os leads. Dado pessoal de quem escreveu, e a promoção a cliente mexe no cadastro
+	// de toda a plataforma: admin e operador, como no resto do cadastro.
+	mux.Handle("GET /atendimento/leads", s.autenticado(exigirPerfil(s.listarLeads, editores...)))
+	mux.Handle("GET /atendimento/leads/{id}", s.autenticado(exigirPerfil(s.buscarLeadNaTela, editores...)))
+	mux.Handle("PATCH /atendimento/leads/{id}", s.autenticado(exigirPerfil(s.atualizarLead, editores...)))
+	mux.Handle("POST /atendimento/leads/{id}/aproveitar", s.autenticado(exigirPerfil(s.aproveitarLead, editores...)))
+	mux.Handle("POST /atendimento/leads/{id}/descartar", s.autenticado(exigirPerfil(s.descartarLead, editores...)))
 	mux.Handle("GET /cotas", s.autenticado(s.listarCotas))
 	mux.Handle("POST /cotas", s.autenticado(exigirPerfil(s.criarCota, editores...)))
 	mux.Handle("GET /cotas/grupos", s.autenticado(s.listarGrupos))

@@ -69,6 +69,9 @@ export const servicos: readonly Servico[] = [
       // Uma conversa traz o telefone de quem escreveu e o que a pessoa disse: a mesma régua da
       // tela de Reservas, que também mostra dado de gente de verdade.
       { href: "/atendimento/conversas", rotulo: "Conversas", perfis: ["admin", "operador"] },
+      // O lead traz nome, telefone e e-mail de quem escreveu, e promovê-lo mexe no cadastro de
+      // toda a plataforma: a mesma régua de quem cadastra cliente.
+      { href: "/atendimento/leads", rotulo: "Leads", perfis: ["admin", "operador"] },
       { href: "/atendimento/configuracao", rotulo: "Configurações", perfis: null },
       // O QR dá acesso à conta de WhatsApp que fala com clientes: só admin.
       { href: "/atendimento/conexoes", rotulo: "Conexões", perfis: ["admin"] },
