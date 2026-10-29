@@ -14,6 +14,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/joaofelipe93/travus-plataforma/api/internal/assistente"
+	"github.com/joaofelipe93/travus-plataforma/api/internal/atendimentowa"
 	"github.com/joaofelipe93/travus-plataforma/api/internal/boletoswa"
 	"github.com/joaofelipe93/travus-plataforma/api/internal/checkin"
 	"github.com/joaofelipe93/travus-plataforma/api/internal/cripto"
@@ -74,6 +75,9 @@ type Config struct {
 	// a resposta é composta e gravada, e nada sai (ensaio).
 	ModeloAtendimento          func(nome string) assistente.Modelo
 	AtendimentoEnvioHabilitado bool
+	// Serviço que conecta os WhatsApps dos bots (workers/atendimento-whatsapp). nil = as rotas
+	// de Conexões respondem "indisponível" em vez de falhar.
+	AtendimentoWhatsapp *atendimentowa.Cliente
 	// Versão publicada (version.txt) e commit, mostrados no /health.
 	Versao string
 	Commit string
@@ -213,6 +217,11 @@ func (s *Servidor) Rotas() http.Handler {
 	mux.Handle("DELETE /atendimento/bots/{id}", s.autenticado(exigirPerfil(s.excluirBot, editores...)))
 	mux.Handle("PUT /atendimento/bots/{id}/etapas", s.autenticado(exigirPerfil(s.definirEtapasDoBot, editores...)))
 	mux.Handle("PUT /atendimento/bots/{id}/envio", s.autenticado(exigirPerfil(s.definirEnvioDoBot, admins...)))
+	// Etapa D: Conexões do Atendimento. Só admin: quem vê o QR pareia um aparelho na conta do
+	// WhatsApp daquele bot, e a mensagem de teste sai para um telefone de verdade.
+	mux.Handle("GET /atendimento/whatsapp", s.autenticado(exigirPerfil(s.situacaoWhatsappAtendimento, admins...)))
+	mux.Handle("POST /atendimento/bots/{id}/whatsapp/teste", s.autenticado(exigirPerfil(s.testarWhatsappAtendimento, admins...)))
+	mux.Handle("POST /atendimento/bots/{id}/whatsapp/desconectar", s.autenticado(exigirPerfil(s.desconectarWhatsappAtendimento, admins...)))
 	// Etapa C: as telas. O painel é contagem, todo perfil vê; a conversa traz telefone e o que a
 	// pessoa escreveu, então fica com admin e operador (a mesma régua da tela de Reservas).
 	mux.Handle("GET /atendimento/resumo", s.autenticado(s.resumoAtendimento))

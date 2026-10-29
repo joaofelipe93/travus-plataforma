@@ -28,7 +28,8 @@ ci_node=$(sed -nE 's/^ *NODE_VERSION: *"([^"]+)".*/\1/p' .github/workflows/ci.ym
 ci_go=$(sed -nE 's/^ *GO_VERSION: *"([^"]+)".*/\1/p' .github/workflows/ci.yml | head -1)
 [ -n "$ci_node" ] && [ -n "$ci_go" ] || { echo "x não achei NODE_VERSION/GO_VERSION em .github/workflows/ci.yml"; exit 1; }
 
-for arquivo in web/Dockerfile workers/checkin-whatsapp/Dockerfile workers/boletos-whatsapp/Dockerfile; do
+for arquivo in web/Dockerfile workers/checkin-whatsapp/Dockerfile workers/boletos-whatsapp/Dockerfile \
+               workers/atendimento-whatsapp/Dockerfile; do
   for versao in $(sed -nE 's/^FROM node:([0-9.]+)-.*/\1/p' "$arquivo" | sort -u); do
     conferir "Node da CI e do $arquivo" "$ci_node" "$versao" "$arquivo"
   done
@@ -62,8 +63,8 @@ pw_canopus=$(sed -nE 's#^FROM mcr\.microsoft\.com/playwright:v([0-9.]+-[a-z]+).*
 pw_boletos=$(sed -nE 's#^FROM mcr\.microsoft\.com/playwright:v([0-9.]+-[a-z]+).*#\1#p' workers/boletos-canopus/Dockerfile | head -1)
 conferir "Imagem do Playwright igual nos dois workers" "$pw_canopus" "$pw_boletos" "workers/boletos-canopus/Dockerfile"
 
-# baileys fixo e igual nos dois serviços de WhatsApp (a 7.x tem quedas silenciosas de conexão).
-for servico in checkin-whatsapp boletos-whatsapp; do
+# baileys fixo e igual nos três serviços de WhatsApp (a 7.x tem quedas silenciosas de conexão).
+for servico in checkin-whatsapp boletos-whatsapp atendimento-whatsapp; do
   versao_baileys=$(node -p "require('./workers/$servico/package-lock.json').packages['node_modules/baileys'].version" 2> /dev/null || echo "?")
   conferir "baileys do $servico fixo em 6.7.24" "6.7.24" "$versao_baileys" "workers/$servico/package-lock.json"
 done

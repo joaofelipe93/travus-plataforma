@@ -551,6 +551,31 @@ func (q *Queries) DefinirEtapaDaConversa(ctx context.Context, arg DefinirEtapaDa
 	return i, err
 }
 
+const desistirDaMensagemDeAtendimento = `-- name: DesistirDaMensagemDeAtendimento :one
+UPDATE atendimento.mensagens
+SET status = 'falhou', motivo = $1, ultimo_erro = $2
+WHERE id = $3 AND status = 'pendente'
+RETURNING id, tentativas
+`
+
+type DesistirDaMensagemDeAtendimentoParams struct {
+	Motivo *string
+	Erro   *string
+	ID     int64
+}
+
+type DesistirDaMensagemDeAtendimentoRow struct {
+	ID         int64
+	Tentativas int32
+}
+
+func (q *Queries) DesistirDaMensagemDeAtendimento(ctx context.Context, arg DesistirDaMensagemDeAtendimentoParams) (DesistirDaMensagemDeAtendimentoRow, error) {
+	row := q.db.QueryRow(ctx, desistirDaMensagemDeAtendimento, arg.Motivo, arg.Erro, arg.ID)
+	var i DesistirDaMensagemDeAtendimentoRow
+	err := row.Scan(&i.ID, &i.Tentativas)
+	return i, err
+}
+
 const encerrarConversa = `-- name: EncerrarConversa :one
 UPDATE atendimento.conversas SET
     status = $1, motivo = $2, ultima_em = now(), encerrada_em = now()
@@ -661,6 +686,48 @@ func (q *Queries) ExcluirBot(ctx context.Context, id int64) (int64, error) {
 		return 0, err
 	}
 	return result.RowsAffected(), nil
+}
+
+const filaDeAtendimentoPorBot = `-- name: FilaDeAtendimentoPorBot :many
+SELECT b.id AS bot_id, b.slug, m.status, count(*) AS total
+FROM atendimento.mensagens m
+JOIN atendimento.conversas c ON c.id = m.conversa_id
+JOIN atendimento.bots b ON b.id = c.bot_id
+WHERE m.direcao = 'enviada'
+GROUP BY b.id, b.slug, m.status
+`
+
+type FilaDeAtendimentoPorBotRow struct {
+	BotID  int64
+	Slug   string
+	Status string
+	Total  int64
+}
+
+// Fila por bot, para a tela de Conexões dizer o que está esperando em cada número.
+func (q *Queries) FilaDeAtendimentoPorBot(ctx context.Context) ([]FilaDeAtendimentoPorBotRow, error) {
+	rows, err := q.db.Query(ctx, filaDeAtendimentoPorBot)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []FilaDeAtendimentoPorBotRow
+	for rows.Next() {
+		var i FilaDeAtendimentoPorBotRow
+		if err := rows.Scan(
+			&i.BotID,
+			&i.Slug,
+			&i.Status,
+			&i.Total,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const historicoDaConversa = `-- name: HistoricoDaConversa :many
@@ -892,6 +959,25 @@ func (q *Queries) ListarEtapasDoBot(ctx context.Context, botID int64) ([]Atendim
 	return items, nil
 }
 
+const marcarMensagemDeAtendimentoEnviada = `-- name: MarcarMensagemDeAtendimentoEnviada :one
+UPDATE atendimento.mensagens
+SET status = 'enviada', enviada_em = now(), ultimo_erro = NULL
+WHERE id = $1 AND status = 'pendente'
+RETURNING id, conversa_id
+`
+
+type MarcarMensagemDeAtendimentoEnviadaRow struct {
+	ID         int64
+	ConversaID int64
+}
+
+func (q *Queries) MarcarMensagemDeAtendimentoEnviada(ctx context.Context, id int64) (MarcarMensagemDeAtendimentoEnviadaRow, error) {
+	row := q.db.QueryRow(ctx, marcarMensagemDeAtendimentoEnviada, id)
+	var i MarcarMensagemDeAtendimentoEnviadaRow
+	err := row.Scan(&i.ID, &i.ConversaID)
+	return i, err
+}
+
 const mensagensDaConversa = `-- name: MensagensDaConversa :many
 SELECT id, direcao, texto, status, motivo, tentativas, ultimo_erro, criada_em, enviada_em
 FROM atendimento.mensagens
@@ -965,6 +1051,34 @@ func (q *Queries) PrimeiraEtapaDoBot(ctx context.Context, botID int64) (Atendime
 	return i, err
 }
 
+const reenfileirarMensagemDeAtendimento = `-- name: ReenfileirarMensagemDeAtendimento :one
+UPDATE atendimento.mensagens
+SET ultimo_erro = $1, proxima_tentativa_em = now() + make_interval(secs => $2)
+WHERE id = $3 AND status = 'pendente'
+RETURNING id, tentativas, proxima_tentativa_em
+`
+
+type ReenfileirarMensagemDeAtendimentoParams struct {
+	Erro           *string
+	EsperaSegundos float64
+	ID             int64
+}
+
+type ReenfileirarMensagemDeAtendimentoRow struct {
+	ID                 int64
+	Tentativas         int32
+	ProximaTentativaEm time.Time
+}
+
+// Falha: duas consultas, porque quem decide entre tentar de novo e desistir é a API (o worker
+// diz se a falha é definitiva — número sem WhatsApp não melhora tentando de novo).
+func (q *Queries) ReenfileirarMensagemDeAtendimento(ctx context.Context, arg ReenfileirarMensagemDeAtendimentoParams) (ReenfileirarMensagemDeAtendimentoRow, error) {
+	row := q.db.QueryRow(ctx, reenfileirarMensagemDeAtendimento, arg.Erro, arg.EsperaSegundos, arg.ID)
+	var i ReenfileirarMensagemDeAtendimentoRow
+	err := row.Scan(&i.ID, &i.Tentativas, &i.ProximaTentativaEm)
+	return i, err
+}
+
 const registrarMensagemRecebida = `-- name: RegistrarMensagemRecebida :one
 INSERT INTO atendimento.mensagens (conversa_id, direcao, texto, status)
 VALUES ($1, 'recebida', $2, 'recebida')
@@ -993,6 +1107,82 @@ func (q *Queries) RegistrarMensagemRecebida(ctx context.Context, arg RegistrarMe
 		&i.EnviadaEm,
 	)
 	return i, err
+}
+
+const reservarMensagensDeAtendimento = `-- name: ReservarMensagensDeAtendimento :many
+
+WITH alvo AS (
+    SELECT m.id
+    FROM atendimento.mensagens m
+    JOIN atendimento.conversas c ON c.id = m.conversa_id
+    JOIN atendimento.bots b ON b.id = c.bot_id
+    WHERE m.status = 'pendente'
+      AND m.proxima_tentativa_em <= now()
+      AND b.ativo AND b.envio_habilitado
+      AND b.slug = ANY($1::text[])
+    ORDER BY m.proxima_tentativa_em, m.id
+    FOR UPDATE OF m SKIP LOCKED
+    LIMIT $2
+)
+UPDATE atendimento.mensagens m
+SET tentativas           = m.tentativas + 1,
+    proxima_tentativa_em = now() + interval '2 minutes'
+WHERE m.id IN (SELECT id FROM alvo)
+RETURNING m.id, m.texto, m.tentativas,
+          (SELECT c.telefone FROM atendimento.conversas c WHERE c.id = m.conversa_id)   AS telefone,
+          (SELECT b.slug FROM atendimento.bots b
+             JOIN atendimento.conversas c ON c.bot_id = b.id
+            WHERE c.id = m.conversa_id)                                                 AS bot_slug,
+          (SELECT c.id FROM atendimento.conversas c WHERE c.id = m.conversa_id)          AS conversa_id
+`
+
+type ReservarMensagensDeAtendimentoParams struct {
+	Slugs  []string
+	Limite int32
+}
+
+type ReservarMensagensDeAtendimentoRow struct {
+	ID         int64
+	Texto      string
+	Tentativas int32
+	Telefone   string
+	BotSlug    string
+	ConversaID int64
+}
+
+// Etapa D (o worker de WhatsApp). A fila de envio vive aqui, e não no worker: ele não tem papel
+// no Postgres e não sabe o que é ensaio, teto ou bot desligado — só transporta.
+// Reserva as próximas mensagens de um conjunto de bots. `FOR UPDATE SKIP LOCKED` + trava de 2
+// minutos no `proxima_tentativa_em`: se o worker morrer entre a reserva e o envio, a mensagem
+// volta à fila sozinha, e dois processos nunca pegam a mesma linha.
+//
+// Só sai mensagem de bot **ligado e com envio autorizado**: se alguém desligar o bot enquanto a
+// resposta espera, ela simplesmente não é entregue — a decisão mais nova é a que vale.
+func (q *Queries) ReservarMensagensDeAtendimento(ctx context.Context, arg ReservarMensagensDeAtendimentoParams) ([]ReservarMensagensDeAtendimentoRow, error) {
+	rows, err := q.db.Query(ctx, reservarMensagensDeAtendimento, arg.Slugs, arg.Limite)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ReservarMensagensDeAtendimentoRow
+	for rows.Next() {
+		var i ReservarMensagensDeAtendimentoRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Texto,
+			&i.Tentativas,
+			&i.Telefone,
+			&i.BotSlug,
+			&i.ConversaID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const resumoAtendimento = `-- name: ResumoAtendimento :one

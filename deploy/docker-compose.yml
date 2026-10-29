@@ -54,6 +54,12 @@ x-api: &api-base
     CHECKIN_URL: http://checkin-whatsapp:3000
     # Serviço de boletos no WhatsApp (tela de boletos: QR, teste, desconectar).
     BOLETOS_WHATSAPP_URL: http://boletos-whatsapp:3000
+    # Serviço que conecta os WhatsApps dos bots de atendimento (um processo, N sessões).
+    ATENDIMENTO_WHATSAPP_URL: http://atendimento-whatsapp:3000
+    ATENDIMENTO_ADMIN_TOKEN: ${ATENDIMENTO_ADMIN_TOKEN:?defina ATENDIMENTO_ADMIN_TOKEN em deploy/.env (make up gera)}
+    # Só "true" libera um bot a MANDAR mensagem para cliente. Desligada, a resposta é composta e
+    # guardada como cancelada (ensaio).
+    ATENDIMENTO_ENVIO_HABILITADO: ${ATENDIMENTO_ENVIO_HABILITADO:-false}
     BOLETOS_ADMIN_TOKEN: ${BOLETOS_ADMIN_TOKEN:?defina BOLETOS_ADMIN_TOKEN em deploy/.env (make up gera)}
     CHECKIN_ADMIN_TOKEN: ${CHECKIN_ADMIN_TOKEN:?defina CHECKIN_ADMIN_TOKEN em deploy/.env (make up gera)}
     # Senha do papel checkin no Postgres: `api migrate up` liga o login com ela.
@@ -283,6 +289,54 @@ services:
         condition: service_healthy
     networks: [interna]
 
+  # Atendimento no WhatsApp (issue #100): N sessões num processo, uma por bot ligado. Ele NÃO fala
+  # com o Postgres — pede tudo à API pela rede interna (porta 8081). Perfil atendimento: fica
+  # desligado no dia a dia (make atendimento sobe).
+  atendimento-whatsapp:
+    build:
+      context: ../workers/atendimento-whatsapp
+      args: *versao
+    image: travus/atendimento-whatsapp:dev
+    profiles: [atendimento]
+    restart: unless-stopped
+    environment:
+      # A API pela rede interna: a porta 8081 não tem rota no gateway.
+      API_URL: http://api:8081
+      WORKER_TOKEN: ${WORKER_TOKEN:?defina WORKER_TOKEN em deploy/.env (make up gera)}
+      ADMIN_TOKEN: ${ATENDIMENTO_ADMIN_TOKEN:?defina ATENDIMENTO_ADMIN_TOKEN em deploy/.env (make up gera)}
+      # Freio de mão do próprio serviço, além da chave da API e do interruptor de cada bot.
+      ENVIO_HABILITADO: ${ATENDIMENTO_ENVIO_SERVICO:-true}
+      # Teto de sessões no processo: cada uma custa memória, e a VM tem 2 GB.
+      MAX_SESSOES: ${ATENDIMENTO_MAX_SESSOES:-4}
+      LOG_FORMAT: json
+      TZ: America/Sao_Paulo
+    volumes:
+      - atendimento-dados:/dados
+    depends_on:
+      api:
+        condition: service_healthy
+    # Ao desligar, termina a mensagem atual antes de sair (senão ela sairia duas vezes).
+    stop_grace_period: 60s
+    networks: [interna]
+    logging: *logs
+    mem_limit: 768m
+
+  # Testes do atendimento no WhatsApp (make test). Não precisa de banco: o worker não tem um.
+  atendimento-teste:
+    build:
+      context: ../workers/atendimento-whatsapp
+      target: deps
+    image: travus/atendimento-whatsapp-teste:dev
+    profiles: [teste]
+    working_dir: /app
+    command: ["sh", "-c", "npm run typecheck && npm run typecheck:tests && npm test"]
+    volumes:
+      - ../workers/atendimento-whatsapp/src:/app/src:ro
+      - ../workers/atendimento-whatsapp/tests:/app/tests:ro
+      - ../workers/atendimento-whatsapp/tsconfig.json:/app/tsconfig.json:ro
+      - ../workers/atendimento-whatsapp/tsconfig.test.json:/app/tsconfig.test.json:ro
+    networks: [interna]
+
   # Worker de boletos da Canopus: pega a rodada na fila da API, consulta o Boleto Fácil por CPF e
   # guarda as parcelas em aberto e o PDF. SÓ LÊ o site (nada de Newcon, nada de WhatsApp aqui).
   # Perfil boletos: fica desligado no dia a dia (make boletos sobe) — ver CLAUDE.md.
@@ -469,5 +523,7 @@ volumes:
   checkin-dados:
   # Sessão do WhatsApp DOS BOLETOS (outro número): separada da do notificador de check-in.
   boletos-dados:
+  # Sessões do ATENDIMENTO: uma subpasta por bot, cada bot com o próprio número.
+  atendimento-dados:
   go-modulos:
   go-build:

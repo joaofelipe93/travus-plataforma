@@ -225,3 +225,66 @@ FROM atendimento.coletas k
 LEFT JOIN atendimento.etapas e ON e.id = k.etapa_id
 WHERE k.conversa_id = @conversa_id
 ORDER BY k.criado_em, k.campo;
+
+-- Etapa D (o worker de WhatsApp). A fila de envio vive aqui, e não no worker: ele não tem papel
+-- no Postgres e não sabe o que é ensaio, teto ou bot desligado — só transporta.
+
+-- Reserva as próximas mensagens de um conjunto de bots. `FOR UPDATE SKIP LOCKED` + trava de 2
+-- minutos no `proxima_tentativa_em`: se o worker morrer entre a reserva e o envio, a mensagem
+-- volta à fila sozinha, e dois processos nunca pegam a mesma linha.
+--
+-- Só sai mensagem de bot **ligado e com envio autorizado**: se alguém desligar o bot enquanto a
+-- resposta espera, ela simplesmente não é entregue — a decisão mais nova é a que vale.
+-- name: ReservarMensagensDeAtendimento :many
+WITH alvo AS (
+    SELECT m.id
+    FROM atendimento.mensagens m
+    JOIN atendimento.conversas c ON c.id = m.conversa_id
+    JOIN atendimento.bots b ON b.id = c.bot_id
+    WHERE m.status = 'pendente'
+      AND m.proxima_tentativa_em <= now()
+      AND b.ativo AND b.envio_habilitado
+      AND b.slug = ANY(@slugs::text[])
+    ORDER BY m.proxima_tentativa_em, m.id
+    FOR UPDATE OF m SKIP LOCKED
+    LIMIT @limite
+)
+UPDATE atendimento.mensagens m
+SET tentativas           = m.tentativas + 1,
+    proxima_tentativa_em = now() + interval '2 minutes'
+WHERE m.id IN (SELECT id FROM alvo)
+RETURNING m.id, m.texto, m.tentativas,
+          (SELECT c.telefone FROM atendimento.conversas c WHERE c.id = m.conversa_id)   AS telefone,
+          (SELECT b.slug FROM atendimento.bots b
+             JOIN atendimento.conversas c ON c.bot_id = b.id
+            WHERE c.id = m.conversa_id)                                                 AS bot_slug,
+          (SELECT c.id FROM atendimento.conversas c WHERE c.id = m.conversa_id)          AS conversa_id;
+
+-- name: MarcarMensagemDeAtendimentoEnviada :one
+UPDATE atendimento.mensagens
+SET status = 'enviada', enviada_em = now(), ultimo_erro = NULL
+WHERE id = @id AND status = 'pendente'
+RETURNING id, conversa_id;
+
+-- Falha: duas consultas, porque quem decide entre tentar de novo e desistir é a API (o worker
+-- diz se a falha é definitiva — número sem WhatsApp não melhora tentando de novo).
+-- name: ReenfileirarMensagemDeAtendimento :one
+UPDATE atendimento.mensagens
+SET ultimo_erro = @erro, proxima_tentativa_em = now() + make_interval(secs => @espera_segundos)
+WHERE id = @id AND status = 'pendente'
+RETURNING id, tentativas, proxima_tentativa_em;
+
+-- name: DesistirDaMensagemDeAtendimento :one
+UPDATE atendimento.mensagens
+SET status = 'falhou', motivo = @motivo, ultimo_erro = @erro
+WHERE id = @id AND status = 'pendente'
+RETURNING id, tentativas;
+
+-- Fila por bot, para a tela de Conexões dizer o que está esperando em cada número.
+-- name: FilaDeAtendimentoPorBot :many
+SELECT b.id AS bot_id, b.slug, m.status, count(*) AS total
+FROM atendimento.mensagens m
+JOIN atendimento.conversas c ON c.id = m.conversa_id
+JOIN atendimento.bots b ON b.id = c.bot_id
+WHERE m.direcao = 'enviada'
+GROUP BY b.id, b.slug, m.status;
