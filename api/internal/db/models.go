@@ -75,6 +75,77 @@ type Arquivo struct {
 	ExpiraEm    *time.Time
 }
 
+type AtendimentoBot struct {
+	ID                    int64
+	Nome                  string
+	Slug                  string
+	Modelo                string
+	Instrucoes            string
+	Saudacao              *string
+	Ativo                 bool
+	EnvioHabilitado       bool
+	EnvioHabilitadoPor    *int64
+	EnvioHabilitadoEm     *time.Time
+	MaxMensagensHora      int32
+	MaxTokensConversa     int32
+	PausaRespostaSegundos int32
+	CriadoPor             *int64
+	AtualizadoPor         *int64
+	CriadoEm              time.Time
+	AtualizadoEm          time.Time
+}
+
+type AtendimentoColeta struct {
+	ID           int64
+	ConversaID   int64
+	EtapaID      *int64
+	Campo        string
+	Valor        string
+	CriadoEm     time.Time
+	AtualizadoEm time.Time
+}
+
+type AtendimentoConversa struct {
+	ID            int64
+	BotID         int64
+	Telefone      string
+	ContatoNome   *string
+	EtapaID       *int64
+	Status        string
+	Motivo        *string
+	TokensEntrada int32
+	TokensSaida   int32
+	IniciadaEm    time.Time
+	UltimaEm      time.Time
+	EncerradaEm   *time.Time
+}
+
+type AtendimentoEtapa struct {
+	ID           int64
+	BotID        int64
+	Ordem        int32
+	Nome         string
+	Objetivo     string
+	Instrucoes   *string
+	Campos       []byte
+	CriadoEm     time.Time
+	AtualizadoEm time.Time
+}
+
+type AtendimentoMensagen struct {
+	ID                 int64
+	ConversaID         int64
+	Direcao            string
+	Texto              string
+	Status             string
+	Motivo             *string
+	Tentativas         int32
+	ProximaTentativaEm time.Time
+	UltimoErro         *string
+	CriadaEm           time.Time
+	EnviadaEm          *time.Time
+}
+
 type Auditoria struct {
 	ID         int64
 	UsuarioID  *int64

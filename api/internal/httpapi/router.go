@@ -193,6 +193,18 @@ func (s *Servidor) Rotas() http.Handler {
 	mux.Handle("DELETE /clientes/{id}", s.autenticado(exigirPerfil(s.excluirCliente, editores...)))
 	mux.Handle("PUT /clientes/{id}/servicos/{servico}", s.autenticado(exigirPerfil(s.definirServicoDoCliente, editores...)))
 	mux.Handle("GET /servicos", s.autenticado(s.listarServicos))
+
+	// Serviço de Atendimento (atendimento.go, issue #100): os bots de WhatsApp e o fluxo de cada
+	// um. Todo perfil enxerga; admin e operador mexem. `envio_habilitado` — o que autoriza a
+	// plataforma a falar com cliente de verdade — é **só admin**, como aprovar lance real.
+	mux.Handle("GET /atendimento/modelos", s.autenticado(s.listarModelosAtendimento))
+	mux.Handle("GET /atendimento/bots", s.autenticado(s.listarBots))
+	mux.Handle("POST /atendimento/bots", s.autenticado(exigirPerfil(s.criarBot, editores...)))
+	mux.Handle("GET /atendimento/bots/{id}", s.autenticado(s.buscarBot))
+	mux.Handle("PUT /atendimento/bots/{id}", s.autenticado(exigirPerfil(s.atualizarBot, editores...)))
+	mux.Handle("DELETE /atendimento/bots/{id}", s.autenticado(exigirPerfil(s.excluirBot, editores...)))
+	mux.Handle("PUT /atendimento/bots/{id}/etapas", s.autenticado(exigirPerfil(s.definirEtapasDoBot, editores...)))
+	mux.Handle("PUT /atendimento/bots/{id}/envio", s.autenticado(exigirPerfil(s.definirEnvioDoBot, admins...)))
 	mux.Handle("GET /cotas", s.autenticado(s.listarCotas))
 	mux.Handle("POST /cotas", s.autenticado(exigirPerfil(s.criarCota, editores...)))
 	mux.Handle("GET /cotas/grupos", s.autenticado(s.listarGrupos))
