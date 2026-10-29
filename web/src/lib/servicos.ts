@@ -60,6 +60,21 @@ export const servicos: readonly Servico[] = [
     ],
   },
   {
+    id: "atendimento",
+    nome: "Atendimento",
+    descricao: "Bots que atendem no WhatsApp e coletam o que interessa",
+    abas: [
+      { href: "/atendimento/painel", rotulo: "Painel", perfis: null },
+      { href: "/atendimento/bots", rotulo: "Bots", perfis: null },
+      // Uma conversa traz o telefone de quem escreveu e o que a pessoa disse: a mesma régua da
+      // tela de Reservas, que também mostra dado de gente de verdade.
+      { href: "/atendimento/conversas", rotulo: "Conversas", perfis: ["admin", "operador"] },
+      { href: "/atendimento/configuracao", rotulo: "Configurações", perfis: null },
+      // O QR dá acesso à conta de WhatsApp que fala com clientes: só admin.
+      { href: "/atendimento/conexoes", rotulo: "Conexões", perfis: ["admin"] },
+    ],
+  },
+  {
     id: "reservas",
     nome: "Reservas",
     descricao: "Avisos de reservas e cancelamentos no grupo do WhatsApp",

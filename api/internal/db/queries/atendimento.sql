@@ -156,3 +156,72 @@ WHERE bot_id = @bot_id AND ordem > @ordem ORDER BY ordem LIMIT 1;
 
 -- name: BuscarEtapa :one
 SELECT * FROM atendimento.etapas WHERE id = @id;
+
+-- Etapa C (as telas). Consultas de LEITURA: o painel, a lista de conversas e a conversa aberta.
+-- Os períodos ("hoje", "no mês") vêm calculados da API no fuso de Brasília, como no resto da
+-- plataforma — o banco não decide onde o dia começa.
+
+-- name: ResumoAtendimento :one
+SELECT
+    (SELECT count(*) FROM atendimento.bots b1)                                            AS bots,
+    (SELECT count(*) FROM atendimento.bots b2 WHERE b2.ativo)                             AS bots_ativos,
+    (SELECT count(*) FROM atendimento.bots b3 WHERE b3.ativo AND b3.envio_habilitado)     AS bots_com_envio,
+    (SELECT count(*) FROM atendimento.conversas c1 WHERE c1.status = 'aberta')            AS conversas_abertas,
+    (SELECT count(*) FROM atendimento.conversas c2 WHERE c2.iniciada_em >= @desde_hoje)    AS conversas_hoje,
+    (SELECT count(*) FROM atendimento.conversas c3
+       WHERE c3.encerrada_em >= @desde_mes AND c3.motivo = 'pediu_humano')                AS pediram_humano_mes,
+    (SELECT count(*) FROM atendimento.conversas c4
+       WHERE c4.encerrada_em >= @desde_mes AND c4.motivo = 'concluido')                   AS concluidas_mes,
+    (SELECT count(*) FROM atendimento.mensagens m1 WHERE m1.status = 'pendente')          AS fila_pendentes,
+    (SELECT count(*) FROM atendimento.mensagens m2 WHERE m2.status = 'falhou')            AS fila_falharam,
+    (SELECT count(*) FROM atendimento.mensagens m3
+       WHERE m3.status = 'cancelada' AND m3.criada_em >= @desde_mes)                      AS canceladas_mes,
+    (SELECT min(m4.proxima_tentativa_em) FROM atendimento.mensagens m4
+       WHERE m4.status = 'pendente')                                                      AS proxima_da_fila,
+    (SELECT count(*) FROM atendimento.coletas k1 WHERE k1.criado_em >= @desde_mes)        AS dados_mes,
+    (SELECT coalesce(sum(c5.tokens_entrada + c5.tokens_saida), 0) FROM atendimento.conversas c5
+       WHERE c5.ultima_em >= @desde_mes)::bigint                                          AS tokens_mes;
+
+-- name: ListarConversas :many
+SELECT c.id, c.bot_id, b.nome AS bot_nome, b.slug AS bot_slug, c.telefone, c.contato_nome,
+       c.status, c.motivo, e.nome AS etapa_nome, c.tokens_entrada, c.tokens_saida,
+       c.iniciada_em, c.ultima_em, c.encerrada_em,
+       (SELECT count(*) FROM atendimento.mensagens m WHERE m.conversa_id = c.id) AS mensagens,
+       (SELECT count(*) FROM atendimento.coletas k WHERE k.conversa_id = c.id)   AS dados,
+       coalesce((SELECT m.texto FROM atendimento.mensagens m WHERE m.conversa_id = c.id
+          ORDER BY m.id DESC LIMIT 1), '')::text                                 AS ultimo_texto,
+       coalesce((SELECT m.direcao FROM atendimento.mensagens m WHERE m.conversa_id = c.id
+          ORDER BY m.id DESC LIMIT 1), '')::text                                 AS ultima_direcao
+FROM atendimento.conversas c
+JOIN atendimento.bots b ON b.id = c.bot_id
+LEFT JOIN atendimento.etapas e ON e.id = c.etapa_id
+WHERE (sqlc.narg('bot_id')::bigint IS NULL OR c.bot_id = sqlc.narg('bot_id')::bigint)
+  AND (sqlc.narg('status')::text IS NULL OR c.status = sqlc.narg('status')::text)
+ORDER BY c.ultima_em DESC
+LIMIT @limite;
+
+-- name: BuscarConversa :one
+SELECT c.id, c.bot_id, b.nome AS bot_nome, b.slug AS bot_slug, c.telefone, c.contato_nome,
+       c.status, c.motivo, c.etapa_id, e.nome AS etapa_nome, e.ordem AS etapa_ordem,
+       c.tokens_entrada, c.tokens_saida, c.iniciada_em, c.ultima_em, c.encerrada_em,
+       (SELECT count(*) FROM atendimento.etapas x WHERE x.bot_id = c.bot_id) AS etapas_do_bot
+FROM atendimento.conversas c
+JOIN atendimento.bots b ON b.id = c.bot_id
+LEFT JOIN atendimento.etapas e ON e.id = c.etapa_id
+WHERE c.id = @id;
+
+-- Tudo o que a conversa teve, na ordem em que aconteceu — inclusive a mensagem `cancelada`, que
+-- é o que o bot teria dito em ensaio. (Diferente de HistoricoDaConversa, que monta o que vai ao
+-- modelo e por isso omite o que não saiu.)
+-- name: MensagensDaConversa :many
+SELECT id, direcao, texto, status, motivo, tentativas, ultimo_erro, criada_em, enviada_em
+FROM atendimento.mensagens
+WHERE conversa_id = @conversa_id
+ORDER BY id;
+
+-- name: DadosDaConversa :many
+SELECT k.campo, k.valor, k.criado_em, k.atualizado_em, e.nome AS etapa_nome
+FROM atendimento.coletas k
+LEFT JOIN atendimento.etapas e ON e.id = k.etapa_id
+WHERE k.conversa_id = @conversa_id
+ORDER BY k.criado_em, k.campo;

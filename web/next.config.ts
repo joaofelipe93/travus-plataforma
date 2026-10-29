@@ -15,6 +15,7 @@ const nextConfig: NextConfig = {
       { source: "/lances", destination: "/lances/painel", permanent: false },
       { source: "/boletos", destination: "/boletos/painel", permanent: false },
       { source: "/reservas", destination: "/reservas/painel", permanent: false },
+      { source: "/atendimento", destination: "/atendimento/painel", permanent: false },
       { source: "/boletos/whatsapp", destination: "/boletos/conexoes", permanent: false },
       { source: "/reservas/whatsapp", destination: "/reservas/conexoes", permanent: false },
       { source: "/canopus", destination: "/lances/painel", permanent: false },
