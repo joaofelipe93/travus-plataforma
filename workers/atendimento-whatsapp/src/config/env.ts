@@ -29,13 +29,6 @@ const schema = z.object({
   // Baileys derrubam uma à outra. Nunca aponte para a pasta do notificador nem a dos boletos.
   AUTH_DIR: z.string().default('./data/sessoes'),
 
-  // Freio de mão do próprio worker, independente da API: com ele desligado, nada é enviado nem
-  // recebido (o socket nem abre). A decisão de responder continua sendo da plataforma.
-  ENVIO_HABILITADO: z
-    .enum(['true', 'false'])
-    .default('true')
-    .transform((v) => v === 'true'),
-
   // Quantas respostas por ciclo da fila, somando todos os bots. Baixo de propósito: o que
   // protege um número é o ritmo.
   LOTE: z.coerce.number().int().min(1).max(50).default(5),

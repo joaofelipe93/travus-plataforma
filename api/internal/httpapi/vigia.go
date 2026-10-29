@@ -276,12 +276,12 @@ func (s *Servidor) verificarCheckin(ctx context.Context, agora time.Time, bancoO
 	return out
 }
 
-// verificarAtendimento: o serviço de WhatsApp dos bots sem resposta, bot autorizado a responder
-// cujo número caiu, respostas que desistiram e fila parada.
+// verificarAtendimento: o serviço de WhatsApp dos bots sem resposta, bot ligado cujo número
+// caiu, respostas que desistiram e fila parada.
 //
-// O alerta que mais importa aqui é o do **bot autorizado sem sessão**: alguém ligou o envio, a
-// pessoa escreve, o bot compõe a resposta — e ela fica na fila porque o número desconectou. Sem
-// vigia, isso se descobre pelo cliente reclamando que ninguém respondeu.
+// O alerta que mais importa aqui é o do **bot ligado sem sessão**: o bot está ligado, a pessoa
+// escreve, ele compõe a resposta — e ela fica na fila porque o número desconectou. Sem vigia,
+// isso se descobre pelo cliente reclamando que ninguém respondeu.
 //
 // Nome e telefone de quem conversou **não entram no alerta**: o e-mail do vigia não é lugar de
 // dado de cliente. Vai o nome do bot e a contagem.
@@ -323,7 +323,7 @@ func (s *Servidor) verificarAtendimento(ctx context.Context, agora time.Time, ba
 	vistos := map[string]bool{}
 	algumConectado := false
 	for _, b := range autorizados {
-		if !b.Ativo || !b.EnvioHabilitado {
+		if !b.Ativo {
 			continue
 		}
 		vistos[b.Slug] = true
@@ -341,7 +341,7 @@ func (s *Servidor) verificarAtendimento(ctx context.Context, agora time.Time, ba
 			continue
 		}
 		titulo := "Bot " + b.Nome + ": WhatsApp desconectado há " + textoTempo(d)
-		detalhe := "O bot está ligado e autorizado a responder, mas o número não está conectado: as respostas esperam na fila. Veja " + tela
+		detalhe := "O bot está ligado, mas o número não está conectado: as respostas esperam na fila. Veja " + tela
 		switch {
 		case sessao == nil:
 			titulo = "Bot " + b.Nome + ": sem sessão de WhatsApp há " + textoTempo(d)

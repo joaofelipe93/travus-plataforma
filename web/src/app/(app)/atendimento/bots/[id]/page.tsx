@@ -19,7 +19,6 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { Badge } from "@/components/ui/badge";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -28,17 +27,17 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { api } from "@/lib/api";
+import { cn } from "@/lib/utils";
 import { dataHora, useSessao } from "@/lib/sessao";
 import type { DetalheBot, ModeloBot } from "@/lib/tipos";
 
 // A tela de um bot: quem ele é (nome, modelo, instruções), o fluxo de etapas, os tetos de gasto
-// e o interruptor do envio. É aqui que o serviço é montado.
+// e **o botão** — ligado ou desligado, o único interruptor que existe (decisão do usuário em
+// 29/10/2026: "não quero tantas travas, só quero um botão"). Bot ligado responde quem escrever
+// para o número dele; desligado, não abre conversa nem responde.
 //
-// Três coisas separadas de propósito, porque têm pesos diferentes:
-//   - **o bot** (nome, modelo, instruções, ligado/desligado e tetos): admin e operador salvam;
-//   - **o fluxo** (etapas e dados a coletar): admin e operador, e a API recusa mudar o fluxo com
-//     conversa aberta — ninguém troca o chão debaixo de quem está conversando;
-//   - **o envio** (mandar mensagem para cliente de verdade): só admin, em seção vermelha.
+// O que continua separado: mudar o **fluxo** com conversa aberta é recusado pela API, porque a
+// pessoa ficaria numa etapa que deixou de existir.
 
 export default function PaginaBot() {
   const params = useParams<{ id: string }>();
@@ -46,7 +45,6 @@ export default function PaginaBot() {
   const sessao = useSessao();
   const perfil = sessao.data?.usuario.perfil;
   const podeEditar = perfil === "admin" || perfil === "operador";
-  const admin = perfil === "admin";
 
   const consulta = useQuery({
     queryKey: ["atendimento-bot", id],
@@ -74,19 +72,13 @@ export default function PaginaBot() {
     <Colunas
       lateral={
         <>
-          <Bloco titulo="Como está" tom={bot.ativo && bot.envio_habilitado ? "ok" : "neutro"}>
+          <Bloco titulo="Como está" tom={bot.ativo ? "ok" : "neutro"}>
             <Estados
               itens={[
                 {
                   rotulo: "Bot",
-                  valor: bot.ativo ? "ligado" : "desligado",
+                  valor: bot.ativo ? "ligado: responde quem escrever" : "desligado",
                   tom: bot.ativo ? "ok" : "neutro",
-                },
-                {
-                  rotulo: "Envio ao cliente",
-                  valor: bot.envio_habilitado ? "autorizado" : "em ensaio",
-                  tom: bot.envio_habilitado ? "aviso" : "neutro",
-                  detalhe: bot.envio_habilitado_por_nome ? `por ${bot.envio_habilitado_por_nome}` : undefined,
                 },
                 { rotulo: "Conversas", valor: conversas.total, detalhe: `${conversas.abertas} aberta(s)` },
                 { rotulo: "Identificador", valor: bot.slug },
@@ -136,7 +128,6 @@ export default function PaginaBot() {
         />
       </Secao>
 
-      {admin && <SecaoEnvio dados={consulta.data} />}
       {podeEditar && <SecaoExcluir dados={consulta.data} />}
     </Colunas>
   );
@@ -164,6 +155,7 @@ function DadosDoBot({
 }) {
   const { bot } = dados;
   const queryClient = useQueryClient();
+  const [confirmarLigar, setConfirmarLigar] = useState(false);
   const [f, setF] = useState<Formulario>({
     nome: bot.nome,
     modelo: bot.modelo,
@@ -325,20 +317,33 @@ function DadosDoBot({
           </div>
         </div>
 
-        <div className="flex items-start justify-between gap-6 rounded-lg border p-4">
+        <div
+          className={cn(
+            "flex items-start justify-between gap-6 rounded-lg border p-4",
+            f.ativo && "border-ouro/60",
+          )}
+        >
           <div className="min-w-0">
             <Label htmlFor="ativo" className="font-heading font-semibold">
               Bot ligado
             </Label>
             <p className="mt-1 text-sm text-muted-foreground">
-              Desligado, ele não abre conversa nem responde. Ligado, ele responde quem escrever —
-              mas só <strong>envia</strong> se o envio estiver autorizado abaixo.
+              É o único interruptor: <strong>ligado, ele responde</strong> quem escrever para o
+              número dele, com o texto que o modelo escrever na hora. Desligado, não abre conversa
+              nem responde — e o que estiver na fila espera.
+            </p>
+            <p className="mt-2 text-xs text-muted-foreground">
+              Antes de divulgar o número, mande uma mensagem para ele você mesmo: é o teste que não
+              mente.
             </p>
           </div>
           <Switch
             id="ativo"
             checked={f.ativo}
-            onCheckedChange={(v) => setF({ ...f, ativo: v })}
+            onCheckedChange={(v) => {
+              if (v && !bot.ativo) setConfirmarLigar(true);
+              else setF({ ...f, ativo: v });
+            }}
             disabled={!podeEditar}
           />
         </div>
@@ -348,94 +353,38 @@ function DadosDoBot({
             <Button type="submit" disabled={salvar.isPending}>
               {salvar.isPending ? "Salvando…" : "Salvar bot"}
             </Button>
+            {f.ativo !== bot.ativo && (
+              <span className="text-sm text-aviso">
+                {f.ativo ? "Salve para ligar o bot." : "Salve para desligar o bot."}
+              </span>
+            )}
           </div>
         )}
+
+        <AlertDialog open={confirmarLigar} onOpenChange={setConfirmarLigar}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Ligar {bot.nome}?</AlertDialogTitle>
+              <AlertDialogDescription>
+                A partir do momento em que você salvar, quem escrever para o número deste bot
+                recebe resposta. O texto é escrito pelo modelo na hora e ninguém revisa antes de
+                sair. Dá para desligar a qualquer momento, mas o que já saiu não volta.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>Cancelar</AlertDialogCancel>
+              <AlertDialogAction
+                onClick={() => {
+                  setConfirmarLigar(false);
+                  setF({ ...f, ativo: true });
+                }}
+              >
+                Ligar
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
       </form>
-    </Secao>
-  );
-}
-
-function SecaoEnvio({ dados }: { dados: DetalheBot }) {
-  const { bot } = dados;
-  const queryClient = useQueryClient();
-  const [confirmar, setConfirmar] = useState(false);
-
-  const definir = useMutation({
-    mutationFn: (habilitado: boolean) =>
-      api<DetalheBot>(`/atendimento/bots/${bot.id}/envio`, {
-        metodo: "PUT",
-        json: { envio_habilitado: habilitado },
-      }),
-    onSuccess: (_, habilitado) => {
-      void queryClient.invalidateQueries({ queryKey: ["atendimento-bot", bot.id] });
-      void queryClient.invalidateQueries({ queryKey: ["atendimento-bots"] });
-      void queryClient.invalidateQueries({ queryKey: ["atendimento-resumo"] });
-      toast.success(habilitado ? "Envio autorizado para este bot" : "Envio desligado: o bot volta ao ensaio");
-    },
-    onError: (e) => toast.error(e.message),
-  });
-
-  return (
-    <Secao titulo="Envio ao cliente" rotulo="Envio ao cliente">
-      <div className="flex max-w-3xl flex-col gap-4 rounded-lg border border-destructive/50 p-4">
-        <div>
-          <p className="font-heading font-semibold">Mandar mensagem no WhatsApp de quem escrever</p>
-          <p className="mt-1 text-sm text-muted-foreground">
-            Com isto ligado, o texto que o modelo escreve <strong>sai</strong> para o telefone da
-            pessoa, sem ninguém revisar antes. Desligado, a resposta é composta e fica guardada na
-            conversa com o motivo (ensaio) — é assim que se confere o bot antes de soltá-lo.
-          </p>
-          {bot.envio_habilitado && bot.envio_habilitado_por_nome && (
-            <p className="mt-2 text-sm">
-              <Badge>autorizado</Badge>{" "}
-              <span className="text-muted-foreground">
-                por {bot.envio_habilitado_por_nome}
-                {bot.envio_habilitado_em ? ` em ${dataHora(bot.envio_habilitado_em)}` : ""}
-              </span>
-            </p>
-          )}
-        </div>
-        <div className="flex items-center justify-between gap-6">
-          <Label htmlFor="envio">Envio autorizado</Label>
-          <Switch
-            id="envio"
-            checked={bot.envio_habilitado}
-            disabled={definir.isPending}
-            onCheckedChange={(v) => {
-              if (v) setConfirmar(true);
-              else definir.mutate(false);
-            }}
-          />
-        </div>
-        <p className="text-xs text-muted-foreground">
-          Além disto, a chave <code>ATENDIMENTO_ENVIO_HABILITADO</code> do servidor precisa estar
-          ligada. Com uma das duas desligada, nada sai.
-        </p>
-      </div>
-
-      <AlertDialog open={confirmar} onOpenChange={setConfirmar}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Autorizar o envio de {bot.nome}?</AlertDialogTitle>
-            <AlertDialogDescription>
-              A partir de agora, este bot responde no WhatsApp de quem escrever para ele. O texto é
-              escrito pelo modelo na hora e ninguém revisa antes de sair. Dá para desligar a
-              qualquer momento, mas o que já saiu não volta.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Não</AlertDialogCancel>
-            <AlertDialogAction
-              onClick={() => {
-                setConfirmar(false);
-                definir.mutate(true);
-              }}
-            >
-              Autorizar
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
     </Secao>
   );
 }

@@ -87,13 +87,7 @@ export default function PaginaBots() {
                   <TableCell className="text-right tabular-nums">{b.etapas ?? 0} etapa(s)</TableCell>
                   <TableCell className="text-right tabular-nums">{b.conversas_abertas ?? 0}</TableCell>
                   <TableCell>
-                    {!b.ativo ? (
-                      <Badge variant="secondary">desligado</Badge>
-                    ) : b.envio_habilitado ? (
-                      <Badge>responde</Badge>
-                    ) : (
-                      <Badge variant="outline">ensaio</Badge>
-                    )}
+                    {b.ativo ? <Badge>ligado</Badge> : <Badge variant="secondary">desligado</Badge>}
                   </TableCell>
                   <TableCell className="text-xs whitespace-nowrap text-muted-foreground">
                     {dataHora(b.criado_em)}

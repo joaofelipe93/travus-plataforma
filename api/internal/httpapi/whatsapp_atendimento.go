@@ -50,25 +50,22 @@ func (s *Servidor) situacaoWhatsappAtendimento(w http.ResponseWriter, r *http.Re
 	}
 
 	resposta := map[string]any{
-		"disponivel":               false,
-		"envio_habilitado_servico": s.cfg.AtendimentoEnvioHabilitado,
-		"modelo_disponivel":        s.cfg.ModeloAtendimento != nil,
+		"disponivel":        false,
+		"modelo_disponivel": s.cfg.ModeloAtendimento != nil,
 	}
 
 	status, erroWorker := s.cfg.AtendimentoWhatsapp.Status(ctx)
 	if erroWorker == nil {
 		resposta["disponivel"] = true
-		resposta["envio_habilitado_worker"] = status.EnvioServico
 	} else {
 		resposta["motivo"] = erroWorker.Error()
 	}
 
 	type botNaTela struct {
-		ID              int64  `json:"id"`
-		Nome            string `json:"nome"`
-		Slug            string `json:"slug"`
-		Ativo           bool   `json:"ativo"`
-		EnvioHabilitado bool   `json:"envio_habilitado"`
+		ID    int64  `json:"id"`
+		Nome  string `json:"nome"`
+		Slug  string `json:"slug"`
+		Ativo bool   `json:"ativo"`
 		// Estado no vocabulário das outras telas de WhatsApp da plataforma, para a tela usar as
 		// mesmas cores e rótulos (components/conexao-whatsapp.tsx).
 		Estado string `json:"estado"`
@@ -86,8 +83,7 @@ func (s *Servidor) situacaoWhatsappAtendimento(w http.ResponseWriter, r *http.Re
 	for _, b := range bots {
 		item := botNaTela{
 			ID: b.ID, Nome: b.Nome, Slug: b.Slug, Ativo: b.Ativo,
-			EnvioHabilitado: b.EnvioHabilitado, Estado: "indisponivel",
-			Fila: filaPorBot[b.ID],
+			Estado: "indisponivel", Fila: filaPorBot[b.ID],
 		}
 		if item.Fila == nil {
 			item.Fila = map[string]int64{}

@@ -14,13 +14,15 @@ import (
 
 // Serviço de Atendimento (issue #100): cadastro dos bots e do fluxo de cada um. Quem conversa é
 // o worker de WhatsApp (etapa D) e quem responde é o agente (etapa B); aqui é só o que define
-// um bot — e as duas regras que protegem quem está do outro lado:
+// um bot.
 //
-//   - `envio_habilitado` (mandar de verdade) **só admin** muda. Operador liga e desliga o bot,
-//     escreve instruções e monta o fluxo, mas não autoriza a plataforma a falar com cliente —
-//     na tela, lance real também é só de admin, e configuração não pode ser a porta dos fundos.
-//   - mudar o **fluxo** com conversa aberta é recusado (409): a pessoa ficaria numa etapa que
-//     deixou de existir. Encerre as conversas ou espere elas fecharem.
+// **Um bot tem um botão: ligado ou desligado** (decisão do usuário em 29/10/2026). Antes havia
+// também um `envio_habilitado` só de admin, que deixava o bot conversar sem nada sair (ensaio);
+// eram travas demais para o serviço falar pelo número da própria casa — quem liga o bot é quem
+// responde por ele. Para conferir um bot antes de divulgar o número, mande mensagem para ele.
+//
+// A regra que sobra: mudar o **fluxo** com conversa aberta é recusado (409), porque a pessoa
+// ficaria numa etapa que deixou de existir. Encerre as conversas ou espere elas fecharem.
 
 // Limite do corpo: as instruções de um bot vão a 20 mil caracteres e o fluxo tem até 30 etapas,
 // cada uma com instruções próprias — por isso o do fluxo é maior que o de qualquer outra rota.
@@ -38,7 +40,6 @@ type botJSON struct {
 	Instrucoes            string  `json:"instrucoes"`
 	Saudacao              *string `json:"saudacao"`
 	Ativo                 bool    `json:"ativo"`
-	EnvioHabilitado       bool    `json:"envio_habilitado"`
 	MaxMensagensHora      int32   `json:"max_mensagens_hora"`
 	MaxTokensConversa     int32   `json:"max_tokens_conversa"`
 	PausaRespostaSegundos int32   `json:"pausa_resposta_segundos"`
@@ -50,7 +51,7 @@ type botJSON struct {
 func botParaJSON(b db.AtendimentoBot) botJSON {
 	return botJSON{
 		ID: b.ID, Nome: b.Nome, Slug: b.Slug, Modelo: b.Modelo, Instrucoes: b.Instrucoes,
-		Saudacao: b.Saudacao, Ativo: b.Ativo, EnvioHabilitado: b.EnvioHabilitado,
+		Saudacao: b.Saudacao, Ativo: b.Ativo,
 		MaxMensagensHora: b.MaxMensagensHora, MaxTokensConversa: b.MaxTokensConversa,
 		PausaRespostaSegundos: b.PausaRespostaSegundos,
 	}
@@ -97,7 +98,7 @@ func (s *Servidor) listarBots(w http.ResponseWriter, r *http.Request, _ *Usuario
 	for _, l := range linhas {
 		b := botParaJSON(db.AtendimentoBot{
 			ID: l.ID, Nome: l.Nome, Slug: l.Slug, Modelo: l.Modelo, Instrucoes: l.Instrucoes,
-			Saudacao: l.Saudacao, Ativo: l.Ativo, EnvioHabilitado: l.EnvioHabilitado,
+			Saudacao: l.Saudacao, Ativo: l.Ativo,
 			MaxMensagensHora: l.MaxMensagensHora, MaxTokensConversa: l.MaxTokensConversa,
 			PausaRespostaSegundos: l.PausaRespostaSegundos,
 		})
@@ -244,7 +245,8 @@ func (s *Servidor) criarBot(w http.ResponseWriter, r *http.Request, u *UsuarioSe
 	responderJSON(w, http.StatusCreated, map[string]any{"bot": botParaJSON(bot)})
 }
 
-// PUT /atendimento/bots/{id} — admin e operador. `slug` e `envio_habilitado` não passam por aqui.
+// PUT /atendimento/bots/{id} — admin e operador. O `slug` não passa por aqui: trocá-lo perderia
+// o pareamento do WhatsApp daquele bot.
 func (s *Servidor) atualizarBot(w http.ResponseWriter, r *http.Request, u *UsuarioSessao) {
 	id, ok := idDoCaminho(r)
 	if !ok {
@@ -284,41 +286,6 @@ func (s *Servidor) atualizarBot(w http.ResponseWriter, r *http.Request, u *Usuar
 	}
 	s.auditar(r.Context(), r, &u.ID, "atendimento_bot_atualizado", "atendimento_bot", idTexto(bot.ID),
 		map[string]any{"nome": bot.Nome, "modelo": bot.Modelo, "ativo": bot.Ativo})
-	responderJSON(w, http.StatusOK, map[string]any{"bot": botParaJSON(bot)})
-}
-
-// PUT /atendimento/bots/{id}/envio — **só admin**: é o que autoriza a plataforma a falar com
-// cliente de verdade. Com isto desligado o bot fica em ensaio.
-func (s *Servidor) definirEnvioDoBot(w http.ResponseWriter, r *http.Request, u *UsuarioSessao) {
-	id, ok := idDoCaminho(r)
-	if !ok {
-		responderErro(w, http.StatusBadRequest, "id inválido")
-		return
-	}
-	var p struct {
-		EnvioHabilitado *bool `json:"envio_habilitado"`
-	}
-	if err := lerJSON(w, r, &p, 1<<10); err != nil {
-		responderErro(w, http.StatusBadRequest, err.Error())
-		return
-	}
-	if p.EnvioHabilitado == nil {
-		responderErro(w, http.StatusBadRequest, "informe envio_habilitado (true ou false)")
-		return
-	}
-	bot, err := s.q.DefinirEnvioDoBot(r.Context(), db.DefinirEnvioDoBotParams{
-		ID: id, EnvioHabilitado: *p.EnvioHabilitado, Por: &u.ID,
-	})
-	if errors.Is(err, pgx.ErrNoRows) {
-		responderErro(w, http.StatusNotFound, "bot não encontrado")
-		return
-	}
-	if err != nil {
-		erroInterno(w, r, err)
-		return
-	}
-	s.auditar(r.Context(), r, &u.ID, "atendimento_envio_alterado", "atendimento_bot", idTexto(bot.ID),
-		map[string]any{"slug": bot.Slug, "envio_habilitado": bot.EnvioHabilitado})
 	responderJSON(w, http.StatusOK, map[string]any{"bot": botParaJSON(bot)})
 }
 

@@ -73,7 +73,7 @@ func statusDaMensagem(t *testing.T, s *Servidor, id int64) (string, int32, *stri
 
 func TestAtendimentoFilaEntregaEregistra(t *testing.T) {
 	m := &modeloRoteiroBot{turnos: []turnoBot{{texto: "Oi! Em qual bairro?"}}}
-	s := servidorComBot(t, m, true)
+	s := servidorComBot(t, m)
 	bot := botComFluxo(t, s, "fila", true)
 	res, err := s.responderAtendimento(context.Background(), bot, "5511900060001", "Ana", "oi")
 	if err != nil {
@@ -115,7 +115,7 @@ func TestAtendimentoFilaEntregaEregistra(t *testing.T) {
 // A decisão mais nova é a que vale: desligar o bot segura o que ele já tinha composto.
 func TestAtendimentoFilaNaoEntregaDeBotDesligado(t *testing.T) {
 	m := &modeloRoteiroBot{turnos: []turnoBot{{texto: "Oi!"}}}
-	s := servidorComBot(t, m, true)
+	s := servidorComBot(t, m)
 	bot := botComFluxo(t, s, "desligado-depois", true)
 	if _, err := s.responderAtendimento(context.Background(), bot, "5511900060002", "", "oi"); err != nil {
 		t.Fatal(err)
@@ -126,20 +126,16 @@ func TestAtendimentoFilaNaoEntregaDeBotDesligado(t *testing.T) {
 		t.Errorf("bot desligado não devia entregar nada: %+v", fila)
 	}
 
-	s.exec(t, "UPDATE atendimento.bots SET ativo = true, envio_habilitado = false WHERE id = $1", bot.ID)
-	if fila := filaDoWorker(t, s, []string{bot.Slug}); len(fila) != 0 {
-		t.Errorf("bot sem envio autorizado não devia entregar nada: %+v", fila)
-	}
-
-	s.exec(t, "UPDATE atendimento.bots SET envio_habilitado = true WHERE id = $1", bot.ID)
+	// Ligar de volta destrava o que já estava composto: a decisão mais nova é a que vale.
+	s.exec(t, "UPDATE atendimento.bots SET ativo = true WHERE id = $1", bot.ID)
 	if fila := filaDoWorker(t, s, []string{bot.Slug}); len(fila) != 1 {
-		t.Errorf("com as duas chaves ligadas, devia entregar: %+v", fila)
+		t.Errorf("bot ligado devia entregar: %+v", fila)
 	}
 }
 
 func TestAtendimentoFilaSoDeQuemTemSessao(t *testing.T) {
 	m := &modeloRoteiroBot{turnos: []turnoBot{{texto: "Oi!"}}}
-	s := servidorComBot(t, m, true)
+	s := servidorComBot(t, m)
 	bot := botComFluxo(t, s, "com-sessao", true)
 	if _, err := s.responderAtendimento(context.Background(), bot, "5511900060003", "", "oi"); err != nil {
 		t.Fatal(err)
@@ -157,7 +153,7 @@ func TestAtendimentoFilaSoDeQuemTemSessao(t *testing.T) {
 
 func TestAtendimentoFilaFalhaVoltaOuDesiste(t *testing.T) {
 	m := &modeloRoteiroBot{turnos: []turnoBot{{texto: "Oi!"}}}
-	s := servidorComBot(t, m, true)
+	s := servidorComBot(t, m)
 	bot := botComFluxo(t, s, "falhas", true)
 	res, err := s.responderAtendimento(context.Background(), bot, "5511900060004", "", "oi")
 	if err != nil {
@@ -207,7 +203,7 @@ func TestAtendimentoFilaFalhaVoltaOuDesiste(t *testing.T) {
 
 func TestAtendimentoFilaDesisteNoTeto(t *testing.T) {
 	m := &modeloRoteiroBot{turnos: []turnoBot{{texto: "Oi!"}}}
-	s := servidorComBot(t, m, true)
+	s := servidorComBot(t, m)
 	bot := botComFluxo(t, s, "teto-tentativas", true)
 	res, err := s.responderAtendimento(context.Background(), bot, "5511900060005", "", "oi")
 	if err != nil {
@@ -226,7 +222,7 @@ func TestAtendimentoFilaDesisteNoTeto(t *testing.T) {
 }
 
 func TestAtendimentoFilaExigeToken(t *testing.T) {
-	s := servidorComBot(t, &modeloRoteiroBot{}, true)
+	s := servidorComBot(t, &modeloRoteiroBot{})
 	r := httptest.NewRequest(http.MethodPost, "/internal/atendimento/fila/proxima", strings.NewReader(`{"bots":["x"]}`))
 	r.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()

@@ -52,12 +52,10 @@ test('o status descreve cada sessão e quem ficou sem', async () => {
       headers: { 'x-admin-token': TOKEN_ADMIN_TESTE },
     })
     const corpo = r.json() as {
-      envio_habilitado_servico: boolean
       max_sessoes: number
       sem_sessao: string[]
       sessoes: { bot: string; conectado: boolean; qr: string | null }[]
     }
-    assert.equal(corpo.envio_habilitado_servico, true)
     assert.equal(corpo.max_sessoes, 3)
     assert.deepEqual(corpo.sem_sessao, [])
     assert.deepEqual(corpo.sessoes.map((s) => s.bot).sort(), ['suporte', 'vendas'])

@@ -7,7 +7,7 @@ Roteiro para colocar a Travus Plataforma numa VM e mantê-la. Decisões do usuá
 - **Backup do Postgres**: na própria VM, com cópia manual para fora (`make backup-baixar`).
 - **Alertas**: e-mail (vigia da API) + monitor externo.
 - **Notificador de check-in (WhatsApp)**: sai da VM `appairbnb` e passa a rodar nesta VM, com fila e eventos no mesmo Postgres. O número é **pareado de novo** pela tela Reservas → Conexões (sem copiar a sessão nem o histórico da `appairbnb`). Roteiro na seção 9.
-- **Atendimento (bots de WhatsApp)**: sobe junto e **sobe vazio** — sem bot cadastrado não há sessão nem QR. Cada bot tem o próprio número, pareado pela tela Atendimento → Conexões, e nada é enviado até três chaves estarem ligadas. A VM de 2 GB comporta **2 bots** (`MAX_SESSOES=2`). Roteiro na seção 10.
+- **Atendimento (bots de WhatsApp)**: sobe junto e **sobe vazio** — sem bot cadastrado não há sessão nem QR. Cada bot tem o próprio número, pareado pela tela Atendimento → Conexões, e **um bot só responde depois de ligado** (um botão, na tela). A VM de 2 GB comporta **2 bots** (`MAX_SESSOES=2`). Roteiro na seção 10.
 
 Nada disso roda sem pedido: criar a VM, mexer no DNS, publicar e ligar o lance real são decisões do usuário, na hora.
 
@@ -177,35 +177,31 @@ O serviço (`workers/atendimento-whatsapp`) sobe junto com a plataforma desde o 
 trouxer, e **sobe vazio**: sem bot cadastrado não existe sessão, nenhum QR aparece e nada é
 enviado. Ele é o único serviço com **vários números** — um por bot.
 
-Antes de qualquer pareamento, três chaves em série decidem se alguma mensagem sai:
+**Um bot tem um botão**: ligado ou desligado (Atendimento → Bots, ou a lista em Configurações).
+Ligado, ele responde quem escrever para o número dele; desligado, não abre conversa nem responde,
+e o que estiver na fila espera. Admin e operador mexem nesse botão.
 
-| Chave | Onde | Padrão |
-|---|---|---|
-| `ATENDIMENTO_ENVIO_HABILITADO` | `.env` da VM (API) | `false` |
-| `envio_habilitado` de cada bot | tela Atendimento → Configurações (**só admin**) | desligado |
-| `ENVIO_HABILITADO` do serviço | `.env` da VM (worker) | `true` |
-
-Com qualquer uma desligada, o bot **compõe a resposta e ela fica guardada na conversa** com o
-motivo — é o modo ensaio, e é assim que se confere um bot antes de soltá-lo.
+Não há chave de ambiente no caminho: para parar tudo de uma vez, desligue os bots na tela ou
+derrube o container (`docker compose stop atendimento-whatsapp`). O que existe de limite, e não é
+botão, são os **tetos** de cada bot (tokens por conversa, respostas por hora).
 
 1. **Criar o bot** (admin ou operador): `https://app.<domínio>/atendimento/bots` → "Novo bot".
    Escreva as instruções (o que ele pode responder e o que não pode) e monte o fluxo em
    Atendimento → Bots → *o bot* → **O fluxo**. Ele nasce **desligado**.
-2. **Ensaiar antes de parear**: com o bot ligado e o envio desligado, mande uma mensagem pela
-   rota interna (ou deixe o pareamento para depois) e leia a resposta em Atendimento →
-   Conversas. Nada sai para ninguém.
+2. **Parear antes de ligar**: deixe o bot desligado e pareie o número (passo 3). Com ele
+   desligado, nada é respondido — e a mensagem de teste (passo 4) continua funcionando.
 3. **Parear o número** (admin): Atendimento → **Conexões** → o cartão daquele bot mostra o QR.
    No celular do **chip daquele atendimento**: WhatsApp → Dispositivos conectados → Conectar
    dispositivo → escaneie. **Confira o nome do bot no cartão antes de escanear**: cada QR é de um
    bot, e o aparelho aparece no celular como `Travus <nome do bot>`.
    - **Nunca pareie aqui o chip das reservas nem o dos boletos.** São três serviços e três
      números; duas conexões na mesma sessão derrubam uma à outra.
-4. **Testar** (em Conexões): "Enviar teste" para **o seu próprio número**. Ela sai mesmo em modo
-   ensaio — é com ela que se confere se o número pareado é o certo.
-5. **Ligar o envio** (só admin, e só quando o ensaio convencer): a chave do servidor no `.env` da
-   VM (`ATENDIMENTO_ENVIO_HABILITADO=true`, exige publicar de novo) e o interruptor do bot em
-   Atendimento → Configurações. A partir daí **o texto que o modelo escreve sai sem revisão
-   humana** para quem escrever ao bot.
+4. **Testar o pareamento** (em Conexões): "Enviar teste" para **o seu próprio número**. Ela sai
+   mesmo com o bot desligado — é com ela que se confere se o número pareado é o certo.
+5. **Ligar o bot** (Atendimento → Bots → *o bot*, ou a lista em Configurações). A partir daí **o
+   texto que o modelo escreve sai sem revisão humana** para quem escrever ao bot. **Antes de
+   divulgar o número, escreva para ele você mesmo pelo WhatsApp** e leia a conversa em
+   Atendimento → Conversas: é o teste que não mente, porque é o caminho de verdade.
 
 ### Memória: quantos bots cabem
 
@@ -295,7 +291,7 @@ Na VM, `make up`, `make prod-local` e `make dev-web` se recusam a rodar: a stack
 - backup atrasado (mais de 26 h) ou com erro; disco acima de 80%;
 - certificado HTTPS vencendo em menos de 14 dias ou não verificável (com `CERT_RESOLVER=le-teste`, esse alerta é esperado);
 - **notificador de check-in** (`VIGIA_CHECKIN=true`): serviço sem resposta ou WhatsApp desconectado/esperando QR há mais de 10 min; conectado sem grupo escolhido; mensagens que desistiram nas últimas 24 h; mensagens paradas há mais de 30 min com o WhatsApp conectado. Antes do passo 1 da seção 9, o alerta "esperando a leitura do QR" é esperado.
-- **atendimento** (`VIGIA_ATENDIMENTO=true`): serviço dos bots sem resposta há mais de 10 min; **bot ligado e autorizado cujo número caiu**, está esperando QR ou ficou sem sessão por causa do teto; respostas que não chegaram a quem escreveu (24 h); fila de respostas parada há mais de 30 min com algum número conectado. Bot desligado não é vigiado. Sem nome, telefone nem texto de conversa no e-mail.
+- **atendimento** (`VIGIA_ATENDIMENTO=true`): serviço dos bots sem resposta há mais de 10 min; **bot ligado cujo número caiu**, está esperando QR ou ficou sem sessão por causa do teto; respostas que não chegaram a quem escreveu (24 h); fila de respostas parada há mais de 30 min com algum número conectado. Bot desligado não é vigiado. Sem nome, telefone nem texto de conversa no e-mail.
 
 Os e-mails não levam nome de cliente nem de hóspede, só grupo, cota e versão.
 

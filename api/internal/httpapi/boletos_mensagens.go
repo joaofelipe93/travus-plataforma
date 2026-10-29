@@ -33,14 +33,14 @@ type ConfigBoletos struct {
 	HoraCobranca     int
 	AnteciparDiaUtil bool
 	// Envio de verdade: precisa desta opção E da chave do servidor.
-	EnvioHabilitado      bool
-	EnvioHabilitadoPor   *int64
-	PausaEnvio           time.Duration
-	MaxMensagensRodada   int
+	EnvioHabilitado    bool
+	EnvioHabilitadoPor *int64
+	PausaEnvio         time.Duration
+	MaxMensagensRodada int
 	// Modelos das mensagens (migração 00019): uma mensagem só para todos, com os campos entre
 	// chaves preenchidos no envio. Ver api/internal/mensagem.
-	TextoEnvio    string
-	TextoCobranca string
+	TextoEnvio           string
+	TextoCobranca        string
 	UltimoEnvioDia       *time.Time
 	UltimaCobrancaDia    *time.Time
 	AtualizadoPorNome    string

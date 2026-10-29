@@ -2,7 +2,7 @@
 
 import { useQuery } from "@tanstack/react-query";
 import Link from "next/link";
-import { AvisoEnsaioAtendimento } from "@/components/aviso-ensaio-atendimento";
+import { AvisoAtendimento } from "@/components/aviso-atendimento";
 import { Colunas } from "@/components/pagina";
 import { Bloco, Estados, Indicador, Indicadores, Vazio, type ItemEstado } from "@/components/painel";
 import { Alert, AlertDescription } from "@/components/ui/alert";
@@ -67,13 +67,13 @@ export default function PaginaPainelAtendimento() {
       ) : (
         <Indicadores>
           <Indicador
-            rotulo="Bots respondendo"
-            valor={r.bots.com_envio}
-            tom={r.bots.com_envio > 0 ? "ok" : "neutro"}
+            rotulo="Bots ligados"
+            valor={r.bots.ativos}
+            tom={r.bots.ativos > 0 ? "ok" : "neutro"}
             detalhe={
               r.bots.total === 0
                 ? "Nenhum bot cadastrado ainda"
-                : `${r.bots.ativos} ligado(s) de ${r.bots.total} · os outros ficam em ensaio`
+                : `de ${r.bots.total} cadastrado(s) · bot ligado responde quem escrever`
             }
             href="/atendimento/bots"
           />
@@ -142,13 +142,7 @@ export default function PaginaPainelAtendimento() {
                     </p>
                   </div>
                   <span className="flex items-center gap-2">
-                    {!b.ativo ? (
-                      <Badge variant="secondary">desligado</Badge>
-                    ) : b.envio_habilitado ? (
-                      <Badge>responde</Badge>
-                    ) : (
-                      <Badge variant="outline">ensaio</Badge>
-                    )}
+                    {b.ativo ? <Badge>ligado</Badge> : <Badge variant="secondary">desligado</Badge>}
                   </span>
                 </li>
               ))}
@@ -216,7 +210,7 @@ function Lateral({
   ];
   return (
     <>
-      <AvisoEnsaioAtendimento resumo={resumo} />
+      <AvisoAtendimento resumo={resumo} />
       <Bloco
         titulo="O mês"
         descricao="Cada mensagem respondida é uma chamada ao modelo: o gasto cresce com a conversa."
@@ -276,12 +270,12 @@ function Lateral({
         />
       </Bloco>
       <Bloco
-        titulo="Mensagens que não saíram"
-        descricao="Em ensaio, a resposta é composta e guardada sem ser enviada."
+        titulo="Respostas que não saíram"
+        descricao="Guardadas na conversa, com o motivo: teto da hora, ou falha na entrega."
       >
         <Estados
           itens={[
-            { rotulo: "No mês (ensaio ou teto)", valor: resumo.fila.canceladas_mes },
+            { rotulo: "No mês (teto da hora)", valor: resumo.fila.canceladas_mes },
             {
               rotulo: "Não entregues",
               valor: resumo.fila.falharam,

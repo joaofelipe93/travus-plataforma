@@ -7,6 +7,7 @@ package httpapi
 
 import (
 	"net/http"
+	"net/http/httptest"
 	"testing"
 
 	"github.com/joaofelipe93/travus-plataforma/api/internal/db"
@@ -44,8 +45,8 @@ func TestAtendimentoCadastroDeBot(t *testing.T) {
 	if criado.Modelo == "" {
 		t.Error("o bot devia nascer com o modelo padrão")
 	}
-	if criado.Ativo || criado.EnvioHabilitado {
-		t.Error("bot novo precisa nascer desligado e sem envio: ninguém liga sem querer")
+	if criado.Ativo {
+		t.Error("bot novo precisa nascer desligado: ninguém liga sem querer")
 	}
 
 	// Slug repetido não passa: é a identidade da sessão do WhatsApp.
@@ -75,10 +76,6 @@ func TestAtendimentoCadastroDeBot(t *testing.T) {
 	if !atualizado.Ativo || atualizado.MaxMensagensHora != 120 {
 		t.Errorf("atualização não valeu: %+v", atualizado)
 	}
-	if atualizado.EnvioHabilitado {
-		t.Error("atualizar o bot não pode ligar o envio: isso é rota de admin")
-	}
-
 	// Trocar o slug é recusado: o pareamento do WhatsApp mora numa pasta com esse nome.
 	outro := botDeTeste("vendas-2")
 	if rec := op.enviarJSON(http.MethodPut, "/atendimento/bots/"+idTexto(criado.ID), outro); rec.Code != http.StatusConflict {
@@ -107,50 +104,64 @@ func TestAtendimentoCadastroDeBot(t *testing.T) {
 	}
 }
 
-func TestAtendimentoEnvioSoAdmin(t *testing.T) {
+// O botão do bot é o único interruptor, e **admin e operador** mexem nele — quem monta o bot é
+// quem o liga (decisão do usuário em 29/10/2026: "só quero um botão"). Antes havia um
+// `envio_habilitado` só de admin, que deixava o bot conversar sem nada sair; eram travas demais.
+func TestAtendimentoBotaoLigaEDesliga(t *testing.T) {
 	s := novoServidorTeste(t)
 	limparAtendimento(t, s)
-	criarUsuario(t, s, "op-envio@teste", db.PerfilUsuarioOperador)
-	criarUsuario(t, s, "admin-envio@teste", db.PerfilUsuarioAdmin)
+	criarUsuario(t, s, "op-botao@teste", db.PerfilUsuarioOperador)
+	criarUsuario(t, s, "leitura-botao@teste", db.PerfilUsuarioLeitura)
 	h := s.Rotas()
-	op, _ := entrar(t, h, "op-envio@teste", senhaTeste)
-	adm, _ := entrar(t, h, "admin-envio@teste", senhaTeste)
+	op, _ := entrar(t, h, "op-botao@teste", senhaTeste)
+	leitura, _ := entrar(t, h, "leitura-botao@teste", senhaTeste)
 
 	rec := op.enviarJSON(http.MethodPost, "/atendimento/bots", botDeTeste("cobranca"))
 	bot := decodificar[struct {
 		Bot botJSON `json:"bot"`
 	}](t, rec).Bot
-	rota := "/atendimento/bots/" + idTexto(bot.ID) + "/envio"
+	rota := "/atendimento/bots/" + idTexto(bot.ID)
 
-	// Operador monta o bot, mas não autoriza a plataforma a falar com cliente.
-	if rec := op.enviarJSON(http.MethodPut, rota, map[string]any{"envio_habilitado": true}); rec.Code != http.StatusForbidden {
-		t.Errorf("operador devia levar 403 ao ligar o envio, veio %d %s", rec.Code, rec.Body)
+	ligar := func(n *navegador, ligado bool) *httptest.ResponseRecorder {
+		corpo := botDeTeste(bot.Slug)
+		corpo["ativo"] = ligado
+		return n.enviarJSON(http.MethodPut, rota, corpo)
 	}
-	// Sem `:=` aqui de propósito: dentro do if a variável seria outra, e o decodificar abaixo
-	// leria a resposta da criação do bot em vez desta.
-	rec = adm.enviarJSON(http.MethodPut, rota, map[string]any{"envio_habilitado": true})
+
+	// Perfil leitura não liga nada.
+	if rec := ligar(leitura, true); rec.Code != http.StatusForbidden {
+		t.Errorf("leitura devia levar 403 ao ligar o bot, veio %d", rec.Code)
+	}
+	// Operador liga.
+	rec = ligar(op, true)
 	if rec.Code != http.StatusOK {
-		t.Fatalf("admin devia conseguir ligar: %d %s", rec.Code, rec.Body)
+		t.Fatalf("operador devia conseguir ligar: %d %s", rec.Code, rec.Body)
 	}
 	depois := decodificar[struct {
 		Bot botJSON `json:"bot"`
 	}](t, rec).Bot
-	if !depois.EnvioHabilitado {
-		t.Error("o envio devia ficar ligado")
+	if !depois.Ativo {
+		t.Error("o bot devia ficar ligado")
 	}
-	// Quem ligou fica gravado, e desligar não apaga esse registro.
-	linha, err := s.q.BuscarBot(t.Context(), bot.ID)
-	if err != nil {
+	// E desliga.
+	rec = ligar(op, false)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("desligar: %d %s", rec.Code, rec.Body)
+	}
+	if decodificar[struct {
+		Bot botJSON `json:"bot"`
+	}](t, rec).Bot.Ativo {
+		t.Error("o bot devia ficar desligado")
+	}
+
+	// Ligar e desligar ficam na auditoria: é o histórico de quem respondeu por aquilo.
+	var quantas int
+	if err := s.pool.QueryRow(t.Context(),
+		"SELECT count(*) FROM auditoria WHERE acao = 'atendimento_bot_atualizado'").Scan(&quantas); err != nil {
 		t.Fatal(err)
 	}
-	if linha.EnvioHabilitadoPor == nil || linha.EnvioHabilitadoEm == nil {
-		t.Error("ligar o envio devia gravar quem ligou e quando")
-	}
-	if rec := adm.enviarJSON(http.MethodPut, rota, map[string]any{"envio_habilitado": false}); rec.Code != http.StatusOK {
-		t.Fatalf("desligar: %d", rec.Code)
-	}
-	if linha, _ := s.q.BuscarBot(t.Context(), bot.ID); linha.EnvioHabilitadoPor == nil {
-		t.Error("desligar não devia apagar quem havia ligado: é o histórico útil")
+	if quantas < 2 {
+		t.Errorf("as duas mudanças deviam estar auditadas: %d", quantas)
 	}
 }
 

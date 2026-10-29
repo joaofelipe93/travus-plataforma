@@ -100,10 +100,6 @@ export function criarGerente(options?: {
   }
 
   function iniciar(): void {
-    if (!env.ENVIO_HABILITADO) {
-      log.warn('ENVIO_HABILITADO=false: nenhuma sessão será aberta (freio de mão local)')
-      return
-    }
     const ciclo = () => {
       cicloAtual = reconciliar()
         .catch((err) => log.error({ err }, 'falha ao reconciliar as sessões'))

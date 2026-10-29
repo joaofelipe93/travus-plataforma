@@ -4,7 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
 import { useState } from "react";
 import { toast } from "sonner";
-import { AvisoEnsaioAtendimento } from "@/components/aviso-ensaio-atendimento";
+import { AvisoAtendimento } from "@/components/aviso-atendimento";
 import {
   BadgeEstadoWhatsapp,
   QrWhatsapp,
@@ -72,7 +72,7 @@ export default function PaginaConexoesAtendimento() {
     <Colunas
       lateral={
         <>
-          {resumo.data && <AvisoEnsaioAtendimento resumo={resumo.data} />}
+          {resumo.data && <AvisoAtendimento resumo={resumo.data} />}
           <Bloco
             titulo="O serviço"
             tom={dados.disponivel ? "ok" : "erro"}
@@ -92,29 +92,20 @@ export default function PaginaConexoesAtendimento() {
                   tom: conectados > 0 ? "ok" : "aviso",
                 },
                 {
-                  rotulo: "Envio no servidor",
-                  valor: dados.envio_habilitado_servico ? "liberado" : "desligado",
-                  tom: dados.envio_habilitado_servico ? "aviso" : "neutro",
+                  rotulo: "Bots ligados",
+                  valor: dados.bots.filter((b) => b.ativo).length,
+                  tom: dados.bots.some((b) => b.ativo) ? "ok" : "neutro",
                 },
-                ...(dados.envio_habilitado_worker === undefined
-                  ? []
-                  : [
-                      {
-                        rotulo: "Freio do serviço",
-                        valor: dados.envio_habilitado_worker ? "liberado" : "puxado",
-                        tom: dados.envio_habilitado_worker ? "aviso" : "neutro",
-                      } as const,
-                    ]),
               ]}
             />
           </Bloco>
-          <Bloco titulo="As três chaves do envio" descricao="Só leitura aqui.">
+          <Bloco titulo="O que faz um bot responder">
             <p className="text-sm text-muted-foreground">
-              Para uma resposta sair, precisam estar ligadas: a chave do servidor, o envio daquele
-              bot e o freio de mão do serviço. Qualquer uma desligada e a resposta fica guardada.
+              Duas coisas: o <strong>botão do bot</strong> ligado e o número dele{" "}
+              <strong>pareado aqui</strong>. Sem o número, a resposta fica na fila esperando.
             </p>
             <Link href="/atendimento/configuracao" className={buttonVariants({ variant: "outline", size: "sm" })}>
-              Ver em Configurações
+              Ligar e desligar bots
             </Link>
           </Bloco>
         </>
@@ -230,9 +221,9 @@ function CartaoDoBot({ bot, servicoNoAr }: { bot: BotNaConexao; servicoNoAr: boo
             detalhe: bot.aberta_ha_ms ? `conectado há ${duracao(bot.aberta_ha_ms)}` : undefined,
           },
           {
-            rotulo: "Envio deste bot",
-            valor: bot.envio_habilitado ? "autorizado" : "em ensaio",
-            tom: bot.envio_habilitado ? "aviso" : "neutro",
+            rotulo: "O bot",
+            valor: bot.ativo ? "ligado" : "desligado",
+            tom: bot.ativo ? "ok" : "neutro",
           },
           {
             rotulo: "Respostas na fila",
@@ -265,9 +256,8 @@ function CartaoDoBot({ bot, servicoNoAr }: { bot: BotNaConexao; servicoNoAr: boo
           <div>
             <p className="font-heading font-semibold">Mensagem de teste</p>
             <p className="mt-1 text-sm text-muted-foreground">
-              Sai pelo número deste bot <strong>para o telefone que você digitar</strong> — e sai
-              mesmo em modo ensaio, porque é com ela que se confere o pareamento. Use o seu próprio
-              número.
+              Sai pelo número deste bot <strong>para o telefone que você digitar</strong>, mesmo com
+              o bot desligado: é com ela que se confere o pareamento. Use o seu próprio número.
             </p>
           </div>
           <div className="flex flex-wrap items-end gap-3">

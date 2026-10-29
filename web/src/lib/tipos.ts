@@ -657,14 +657,11 @@ export type Bot = {
   instrucoes: string;
   saudacao: string | null;
   ativo: boolean;
-  envio_habilitado: boolean;
   max_mensagens_hora: number;
   max_tokens_conversa: number;
   pausa_resposta_segundos: number;
   criado_em: string;
   atualizado_em: string;
-  envio_habilitado_por_nome?: string | null;
-  envio_habilitado_em?: string | null;
   // Só na lista.
   etapas?: number;
   conversas_abertas?: number;
@@ -745,13 +742,12 @@ export type DetalheConversa = {
 };
 
 export type ResumoAtendimento = {
-  bots: { total: number; ativos: number; com_envio: number };
+  bots: { total: number; ativos: number };
   conversas: { abertas: number; hoje: number; concluidas_mes: number; pediram_humano_mes: number };
   fila: { pendentes: number; falharam: number; canceladas_mes: number; proxima: string | null };
   leads: { novos: number; aproveitados: number; descartados: number; no_mes: number };
   dados_coletados_mes: number;
   tokens_mes: number;
-  envio_habilitado_servico: boolean;
   modelo_disponivel: boolean;
 };
 
@@ -761,7 +757,6 @@ export type BotNaConexao = {
   nome: string;
   slug: string;
   ativo: boolean;
-  envio_habilitado: boolean;
   estado: EstadoWhatsapp;
   // O worker está no ar e não tem sessão para este bot (bot desligado, ou acima do teto).
   sem_sessao: boolean;
@@ -777,10 +772,7 @@ export type SituacaoWhatsappAtendimento = {
   // O worker respondeu? Sem ele, nenhum bot conversa — e isso não é erro da tela.
   disponivel: boolean;
   motivo?: string;
-  envio_habilitado_servico: boolean;
   modelo_disponivel: boolean;
-  // Freio de mão do próprio worker; ausente quando ele não respondeu.
-  envio_habilitado_worker?: boolean;
   bots: BotNaConexao[];
 };
 

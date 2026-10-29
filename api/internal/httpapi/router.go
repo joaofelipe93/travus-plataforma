@@ -71,10 +71,12 @@ type Config struct {
 
 	// Atendimento (atendimento_agente.go, issue #100). Cada bot escolhe o modelo dele, então
 	// aqui vai uma fábrica em vez de um modelo pronto; nil (sem ANTHROPIC_API_KEY) deixa o
-	// serviço indisponível. `AtendimentoEnvioHabilitado` é a chave mestra do servidor: sem ela
-	// a resposta é composta e gravada, e nada sai (ensaio).
-	ModeloAtendimento          func(nome string) assistente.Modelo
-	AtendimentoEnvioHabilitado bool
+	// serviço indisponível.
+	//
+	// Não há chave de envio no servidor: **o botão do bot é o único interruptor** (decisão do
+	// usuário em 29/10/2026). Para parar tudo de uma vez, o jeito é desligar os bots na tela ou
+	// derrubar o container do WhatsApp.
+	ModeloAtendimento func(nome string) assistente.Modelo
 	// Serviço que conecta os WhatsApps dos bots (workers/atendimento-whatsapp). nil = as rotas
 	// de Conexões respondem "indisponível" em vez de falhar.
 	AtendimentoWhatsapp *atendimentowa.Cliente
@@ -220,7 +222,6 @@ func (s *Servidor) Rotas() http.Handler {
 	mux.Handle("PUT /atendimento/bots/{id}", s.autenticado(exigirPerfil(s.atualizarBot, editores...)))
 	mux.Handle("DELETE /atendimento/bots/{id}", s.autenticado(exigirPerfil(s.excluirBot, editores...)))
 	mux.Handle("PUT /atendimento/bots/{id}/etapas", s.autenticado(exigirPerfil(s.definirEtapasDoBot, editores...)))
-	mux.Handle("PUT /atendimento/bots/{id}/envio", s.autenticado(exigirPerfil(s.definirEnvioDoBot, admins...)))
 	// Etapa D: Conexões do Atendimento. Só admin: quem vê o QR pareia um aparelho na conta do
 	// WhatsApp daquele bot, e a mensagem de teste sai para um telefone de verdade.
 	mux.Handle("GET /atendimento/whatsapp", s.autenticado(exigirPerfil(s.situacaoWhatsappAtendimento, admins...)))

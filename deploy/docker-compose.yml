@@ -57,9 +57,6 @@ x-api: &api-base
     # Serviço que conecta os WhatsApps dos bots de atendimento (um processo, N sessões).
     ATENDIMENTO_WHATSAPP_URL: http://atendimento-whatsapp:3000
     ATENDIMENTO_ADMIN_TOKEN: ${ATENDIMENTO_ADMIN_TOKEN:?defina ATENDIMENTO_ADMIN_TOKEN em deploy/.env (make up gera)}
-    # Só "true" libera um bot a MANDAR mensagem para cliente. Desligada, a resposta é composta e
-    # guardada como cancelada (ensaio).
-    ATENDIMENTO_ENVIO_HABILITADO: ${ATENDIMENTO_ENVIO_HABILITADO:-false}
     BOLETOS_ADMIN_TOKEN: ${BOLETOS_ADMIN_TOKEN:?defina BOLETOS_ADMIN_TOKEN em deploy/.env (make up gera)}
     CHECKIN_ADMIN_TOKEN: ${CHECKIN_ADMIN_TOKEN:?defina CHECKIN_ADMIN_TOKEN em deploy/.env (make up gera)}
     # Senha do papel checkin no Postgres: `api migrate up` liga o login com ela.
@@ -304,8 +301,6 @@ services:
       API_URL: http://api:8081
       WORKER_TOKEN: ${WORKER_TOKEN:?defina WORKER_TOKEN em deploy/.env (make up gera)}
       ADMIN_TOKEN: ${ATENDIMENTO_ADMIN_TOKEN:?defina ATENDIMENTO_ADMIN_TOKEN em deploy/.env (make up gera)}
-      # Freio de mão do próprio serviço, além da chave da API e do interruptor de cada bot.
-      ENVIO_HABILITADO: ${ATENDIMENTO_ENVIO_SERVICO:-true}
       # Teto de sessões no processo: cada uma custa memória, e a VM tem 2 GB.
       MAX_SESSOES: ${ATENDIMENTO_MAX_SESSOES:-4}
       LOG_FORMAT: json

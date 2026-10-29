@@ -46,9 +46,7 @@ func (s *Servidor) resumoAtendimento(w http.ResponseWriter, r *http.Request, _ *
 		return
 	}
 	responderJSON(w, http.StatusOK, map[string]any{
-		"bots": map[string]int64{
-			"total": resumo.Bots, "ativos": resumo.BotsAtivos, "com_envio": resumo.BotsComEnvio,
-		},
+		"bots": map[string]int64{"total": resumo.Bots, "ativos": resumo.BotsAtivos},
 		"conversas": map[string]int64{
 			"abertas": resumo.ConversasAbertas, "hoje": resumo.ConversasHoje,
 			"concluidas_mes": resumo.ConcluidasMes, "pediram_humano_mes": resumo.PediramHumanoMes,
@@ -63,11 +61,8 @@ func (s *Servidor) resumoAtendimento(w http.ResponseWriter, r *http.Request, _ *
 		},
 		"dados_coletados_mes": resumo.DadosMes,
 		"tokens_mes":          resumo.TokensMes,
-		// A chave do servidor: desligada, o serviço inteiro está em ensaio, e é isso que a tela
-		// precisa dizer em primeiro lugar — não importa quantos bots estejam ligados.
-		"envio_habilitado_servico": s.cfg.AtendimentoEnvioHabilitado,
-		// Sem a chave da Anthropic nenhum bot responde. A tela avisa em vez de deixar a pessoa
-		// montar um fluxo que nunca vai rodar.
+		// Sem a chave da Anthropic nenhum bot responde, mesmo ligado. A tela avisa em vez de
+		// deixar a pessoa montar um fluxo que nunca vai rodar.
 		"modelo_disponivel": s.cfg.ModeloAtendimento != nil,
 	})
 }

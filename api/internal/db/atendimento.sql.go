@@ -119,7 +119,7 @@ UPDATE atendimento.bots SET
     atualizado_por          = $9,
     atualizado_em           = now()
 WHERE id = $10
-RETURNING id, nome, slug, modelo, instrucoes, saudacao, ativo, envio_habilitado, envio_habilitado_por, envio_habilitado_em, max_mensagens_hora, max_tokens_conversa, pausa_resposta_segundos, criado_por, atualizado_por, criado_em, atualizado_em
+RETURNING id, nome, slug, modelo, instrucoes, saudacao, ativo, max_mensagens_hora, max_tokens_conversa, pausa_resposta_segundos, criado_por, atualizado_por, criado_em, atualizado_em
 `
 
 type AtualizarBotParams struct {
@@ -159,9 +159,6 @@ func (q *Queries) AtualizarBot(ctx context.Context, arg AtualizarBotParams) (Ate
 		&i.Instrucoes,
 		&i.Saudacao,
 		&i.Ativo,
-		&i.EnvioHabilitado,
-		&i.EnvioHabilitadoPor,
-		&i.EnvioHabilitadoEm,
 		&i.MaxMensagensHora,
 		&i.MaxTokensConversa,
 		&i.PausaRespostaSegundos,
@@ -219,7 +216,7 @@ func (q *Queries) AtualizarLead(ctx context.Context, arg AtualizarLeadParams) (A
 }
 
 const buscarBot = `-- name: BuscarBot :one
-SELECT id, nome, slug, modelo, instrucoes, saudacao, ativo, envio_habilitado, envio_habilitado_por, envio_habilitado_em, max_mensagens_hora, max_tokens_conversa, pausa_resposta_segundos, criado_por, atualizado_por, criado_em, atualizado_em FROM atendimento.bots WHERE id = $1
+SELECT id, nome, slug, modelo, instrucoes, saudacao, ativo, max_mensagens_hora, max_tokens_conversa, pausa_resposta_segundos, criado_por, atualizado_por, criado_em, atualizado_em FROM atendimento.bots WHERE id = $1
 `
 
 func (q *Queries) BuscarBot(ctx context.Context, id int64) (AtendimentoBot, error) {
@@ -233,9 +230,6 @@ func (q *Queries) BuscarBot(ctx context.Context, id int64) (AtendimentoBot, erro
 		&i.Instrucoes,
 		&i.Saudacao,
 		&i.Ativo,
-		&i.EnvioHabilitado,
-		&i.EnvioHabilitadoPor,
-		&i.EnvioHabilitadoEm,
 		&i.MaxMensagensHora,
 		&i.MaxTokensConversa,
 		&i.PausaRespostaSegundos,
@@ -248,7 +242,7 @@ func (q *Queries) BuscarBot(ctx context.Context, id int64) (AtendimentoBot, erro
 }
 
 const buscarBotPorSlug = `-- name: BuscarBotPorSlug :one
-SELECT id, nome, slug, modelo, instrucoes, saudacao, ativo, envio_habilitado, envio_habilitado_por, envio_habilitado_em, max_mensagens_hora, max_tokens_conversa, pausa_resposta_segundos, criado_por, atualizado_por, criado_em, atualizado_em FROM atendimento.bots WHERE slug = $1
+SELECT id, nome, slug, modelo, instrucoes, saudacao, ativo, max_mensagens_hora, max_tokens_conversa, pausa_resposta_segundos, criado_por, atualizado_por, criado_em, atualizado_em FROM atendimento.bots WHERE slug = $1
 `
 
 // O worker pede o bot pelo slug: é o nome da pasta da sessão dele no volume.
@@ -263,9 +257,6 @@ func (q *Queries) BuscarBotPorSlug(ctx context.Context, slug string) (Atendiment
 		&i.Instrucoes,
 		&i.Saudacao,
 		&i.Ativo,
-		&i.EnvioHabilitado,
-		&i.EnvioHabilitadoPor,
-		&i.EnvioHabilitadoEm,
 		&i.MaxMensagensHora,
 		&i.MaxTokensConversa,
 		&i.PausaRespostaSegundos,
@@ -543,7 +534,7 @@ INSERT INTO atendimento.bots (nome, slug, modelo, instrucoes, saudacao, max_mens
                               max_tokens_conversa, pausa_resposta_segundos, criado_por, atualizado_por)
 VALUES ($1, $2, $3, $4, $5, $6,
         $7, $8, $9, $9)
-RETURNING id, nome, slug, modelo, instrucoes, saudacao, ativo, envio_habilitado, envio_habilitado_por, envio_habilitado_em, max_mensagens_hora, max_tokens_conversa, pausa_resposta_segundos, criado_por, atualizado_por, criado_em, atualizado_em
+RETURNING id, nome, slug, modelo, instrucoes, saudacao, ativo, max_mensagens_hora, max_tokens_conversa, pausa_resposta_segundos, criado_por, atualizado_por, criado_em, atualizado_em
 `
 
 type CriarBotParams struct {
@@ -582,9 +573,6 @@ func (q *Queries) CriarBot(ctx context.Context, arg CriarBotParams) (Atendimento
 		&i.Instrucoes,
 		&i.Saudacao,
 		&i.Ativo,
-		&i.EnvioHabilitado,
-		&i.EnvioHabilitadoPor,
-		&i.EnvioHabilitadoEm,
 		&i.MaxMensagensHora,
 		&i.MaxTokensConversa,
 		&i.PausaRespostaSegundos,
@@ -728,50 +716,6 @@ func (q *Queries) DadosDaConversa(ctx context.Context, conversaID int64) ([]Dado
 		return nil, err
 	}
 	return items, nil
-}
-
-const definirEnvioDoBot = `-- name: DefinirEnvioDoBot :one
-UPDATE atendimento.bots SET
-    envio_habilitado     = $1,
-    envio_habilitado_por = CASE WHEN $1::boolean THEN $2 ELSE envio_habilitado_por END,
-    envio_habilitado_em  = CASE WHEN $1::boolean THEN now() ELSE envio_habilitado_em END,
-    atualizado_por       = $2,
-    atualizado_em        = now()
-WHERE id = $3
-RETURNING id, nome, slug, modelo, instrucoes, saudacao, ativo, envio_habilitado, envio_habilitado_por, envio_habilitado_em, max_mensagens_hora, max_tokens_conversa, pausa_resposta_segundos, criado_por, atualizado_por, criado_em, atualizado_em
-`
-
-type DefinirEnvioDoBotParams struct {
-	EnvioHabilitado bool
-	Por             *int64
-	ID              int64
-}
-
-// Liga ou desliga o envio de verdade. Só admin chega aqui (a rota barra operador). Quem ligou
-// fica gravado; desligar não apaga o registro de quem havia ligado, que é o histórico útil.
-func (q *Queries) DefinirEnvioDoBot(ctx context.Context, arg DefinirEnvioDoBotParams) (AtendimentoBot, error) {
-	row := q.db.QueryRow(ctx, definirEnvioDoBot, arg.EnvioHabilitado, arg.Por, arg.ID)
-	var i AtendimentoBot
-	err := row.Scan(
-		&i.ID,
-		&i.Nome,
-		&i.Slug,
-		&i.Modelo,
-		&i.Instrucoes,
-		&i.Saudacao,
-		&i.Ativo,
-		&i.EnvioHabilitado,
-		&i.EnvioHabilitadoPor,
-		&i.EnvioHabilitadoEm,
-		&i.MaxMensagensHora,
-		&i.MaxTokensConversa,
-		&i.PausaRespostaSegundos,
-		&i.CriadoPor,
-		&i.AtualizadoPor,
-		&i.CriadoEm,
-		&i.AtualizadoEm,
-	)
-	return i, err
 }
 
 const definirEtapaDaConversa = `-- name: DefinirEtapaDaConversa :one
@@ -967,8 +911,8 @@ const excluirBot = `-- name: ExcluirBot :execrows
 DELETE FROM atendimento.bots WHERE id = $1
 `
 
-// Bot com conversa é histórico e não se exclui (mesma regra de cota com lance): a rota confere
-// antes e responde 409 pedindo para desativar.
+// Liga ou desliga o envio de verdade. Só admin chega aqui (a rota barra operador). Quem ligou
+// fica gravado; desligar não apaga o registro de quem havia ligado, que é o histórico útil.
 func (q *Queries) ExcluirBot(ctx context.Context, id int64) (int64, error) {
 	result, err := q.db.Exec(ctx, excluirBot, id)
 	if err != nil {
@@ -1098,7 +1042,7 @@ func (q *Queries) LeadsDoCliente(ctx context.Context, clienteID *int64) ([]Leads
 }
 
 const listarBots = `-- name: ListarBots :many
-SELECT b.id, b.nome, b.slug, b.modelo, b.instrucoes, b.saudacao, b.ativo, b.envio_habilitado, b.envio_habilitado_por, b.envio_habilitado_em, b.max_mensagens_hora, b.max_tokens_conversa, b.pausa_resposta_segundos, b.criado_por, b.atualizado_por, b.criado_em, b.atualizado_em,
+SELECT b.id, b.nome, b.slug, b.modelo, b.instrucoes, b.saudacao, b.ativo, b.max_mensagens_hora, b.max_tokens_conversa, b.pausa_resposta_segundos, b.criado_por, b.atualizado_por, b.criado_em, b.atualizado_em,
        (SELECT count(*) FROM atendimento.etapas e WHERE e.bot_id = b.id)::int AS etapas,
        (SELECT count(*) FROM atendimento.conversas c
         WHERE c.bot_id = b.id AND c.status = 'aberta')::int AS conversas_abertas
@@ -1114,9 +1058,6 @@ type ListarBotsRow struct {
 	Instrucoes            string
 	Saudacao              *string
 	Ativo                 bool
-	EnvioHabilitado       bool
-	EnvioHabilitadoPor    *int64
-	EnvioHabilitadoEm     *time.Time
 	MaxMensagensHora      int32
 	MaxTokensConversa     int32
 	PausaRespostaSegundos int32
@@ -1147,9 +1088,6 @@ func (q *Queries) ListarBots(ctx context.Context) ([]ListarBotsRow, error) {
 			&i.Instrucoes,
 			&i.Saudacao,
 			&i.Ativo,
-			&i.EnvioHabilitado,
-			&i.EnvioHabilitadoPor,
-			&i.EnvioHabilitadoEm,
 			&i.MaxMensagensHora,
 			&i.MaxTokensConversa,
 			&i.PausaRespostaSegundos,
@@ -1544,7 +1482,7 @@ WITH alvo AS (
     JOIN atendimento.bots b ON b.id = c.bot_id
     WHERE m.status = 'pendente'
       AND m.proxima_tentativa_em <= now()
-      AND b.ativo AND b.envio_habilitado
+      AND b.ativo
       AND b.slug = ANY($1::text[])
     ORDER BY m.proxima_tentativa_em, m.id
     FOR UPDATE OF m SKIP LOCKED
@@ -1616,7 +1554,6 @@ const resumoAtendimento = `-- name: ResumoAtendimento :one
 SELECT
     (SELECT count(*) FROM atendimento.bots b1)                                            AS bots,
     (SELECT count(*) FROM atendimento.bots b2 WHERE b2.ativo)                             AS bots_ativos,
-    (SELECT count(*) FROM atendimento.bots b3 WHERE b3.ativo AND b3.envio_habilitado)     AS bots_com_envio,
     (SELECT count(*) FROM atendimento.conversas c1 WHERE c1.status = 'aberta')            AS conversas_abertas,
     (SELECT count(*) FROM atendimento.conversas c2 WHERE c2.iniciada_em >= $1)    AS conversas_hoje,
     (SELECT count(*) FROM atendimento.conversas c3
@@ -1642,7 +1579,6 @@ type ResumoAtendimentoParams struct {
 type ResumoAtendimentoRow struct {
 	Bots             int64
 	BotsAtivos       int64
-	BotsComEnvio     int64
 	ConversasAbertas int64
 	ConversasHoje    int64
 	PediramHumanoMes int64
@@ -1664,7 +1600,6 @@ func (q *Queries) ResumoAtendimento(ctx context.Context, arg ResumoAtendimentoPa
 	err := row.Scan(
 		&i.Bots,
 		&i.BotsAtivos,
-		&i.BotsComEnvio,
 		&i.ConversasAbertas,
 		&i.ConversasHoje,
 		&i.PediramHumanoMes,

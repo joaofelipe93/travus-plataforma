@@ -83,9 +83,6 @@ type AtendimentoBot struct {
 	Instrucoes            string
 	Saudacao              *string
 	Ativo                 bool
-	EnvioHabilitado       bool
-	EnvioHabilitadoPor    *int64
-	EnvioHabilitadoEm     *time.Time
 	MaxMensagensHora      int32
 	MaxTokensConversa     int32
 	PausaRespostaSegundos int32
