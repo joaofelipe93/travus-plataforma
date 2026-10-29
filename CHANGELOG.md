@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.22.0](https://github.com/joaofelipe93/travus-plataforma/compare/v0.21.0...v0.22.0) (2026-10-29)
+
+
+### Novidades
+
+* **atendimento:** o lead revisável virando cliente ([#108](https://github.com/joaofelipe93/travus-plataforma/issues/108)) ([7f44553](https://github.com/joaofelipe93/travus-plataforma/commit/7f445535bab5fd4a1c35e283410e7e7902d5864f))
+
 ## [0.21.0](https://github.com/joaofelipe93/travus-plataforma/compare/v0.20.0...v0.21.0) (2026-10-29)
 
 
