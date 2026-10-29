@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.24.0](https://github.com/joaofelipe93/travus-plataforma/compare/v0.23.0...v0.24.0) (2026-10-29)
+
+
+### ⚠ BREAKING CHANGES
+
+* **atendimento:** um botão para ligar e desligar o bot ([#112](https://github.com/joaofelipe93/travus-plataforma/issues/112))
+
+### Novidades
+
+* **atendimento:** um botão para ligar e desligar o bot ([#112](https://github.com/joaofelipe93/travus-plataforma/issues/112)) ([27ee0ec](https://github.com/joaofelipe93/travus-plataforma/commit/27ee0ec976768448e964945d88052934338c2151))
+
 ## [0.23.0](https://github.com/joaofelipe93/travus-plataforma/compare/v0.22.0...v0.23.0) (2026-10-29)
 
 
