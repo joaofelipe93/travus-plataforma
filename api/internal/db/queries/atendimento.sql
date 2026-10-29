@@ -288,3 +288,87 @@ JOIN atendimento.conversas c ON c.id = m.conversa_id
 JOIN atendimento.bots b ON b.id = c.bot_id
 WHERE m.direcao = 'enviada'
 GROUP BY b.id, b.slug, m.status;
+
+-- Etapa E: o lead. Nasce quando a conversa encerra tendo colhido algo, é revisado por gente e
+-- vira cliente no cadastro (ou é descartado com motivo).
+
+-- Cria o lead da conversa, se ela ainda não tem um. O `ON CONFLICT DO NOTHING` é a garantia de
+-- "um lead por conversa" sem precisar conferir antes.
+-- name: CriarLeadDaConversa :one
+INSERT INTO atendimento.leads (conversa_id, bot_id, nome, telefone, email, observacoes, dados)
+VALUES (@conversa_id, @bot_id, sqlc.narg(nome), sqlc.narg(telefone), sqlc.narg(email),
+        sqlc.narg(observacoes), @dados)
+ON CONFLICT (conversa_id) DO NOTHING
+RETURNING *;
+
+-- name: ListarLeads :many
+SELECT l.*, b.nome AS bot_nome, b.slug AS bot_slug,
+       c.contato_nome, c.telefone AS conversa_telefone, c.status AS conversa_status,
+       c.motivo AS conversa_motivo, c.ultima_em,
+       cl.nome AS cliente_nome,
+       u.nome AS revisado_por_nome,
+       (SELECT count(*) FROM atendimento.mensagens m WHERE m.conversa_id = l.conversa_id) AS mensagens
+FROM atendimento.leads l
+JOIN atendimento.bots b ON b.id = l.bot_id
+JOIN atendimento.conversas c ON c.id = l.conversa_id
+LEFT JOIN clientes cl ON cl.id = l.cliente_id
+LEFT JOIN usuarios u ON u.id = l.revisado_por
+WHERE (sqlc.narg('status')::text IS NULL OR l.status = sqlc.narg('status')::text)
+  AND (sqlc.narg('bot_id')::bigint IS NULL OR l.bot_id = sqlc.narg('bot_id')::bigint)
+ORDER BY (l.status = 'novo') DESC, l.criado_em DESC
+LIMIT @limite;
+
+-- name: BuscarLead :one
+SELECT l.*, b.nome AS bot_nome, b.slug AS bot_slug,
+       c.contato_nome, c.telefone AS conversa_telefone, c.status AS conversa_status,
+       c.motivo AS conversa_motivo, c.ultima_em,
+       cl.nome AS cliente_nome,
+       u.nome AS revisado_por_nome,
+       (SELECT count(*) FROM atendimento.mensagens m WHERE m.conversa_id = l.conversa_id) AS mensagens
+FROM atendimento.leads l
+JOIN atendimento.bots b ON b.id = l.bot_id
+JOIN atendimento.conversas c ON c.id = l.conversa_id
+LEFT JOIN clientes cl ON cl.id = l.cliente_id
+LEFT JOIN usuarios u ON u.id = l.revisado_por
+WHERE l.id = @id;
+
+-- name: BuscarLeadDaConversa :one
+SELECT id, status, cliente_id FROM atendimento.leads WHERE conversa_id = @conversa_id;
+
+-- Correção da revisão: só os campos que alguém digita. Status e decisão têm rotas próprias.
+-- name: AtualizarLead :one
+UPDATE atendimento.leads
+SET nome = sqlc.narg(nome), telefone = sqlc.narg(telefone), email = sqlc.narg(email),
+    observacoes = sqlc.narg(observacoes)
+WHERE id = @id AND status = 'novo'
+RETURNING *;
+
+-- name: AproveitarLead :one
+UPDATE atendimento.leads
+SET status = 'aproveitado', cliente_id = @cliente_id, revisado_por = sqlc.narg(revisado_por),
+    revisado_em = now(), motivo_descarte = NULL
+WHERE id = @id AND status = 'novo'
+RETURNING *;
+
+-- name: DescartarLead :one
+UPDATE atendimento.leads
+SET status = 'descartado', motivo_descarte = @motivo_descarte,
+    revisado_por = sqlc.narg(revisado_por), revisado_em = now()
+WHERE id = @id AND status = 'novo'
+RETURNING *;
+
+-- Contagem para o painel e para a aba.
+-- name: ContarLeads :one
+SELECT
+    (SELECT count(*) FROM atendimento.leads l1 WHERE l1.status = 'novo')          AS novos,
+    (SELECT count(*) FROM atendimento.leads l2 WHERE l2.status = 'aproveitado')   AS aproveitados,
+    (SELECT count(*) FROM atendimento.leads l3 WHERE l3.status = 'descartado')    AS descartados,
+    (SELECT count(*) FROM atendimento.leads l4 WHERE l4.criado_em >= @desde_mes)  AS no_mes;
+
+-- "De onde veio este cliente?": a tela do cliente mostra a conversa que o originou.
+-- name: LeadsDoCliente :many
+SELECT l.id, l.criado_em, l.conversa_id, b.nome AS bot_nome
+FROM atendimento.leads l
+JOIN atendimento.bots b ON b.id = l.bot_id
+WHERE l.cliente_id = @cliente_id
+ORDER BY l.criado_em DESC;

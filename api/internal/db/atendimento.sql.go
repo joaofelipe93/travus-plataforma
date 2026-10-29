@@ -70,6 +70,42 @@ func (q *Queries) ApagarEtapasDoBot(ctx context.Context, botID int64) error {
 	return err
 }
 
+const aproveitarLead = `-- name: AproveitarLead :one
+UPDATE atendimento.leads
+SET status = 'aproveitado', cliente_id = $1, revisado_por = $2,
+    revisado_em = now(), motivo_descarte = NULL
+WHERE id = $3 AND status = 'novo'
+RETURNING id, conversa_id, bot_id, status, nome, telefone, email, observacoes, dados, cliente_id, motivo_descarte, revisado_por, revisado_em, criado_em
+`
+
+type AproveitarLeadParams struct {
+	ClienteID   *int64
+	RevisadoPor *int64
+	ID          int64
+}
+
+func (q *Queries) AproveitarLead(ctx context.Context, arg AproveitarLeadParams) (AtendimentoLead, error) {
+	row := q.db.QueryRow(ctx, aproveitarLead, arg.ClienteID, arg.RevisadoPor, arg.ID)
+	var i AtendimentoLead
+	err := row.Scan(
+		&i.ID,
+		&i.ConversaID,
+		&i.BotID,
+		&i.Status,
+		&i.Nome,
+		&i.Telefone,
+		&i.Email,
+		&i.Observacoes,
+		&i.Dados,
+		&i.ClienteID,
+		&i.MotivoDescarte,
+		&i.RevisadoPor,
+		&i.RevisadoEm,
+		&i.CriadoEm,
+	)
+	return i, err
+}
+
 const atualizarBot = `-- name: AtualizarBot :one
 UPDATE atendimento.bots SET
     nome                    = $1,
@@ -133,6 +169,51 @@ func (q *Queries) AtualizarBot(ctx context.Context, arg AtualizarBotParams) (Ate
 		&i.AtualizadoPor,
 		&i.CriadoEm,
 		&i.AtualizadoEm,
+	)
+	return i, err
+}
+
+const atualizarLead = `-- name: AtualizarLead :one
+UPDATE atendimento.leads
+SET nome = $1, telefone = $2, email = $3,
+    observacoes = $4
+WHERE id = $5 AND status = 'novo'
+RETURNING id, conversa_id, bot_id, status, nome, telefone, email, observacoes, dados, cliente_id, motivo_descarte, revisado_por, revisado_em, criado_em
+`
+
+type AtualizarLeadParams struct {
+	Nome        *string
+	Telefone    *string
+	Email       *string
+	Observacoes *string
+	ID          int64
+}
+
+// Correção da revisão: só os campos que alguém digita. Status e decisão têm rotas próprias.
+func (q *Queries) AtualizarLead(ctx context.Context, arg AtualizarLeadParams) (AtendimentoLead, error) {
+	row := q.db.QueryRow(ctx, atualizarLead,
+		arg.Nome,
+		arg.Telefone,
+		arg.Email,
+		arg.Observacoes,
+		arg.ID,
+	)
+	var i AtendimentoLead
+	err := row.Scan(
+		&i.ID,
+		&i.ConversaID,
+		&i.BotID,
+		&i.Status,
+		&i.Nome,
+		&i.Telefone,
+		&i.Email,
+		&i.Observacoes,
+		&i.Dados,
+		&i.ClienteID,
+		&i.MotivoDescarte,
+		&i.RevisadoPor,
+		&i.RevisadoEm,
+		&i.CriadoEm,
 	)
 	return i, err
 }
@@ -273,6 +354,97 @@ func (q *Queries) BuscarEtapa(ctx context.Context, id int64) (AtendimentoEtapa, 
 	return i, err
 }
 
+const buscarLead = `-- name: BuscarLead :one
+SELECT l.id, l.conversa_id, l.bot_id, l.status, l.nome, l.telefone, l.email, l.observacoes, l.dados, l.cliente_id, l.motivo_descarte, l.revisado_por, l.revisado_em, l.criado_em, b.nome AS bot_nome, b.slug AS bot_slug,
+       c.contato_nome, c.telefone AS conversa_telefone, c.status AS conversa_status,
+       c.motivo AS conversa_motivo, c.ultima_em,
+       cl.nome AS cliente_nome,
+       u.nome AS revisado_por_nome,
+       (SELECT count(*) FROM atendimento.mensagens m WHERE m.conversa_id = l.conversa_id) AS mensagens
+FROM atendimento.leads l
+JOIN atendimento.bots b ON b.id = l.bot_id
+JOIN atendimento.conversas c ON c.id = l.conversa_id
+LEFT JOIN clientes cl ON cl.id = l.cliente_id
+LEFT JOIN usuarios u ON u.id = l.revisado_por
+WHERE l.id = $1
+`
+
+type BuscarLeadRow struct {
+	ID               int64
+	ConversaID       int64
+	BotID            int64
+	Status           string
+	Nome             *string
+	Telefone         *string
+	Email            *string
+	Observacoes      *string
+	Dados            []byte
+	ClienteID        *int64
+	MotivoDescarte   *string
+	RevisadoPor      *int64
+	RevisadoEm       *time.Time
+	CriadoEm         time.Time
+	BotNome          string
+	BotSlug          string
+	ContatoNome      *string
+	ConversaTelefone string
+	ConversaStatus   string
+	ConversaMotivo   *string
+	UltimaEm         time.Time
+	ClienteNome      *string
+	RevisadoPorNome  *string
+	Mensagens        int64
+}
+
+func (q *Queries) BuscarLead(ctx context.Context, id int64) (BuscarLeadRow, error) {
+	row := q.db.QueryRow(ctx, buscarLead, id)
+	var i BuscarLeadRow
+	err := row.Scan(
+		&i.ID,
+		&i.ConversaID,
+		&i.BotID,
+		&i.Status,
+		&i.Nome,
+		&i.Telefone,
+		&i.Email,
+		&i.Observacoes,
+		&i.Dados,
+		&i.ClienteID,
+		&i.MotivoDescarte,
+		&i.RevisadoPor,
+		&i.RevisadoEm,
+		&i.CriadoEm,
+		&i.BotNome,
+		&i.BotSlug,
+		&i.ContatoNome,
+		&i.ConversaTelefone,
+		&i.ConversaStatus,
+		&i.ConversaMotivo,
+		&i.UltimaEm,
+		&i.ClienteNome,
+		&i.RevisadoPorNome,
+		&i.Mensagens,
+	)
+	return i, err
+}
+
+const buscarLeadDaConversa = `-- name: BuscarLeadDaConversa :one
+SELECT id, status, cliente_id FROM atendimento.leads WHERE conversa_id = $1
+`
+
+type BuscarLeadDaConversaRow struct {
+	ID        int64
+	Status    string
+	ClienteID *int64
+}
+
+func (q *Queries) BuscarLeadDaConversa(ctx context.Context, conversaID int64) (BuscarLeadDaConversaRow, error) {
+	row := q.db.QueryRow(ctx, buscarLeadDaConversa, conversaID)
+	var i BuscarLeadDaConversaRow
+	err := row.Scan(&i.ID, &i.Status, &i.ClienteID)
+	return i, err
+}
+
 const coletasDaConversa = `-- name: ColetasDaConversa :many
 SELECT campo, valor FROM atendimento.coletas WHERE conversa_id = $1 ORDER BY campo
 `
@@ -317,6 +489,34 @@ func (q *Queries) ContarConversasDoBot(ctx context.Context, botID int64) (Contar
 	row := q.db.QueryRow(ctx, contarConversasDoBot, botID)
 	var i ContarConversasDoBotRow
 	err := row.Scan(&i.Total, &i.Abertas)
+	return i, err
+}
+
+const contarLeads = `-- name: ContarLeads :one
+SELECT
+    (SELECT count(*) FROM atendimento.leads l1 WHERE l1.status = 'novo')          AS novos,
+    (SELECT count(*) FROM atendimento.leads l2 WHERE l2.status = 'aproveitado')   AS aproveitados,
+    (SELECT count(*) FROM atendimento.leads l3 WHERE l3.status = 'descartado')    AS descartados,
+    (SELECT count(*) FROM atendimento.leads l4 WHERE l4.criado_em >= $1)  AS no_mes
+`
+
+type ContarLeadsRow struct {
+	Novos        int64
+	Aproveitados int64
+	Descartados  int64
+	NoMes        int64
+}
+
+// Contagem para o painel e para a aba.
+func (q *Queries) ContarLeads(ctx context.Context, desdeMes time.Time) (ContarLeadsRow, error) {
+	row := q.db.QueryRow(ctx, contarLeads, desdeMes)
+	var i ContarLeadsRow
+	err := row.Scan(
+		&i.Novos,
+		&i.Aproveitados,
+		&i.Descartados,
+		&i.NoMes,
+	)
 	return i, err
 }
 
@@ -435,6 +635,59 @@ func (q *Queries) CriarEtapa(ctx context.Context, arg CriarEtapaParams) (Atendim
 	return i, err
 }
 
+const criarLeadDaConversa = `-- name: CriarLeadDaConversa :one
+
+INSERT INTO atendimento.leads (conversa_id, bot_id, nome, telefone, email, observacoes, dados)
+VALUES ($1, $2, $3, $4, $5,
+        $6, $7)
+ON CONFLICT (conversa_id) DO NOTHING
+RETURNING id, conversa_id, bot_id, status, nome, telefone, email, observacoes, dados, cliente_id, motivo_descarte, revisado_por, revisado_em, criado_em
+`
+
+type CriarLeadDaConversaParams struct {
+	ConversaID  int64
+	BotID       int64
+	Nome        *string
+	Telefone    *string
+	Email       *string
+	Observacoes *string
+	Dados       []byte
+}
+
+// Etapa E: o lead. Nasce quando a conversa encerra tendo colhido algo, é revisado por gente e
+// vira cliente no cadastro (ou é descartado com motivo).
+// Cria o lead da conversa, se ela ainda não tem um. O `ON CONFLICT DO NOTHING` é a garantia de
+// "um lead por conversa" sem precisar conferir antes.
+func (q *Queries) CriarLeadDaConversa(ctx context.Context, arg CriarLeadDaConversaParams) (AtendimentoLead, error) {
+	row := q.db.QueryRow(ctx, criarLeadDaConversa,
+		arg.ConversaID,
+		arg.BotID,
+		arg.Nome,
+		arg.Telefone,
+		arg.Email,
+		arg.Observacoes,
+		arg.Dados,
+	)
+	var i AtendimentoLead
+	err := row.Scan(
+		&i.ID,
+		&i.ConversaID,
+		&i.BotID,
+		&i.Status,
+		&i.Nome,
+		&i.Telefone,
+		&i.Email,
+		&i.Observacoes,
+		&i.Dados,
+		&i.ClienteID,
+		&i.MotivoDescarte,
+		&i.RevisadoPor,
+		&i.RevisadoEm,
+		&i.CriadoEm,
+	)
+	return i, err
+}
+
 const dadosDaConversa = `-- name: DadosDaConversa :many
 SELECT k.campo, k.valor, k.criado_em, k.atualizado_em, e.nome AS etapa_nome
 FROM atendimento.coletas k
@@ -547,6 +800,42 @@ func (q *Queries) DefinirEtapaDaConversa(ctx context.Context, arg DefinirEtapaDa
 		&i.IniciadaEm,
 		&i.UltimaEm,
 		&i.EncerradaEm,
+	)
+	return i, err
+}
+
+const descartarLead = `-- name: DescartarLead :one
+UPDATE atendimento.leads
+SET status = 'descartado', motivo_descarte = $1,
+    revisado_por = $2, revisado_em = now()
+WHERE id = $3 AND status = 'novo'
+RETURNING id, conversa_id, bot_id, status, nome, telefone, email, observacoes, dados, cliente_id, motivo_descarte, revisado_por, revisado_em, criado_em
+`
+
+type DescartarLeadParams struct {
+	MotivoDescarte *string
+	RevisadoPor    *int64
+	ID             int64
+}
+
+func (q *Queries) DescartarLead(ctx context.Context, arg DescartarLeadParams) (AtendimentoLead, error) {
+	row := q.db.QueryRow(ctx, descartarLead, arg.MotivoDescarte, arg.RevisadoPor, arg.ID)
+	var i AtendimentoLead
+	err := row.Scan(
+		&i.ID,
+		&i.ConversaID,
+		&i.BotID,
+		&i.Status,
+		&i.Nome,
+		&i.Telefone,
+		&i.Email,
+		&i.Observacoes,
+		&i.Dados,
+		&i.ClienteID,
+		&i.MotivoDescarte,
+		&i.RevisadoPor,
+		&i.RevisadoEm,
+		&i.CriadoEm,
 	)
 	return i, err
 }
@@ -767,6 +1056,47 @@ func (q *Queries) HistoricoDaConversa(ctx context.Context, arg HistoricoDaConver
 	return items, nil
 }
 
+const leadsDoCliente = `-- name: LeadsDoCliente :many
+SELECT l.id, l.criado_em, l.conversa_id, b.nome AS bot_nome
+FROM atendimento.leads l
+JOIN atendimento.bots b ON b.id = l.bot_id
+WHERE l.cliente_id = $1
+ORDER BY l.criado_em DESC
+`
+
+type LeadsDoClienteRow struct {
+	ID         int64
+	CriadoEm   time.Time
+	ConversaID int64
+	BotNome    string
+}
+
+// "De onde veio este cliente?": a tela do cliente mostra a conversa que o originou.
+func (q *Queries) LeadsDoCliente(ctx context.Context, clienteID *int64) ([]LeadsDoClienteRow, error) {
+	rows, err := q.db.Query(ctx, leadsDoCliente, clienteID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []LeadsDoClienteRow
+	for rows.Next() {
+		var i LeadsDoClienteRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.CriadoEm,
+			&i.ConversaID,
+			&i.BotNome,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listarBots = `-- name: ListarBots :many
 SELECT b.id, b.nome, b.slug, b.modelo, b.instrucoes, b.saudacao, b.ativo, b.envio_habilitado, b.envio_habilitado_por, b.envio_habilitado_em, b.max_mensagens_hora, b.max_tokens_conversa, b.pausa_resposta_segundos, b.criado_por, b.atualizado_por, b.criado_em, b.atualizado_em,
        (SELECT count(*) FROM atendimento.etapas e WHERE e.bot_id = b.id)::int AS etapas,
@@ -948,6 +1278,102 @@ func (q *Queries) ListarEtapasDoBot(ctx context.Context, botID int64) ([]Atendim
 			&i.Campos,
 			&i.CriadoEm,
 			&i.AtualizadoEm,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listarLeads = `-- name: ListarLeads :many
+SELECT l.id, l.conversa_id, l.bot_id, l.status, l.nome, l.telefone, l.email, l.observacoes, l.dados, l.cliente_id, l.motivo_descarte, l.revisado_por, l.revisado_em, l.criado_em, b.nome AS bot_nome, b.slug AS bot_slug,
+       c.contato_nome, c.telefone AS conversa_telefone, c.status AS conversa_status,
+       c.motivo AS conversa_motivo, c.ultima_em,
+       cl.nome AS cliente_nome,
+       u.nome AS revisado_por_nome,
+       (SELECT count(*) FROM atendimento.mensagens m WHERE m.conversa_id = l.conversa_id) AS mensagens
+FROM atendimento.leads l
+JOIN atendimento.bots b ON b.id = l.bot_id
+JOIN atendimento.conversas c ON c.id = l.conversa_id
+LEFT JOIN clientes cl ON cl.id = l.cliente_id
+LEFT JOIN usuarios u ON u.id = l.revisado_por
+WHERE ($1::text IS NULL OR l.status = $1::text)
+  AND ($2::bigint IS NULL OR l.bot_id = $2::bigint)
+ORDER BY (l.status = 'novo') DESC, l.criado_em DESC
+LIMIT $3
+`
+
+type ListarLeadsParams struct {
+	Status *string
+	BotID  *int64
+	Limite int32
+}
+
+type ListarLeadsRow struct {
+	ID               int64
+	ConversaID       int64
+	BotID            int64
+	Status           string
+	Nome             *string
+	Telefone         *string
+	Email            *string
+	Observacoes      *string
+	Dados            []byte
+	ClienteID        *int64
+	MotivoDescarte   *string
+	RevisadoPor      *int64
+	RevisadoEm       *time.Time
+	CriadoEm         time.Time
+	BotNome          string
+	BotSlug          string
+	ContatoNome      *string
+	ConversaTelefone string
+	ConversaStatus   string
+	ConversaMotivo   *string
+	UltimaEm         time.Time
+	ClienteNome      *string
+	RevisadoPorNome  *string
+	Mensagens        int64
+}
+
+func (q *Queries) ListarLeads(ctx context.Context, arg ListarLeadsParams) ([]ListarLeadsRow, error) {
+	rows, err := q.db.Query(ctx, listarLeads, arg.Status, arg.BotID, arg.Limite)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListarLeadsRow
+	for rows.Next() {
+		var i ListarLeadsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.ConversaID,
+			&i.BotID,
+			&i.Status,
+			&i.Nome,
+			&i.Telefone,
+			&i.Email,
+			&i.Observacoes,
+			&i.Dados,
+			&i.ClienteID,
+			&i.MotivoDescarte,
+			&i.RevisadoPor,
+			&i.RevisadoEm,
+			&i.CriadoEm,
+			&i.BotNome,
+			&i.BotSlug,
+			&i.ContatoNome,
+			&i.ConversaTelefone,
+			&i.ConversaStatus,
+			&i.ConversaMotivo,
+			&i.UltimaEm,
+			&i.ClienteNome,
+			&i.RevisadoPorNome,
+			&i.Mensagens,
 		); err != nil {
 			return nil, err
 		}

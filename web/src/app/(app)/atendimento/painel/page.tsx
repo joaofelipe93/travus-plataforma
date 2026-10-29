@@ -85,10 +85,11 @@ export default function PaginaPainelAtendimento() {
             href={podeVerConversas ? "/atendimento/conversas?situacao=abertas" : undefined}
           />
           <Indicador
-            rotulo="Dados coletados no mês"
-            valor={r.dados_coletados_mes}
-            detalhe={`${r.conversas.concluidas_mes} conversa(s) chegaram ao fim do fluxo`}
-            href={podeVerConversas ? "/atendimento/conversas" : undefined}
+            rotulo="Leads esperando revisão"
+            valor={r.leads.novos}
+            tom={r.leads.novos > 0 ? "destaque" : "neutro"}
+            detalhe={`${r.leads.aproveitados} aproveitado(s) até agora · ${r.dados_coletados_mes} dado(s) no mês`}
+            href={podeVerConversas ? "/atendimento/leads" : undefined}
           />
           <Indicador
             rotulo="Não entregues"
@@ -257,6 +258,23 @@ function Lateral({
           />
         </Bloco>
       )}
+      <Bloco
+        titulo="O funil"
+        descricao="Conversa que colhe algo vira lead; quem promove a cliente é uma pessoa."
+      >
+        <Estados
+          itens={[
+            { rotulo: "Leads no mês", valor: resumo.leads.no_mes },
+            {
+              rotulo: "Esperando revisão",
+              valor: resumo.leads.novos,
+              tom: resumo.leads.novos > 0 ? "destaque" : "neutro",
+            },
+            { rotulo: "Viraram cliente", valor: resumo.leads.aproveitados, tom: "ok" },
+            { rotulo: "Descartados", valor: resumo.leads.descartados },
+          ]}
+        />
+      </Bloco>
       <Bloco
         titulo="Mensagens que não saíram"
         descricao="Em ensaio, a resposta é composta e guardada sem ser enviada."

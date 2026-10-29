@@ -720,6 +720,8 @@ export type DadoColetado = {
 };
 
 export type DetalheConversa = {
+  // O lead que esta conversa originou (etapa E), quando existe.
+  lead: { id: number; status: StatusLead; cliente_id: number | null } | null;
   conversa: {
     id: number;
     bot_id: number;
@@ -746,6 +748,7 @@ export type ResumoAtendimento = {
   bots: { total: number; ativos: number; com_envio: number };
   conversas: { abertas: number; hoje: number; concluidas_mes: number; pediram_humano_mes: number };
   fila: { pendentes: number; falharam: number; canceladas_mes: number; proxima: string | null };
+  leads: { novos: number; aproveitados: number; descartados: number; no_mes: number };
   dados_coletados_mes: number;
   tokens_mes: number;
   envio_habilitado_servico: boolean;
@@ -779,4 +782,39 @@ export type SituacaoWhatsappAtendimento = {
   // Freio de mão do próprio worker; ausente quando ele não respondeu.
   envio_habilitado_worker?: boolean;
   bots: BotNaConexao[];
+};
+
+// Um lead: a conversa que colheu algo, esperando alguém revisar e promover a cliente.
+export type StatusLead = "novo" | "aproveitado" | "descartado";
+
+export type Lead = {
+  id: number;
+  conversa_id: number;
+  bot_id: number;
+  bot_nome: string;
+  bot_slug: string;
+  status: StatusLead;
+  nome: string | null;
+  telefone: string | null;
+  email: string | null;
+  observacoes: string | null;
+  // Tudo o que o bot colheu, inclusive o que não tem campo próprio aqui.
+  dados: Record<string, string>;
+  contato_nome: string | null;
+  conversa_telefone: string;
+  conversa_status: StatusConversa;
+  conversa_motivo: string | null;
+  mensagens: number;
+  ultima_em: string;
+  cliente_id: number | null;
+  cliente_nome: string | null;
+  motivo_descarte: string | null;
+  revisado_por_nome: string | null;
+  revisado_em: string | null;
+  criado_em: string;
+};
+
+export type RespostaLeads = {
+  leads: Lead[];
+  contagem: { novos: number; aproveitados: number; descartados: number; no_mes: number };
 };
