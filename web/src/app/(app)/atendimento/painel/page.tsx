@@ -12,7 +12,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { api } from "@/lib/api";
 import { corDoStatusConversa, motivoLegivel, rotuloStatusConversa, tokensLegivel } from "@/lib/atendimento";
 import { dataHora, useSessao } from "@/lib/sessao";
-import type { Bot, ConversaResumo, ResumoAtendimento } from "@/lib/tipos";
+import type { Bot, ConversaResumo, ResumoAtendimento, SituacaoWhatsappAtendimento } from "@/lib/tipos";
 
 // Painel do Atendimento: se algum bot está realmente falando com gente, quantas conversas estão
 // abertas agora, o que o mês rendeu em dados coletados — e quanto isso custou em tokens, que é a
@@ -34,6 +34,14 @@ export default function PaginaPainelAtendimento() {
   const bots = useQuery({
     queryKey: ["atendimento-bots"],
     queryFn: () => api<{ bots: Bot[] }>("/atendimento/bots"),
+  });
+  // A situação dos números é rota de admin (ela traz QR): para os outros perfis, o painel
+  // simplesmente não mostra esse bloco, como no painel dos boletos.
+  const whatsapp = useQuery({
+    queryKey: ["atendimento-whatsapp"],
+    queryFn: () => api<SituacaoWhatsappAtendimento>("/atendimento/whatsapp"),
+    enabled: perfil === "admin",
+    refetchInterval: 30_000,
   });
   const conversas = useQuery({
     queryKey: ["atendimento-conversas", "painel"],
@@ -95,7 +103,15 @@ export default function PaginaPainelAtendimento() {
         </Indicadores>
       )}
 
-      <Colunas lateral={r ? <Lateral resumo={r} /> : <Skeleton className="h-64 w-full" />}>
+      <Colunas
+        lateral={
+          r ? (
+            <Lateral resumo={r} whatsapp={perfil === "admin" ? whatsapp.data : undefined} />
+          ) : (
+            <Skeleton className="h-64 w-full" />
+          )
+        }
+      >
         <Bloco
           titulo="Os bots"
           descricao="Cada bot é um atendimento com número, fluxo e modelo próprios."
@@ -180,7 +196,13 @@ export default function PaginaPainelAtendimento() {
   );
 }
 
-function Lateral({ resumo }: { resumo: ResumoAtendimento }) {
+function Lateral({
+  resumo,
+  whatsapp,
+}: {
+  resumo: ResumoAtendimento;
+  whatsapp: SituacaoWhatsappAtendimento | undefined;
+}) {
   const gasto: ItemEstado[] = [
     { rotulo: "Tokens no mês", valor: tokensLegivel(resumo.tokens_mes), detalhe: "entrada + saída" },
     { rotulo: "Dados coletados", valor: resumo.dados_coletados_mes },
@@ -205,6 +227,36 @@ function Lateral({ resumo }: { resumo: ResumoAtendimento }) {
       >
         <Estados itens={gasto} />
       </Bloco>
+      {whatsapp && (
+        <Bloco
+          titulo="Os números"
+          descricao="Um WhatsApp por bot."
+          tom={whatsapp.disponivel ? (whatsapp.bots.some((b) => b.conectado) ? "ok" : "aviso") : "erro"}
+          acoes={
+            <Link href="/atendimento/conexoes" className={buttonVariants({ variant: "outline", size: "sm" })}>
+              Conexões
+            </Link>
+          }
+        >
+          <Estados
+            itens={[
+              {
+                rotulo: "Transporte",
+                valor: whatsapp.disponivel ? "no ar" : "fora do ar",
+                tom: whatsapp.disponivel ? "ok" : "erro",
+              },
+              {
+                rotulo: "Conectados",
+                valor: `${whatsapp.bots.filter((b) => b.conectado).length} de ${whatsapp.bots.length}`,
+                tom: whatsapp.bots.some((b) => b.conectado) ? "ok" : "aviso",
+              },
+              ...(whatsapp.bots.some((b) => b.estado === "aguardando_qr")
+                ? [{ rotulo: "Esperando QR", valor: "sim", tom: "aviso" } as const]
+                : []),
+            ]}
+          />
+        </Bloco>
+      )}
       <Bloco
         titulo="Mensagens que não saíram"
         descricao="Em ensaio, a resposta é composta e guardada sem ser enviada."

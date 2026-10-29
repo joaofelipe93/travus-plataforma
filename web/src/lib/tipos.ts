@@ -751,3 +751,32 @@ export type ResumoAtendimento = {
   envio_habilitado_servico: boolean;
   modelo_disponivel: boolean;
 };
+
+// Um bot na tela de Conexões: o cadastro + o estado da sessão de WhatsApp dele no worker.
+export type BotNaConexao = {
+  id: number;
+  nome: string;
+  slug: string;
+  ativo: boolean;
+  envio_habilitado: boolean;
+  estado: EstadoWhatsapp;
+  // O worker está no ar e não tem sessão para este bot (bot desligado, ou acima do teto).
+  sem_sessao: boolean;
+  conectado: boolean;
+  numero: string | null;
+  qr: string | null;
+  aberta_ha_ms: number | null;
+  ultimo_erro: string | null;
+  fila: Partial<Record<StatusMensagemBot, number>>;
+};
+
+export type SituacaoWhatsappAtendimento = {
+  // O worker respondeu? Sem ele, nenhum bot conversa — e isso não é erro da tela.
+  disponivel: boolean;
+  motivo?: string;
+  envio_habilitado_servico: boolean;
+  modelo_disponivel: boolean;
+  // Freio de mão do próprio worker; ausente quando ele não respondeu.
+  envio_habilitado_worker?: boolean;
+  bots: BotNaConexao[];
+};

@@ -26,6 +26,7 @@ import (
 	_ "github.com/jackc/pgx/v5/stdlib"
 	"github.com/pressly/goose/v3"
 
+	"github.com/joaofelipe93/travus-plataforma/api/internal/atendimentowa"
 	"github.com/joaofelipe93/travus-plataforma/api/internal/boletoswa"
 	"github.com/joaofelipe93/travus-plataforma/api/internal/checkin"
 	"github.com/joaofelipe93/travus-plataforma/api/internal/cripto"
@@ -126,8 +127,11 @@ func serve() error {
 		// envio. Desligada, o bot compõe a resposta e nada sai (ensaio).
 		ModeloAtendimento:          modeloAtendimentoDoAmbiente(),
 		AtendimentoEnvioHabilitado: os.Getenv("ATENDIMENTO_ENVIO_HABILITADO") == "true",
-		ValidadeDryRun:             2 * time.Hour,
-		Cofre:                      cofre,
+		// Serviço que conecta os WhatsApps dos bots (um processo, N sessões).
+		AtendimentoWhatsapp: atendimentowa.NovoCliente(
+			os.Getenv("ATENDIMENTO_WHATSAPP_URL"), os.Getenv("ATENDIMENTO_ADMIN_TOKEN")),
+		ValidadeDryRun: 2 * time.Hour,
+		Cofre:          cofre,
 		Google: httpapi.ConfigGoogle{
 			ClientID:     os.Getenv("GOOGLE_CLIENT_ID"),
 			ClientSecret: os.Getenv("GOOGLE_CLIENT_SECRET"),
