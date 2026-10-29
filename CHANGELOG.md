@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.23.0](https://github.com/joaofelipe93/travus-plataforma/compare/v0.22.0...v0.23.0) (2026-10-29)
+
+
+### Novidades
+
+* **atendimento:** o serviço em produção, com vigia ([#110](https://github.com/joaofelipe93/travus-plataforma/issues/110)) ([072a5b8](https://github.com/joaofelipe93/travus-plataforma/commit/072a5b87a92139966ea117ff8fd527a9286ba62a))
+
 ## [0.22.0](https://github.com/joaofelipe93/travus-plataforma/compare/v0.21.0...v0.22.0) (2026-10-29)
 
 
