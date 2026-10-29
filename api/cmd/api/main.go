@@ -142,6 +142,7 @@ func serve() error {
 			BackupDir:       os.Getenv("VIGIA_BACKUP_DIR"),
 			CertificadoHost: os.Getenv("VIGIA_CERTIFICADO"),
 			Checkin:         os.Getenv("VIGIA_CHECKIN") == "true",
+			Atendimento:     os.Getenv("VIGIA_ATENDIMENTO") == "true",
 		},
 		Versao:  versao,
 		Commit:  commit,

@@ -1729,3 +1729,25 @@ func (q *Queries) SomarTokensDaConversa(ctx context.Context, arg SomarTokensDaCo
 	err := row.Scan(&i.TokensEntrada, &i.TokensSaida)
 	return i, err
 }
+
+const vigiaAtendimento = `-- name: VigiaAtendimento :one
+SELECT
+    (SELECT count(*) FROM atendimento.mensagens m1
+      WHERE m1.status = 'falhou' AND m1.criada_em > now() - interval '24 hours')     AS falharam,
+    (SELECT count(*) FROM atendimento.mensagens m2
+      WHERE m2.status = 'pendente' AND m2.criada_em < now() - interval '30 minutes') AS paradas
+`
+
+type VigiaAtendimentoRow struct {
+	Falharam int64
+	Paradas  int64
+}
+
+// Etapa F: o que o vigia olha. Resposta que desistiu e resposta parada na fila — os dois sinais
+// de "o bot respondeu e a pessoa não recebeu", que é o pior jeito de descobrir um problema.
+func (q *Queries) VigiaAtendimento(ctx context.Context) (VigiaAtendimentoRow, error) {
+	row := q.db.QueryRow(ctx, vigiaAtendimento)
+	var i VigiaAtendimentoRow
+	err := row.Scan(&i.Falharam, &i.Paradas)
+	return i, err
+}

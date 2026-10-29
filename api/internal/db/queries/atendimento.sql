@@ -372,3 +372,12 @@ FROM atendimento.leads l
 JOIN atendimento.bots b ON b.id = l.bot_id
 WHERE l.cliente_id = @cliente_id
 ORDER BY l.criado_em DESC;
+
+-- Etapa F: o que o vigia olha. Resposta que desistiu e resposta parada na fila — os dois sinais
+-- de "o bot respondeu e a pessoa não recebeu", que é o pior jeito de descobrir um problema.
+-- name: VigiaAtendimento :one
+SELECT
+    (SELECT count(*) FROM atendimento.mensagens m1
+      WHERE m1.status = 'falhou' AND m1.criada_em > now() - interval '24 hours')     AS falharam,
+    (SELECT count(*) FROM atendimento.mensagens m2
+      WHERE m2.status = 'pendente' AND m2.criada_em < now() - interval '30 minutes') AS paradas;

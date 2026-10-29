@@ -28,3 +28,5 @@ services:
     image: ${REGISTRO:-ghcr.io/joaofelipe93}/travus-worker-boletos:${VERSAO:?defina VERSAO}
   boletos-whatsapp:
     image: ${REGISTRO:-ghcr.io/joaofelipe93}/travus-boletos-whatsapp:${VERSAO:?defina VERSAO}
+  atendimento-whatsapp:
+    image: ${REGISTRO:-ghcr.io/joaofelipe93}/travus-atendimento-whatsapp:${VERSAO:?defina VERSAO}

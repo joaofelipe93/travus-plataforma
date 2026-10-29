@@ -8,9 +8,13 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/joaofelipe93/travus-plataforma/api/internal/assistente"
+	"github.com/joaofelipe93/travus-plataforma/api/internal/atendimentowa"
 	"github.com/joaofelipe93/travus-plataforma/api/internal/db"
 )
 
@@ -298,5 +302,140 @@ func TestAtendimentoConversaApontaParaOLead(t *testing.T) {
 	decodificarEm(t, rec, &detalhe)
 	if detalhe.Lead != nil {
 		t.Errorf("conversa aberta não tem lead ainda: %+v", detalhe.Lead)
+	}
+}
+
+// Etapa F: o vigia dos bots. O alerta que mais importa é o do **bot autorizado sem sessão** —
+// alguém ligou o envio, a pessoa escreve, o bot responde e a resposta fica na fila porque o
+// número caiu. Sem vigia, isso se descobre pelo cliente reclamando.
+func TestVigiaAtendimento(t *testing.T) {
+	s := servidorComBot(t, &modeloRoteiroBot{}, true)
+	ctx := context.Background()
+
+	// Dublê do serviço de WhatsApp dos bots: responde o status que o teste pedir.
+	var mu sync.Mutex
+	sessoes := "[]"
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/whatsapp/status" {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		mu.Lock()
+		corpo := `{"envio_habilitado_servico":true,"sessoes":` + sessoes + `}`
+		mu.Unlock()
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(corpo))
+	}))
+	defer srv.Close()
+
+	s.cfg.AtendimentoWhatsapp = atendimentowa.NovoCliente(srv.URL, "token-de-teste")
+	s.cfg.Vigia.Atendimento = true
+	s.inicio = time.Now().Add(-time.Hour)
+	s.ultimoContatoWorker.Store(time.Now().UnixNano())
+	relogio := time.Now()
+	s.agora = func() time.Time { return relogio }
+	avancar := func(d time.Duration) { relogio = relogio.Add(d) }
+
+	achados := func() map[string]achado {
+		t.Helper()
+		lista, ok := s.verificarSaude(ctx)
+		if !ok {
+			t.Fatal("banco indisponível")
+		}
+		m := map[string]achado{}
+		for _, a := range lista {
+			if strings.HasPrefix(a.Chave, "atendimento-") {
+				m[a.Chave] = a
+			}
+		}
+		return m
+	}
+
+	// Bot ligado e autorizado, sem sessão no worker: tolera 10 min (deploy, pareamento).
+	bot := botComFluxo(t, s, "vigiado", true)
+	if a := achados(); len(a) != 0 {
+		t.Fatalf("alerta antes da tolerância: %+v", a)
+	}
+	avancar(11 * time.Minute)
+	a := achados()
+	alerta, ok := a["atendimento-bot-vigiado"]
+	if !ok || !strings.Contains(alerta.Titulo, "sem sessão") {
+		t.Fatalf("esperado alerta de bot sem sessão: %+v", a)
+	}
+	if !strings.Contains(alerta.Detalhe, "app.teste/atendimento/conexoes") {
+		t.Errorf("o alerta devia apontar a tela: %q", alerta.Detalhe)
+	}
+
+	// Sessão esperando QR: o alerta muda de texto, porque a ação é outra (escanear).
+	mu.Lock()
+	sessoes = `[{"bot":"vigiado","estado":"qr","conectado":false,"numero":null,"qr":"x"}]`
+	mu.Unlock()
+	if alerta := achados()["atendimento-bot-vigiado"]; !strings.Contains(alerta.Titulo, "QR") {
+		t.Errorf("esperado alerta de QR: %+v", alerta)
+	}
+
+	// Conectou: o alerta do bot sai.
+	mu.Lock()
+	sessoes = `[{"bot":"vigiado","estado":"aberta","conectado":true,"numero":"5511900000000:1@s.whatsapp.net","qr":null}]`
+	mu.Unlock()
+	if a := achados(); len(a) != 0 {
+		t.Fatalf("conectado não devia ter alerta: %+v", a)
+	}
+
+	// Bot desligado não gera alerta nenhum, mesmo sem sessão.
+	s.exec(t, "UPDATE atendimento.bots SET ativo = false WHERE id = $1", bot.ID)
+	mu.Lock()
+	sessoes = "[]"
+	mu.Unlock()
+	avancar(time.Hour)
+	if a := achados(); len(a) != 0 {
+		t.Fatalf("bot desligado não devia ser vigiado: %+v", a)
+	}
+	s.exec(t, "UPDATE atendimento.bots SET ativo = true WHERE id = $1", bot.ID)
+
+	// Resposta que desistiu e resposta parada na fila, com o WhatsApp conectado.
+	mu.Lock()
+	sessoes = `[{"bot":"vigiado","estado":"aberta","conectado":true,"numero":"5511900000000:1@s.whatsapp.net","qr":null}]`
+	mu.Unlock()
+	s.exec(t, `INSERT INTO atendimento.conversas (bot_id, telefone) VALUES ($1, '5511900080001')`, bot.ID)
+	var conversaID int64
+	if err := s.pool.QueryRow(ctx, "SELECT id FROM atendimento.conversas ORDER BY id DESC LIMIT 1").Scan(&conversaID); err != nil {
+		t.Fatal(err)
+	}
+	s.exec(t, `INSERT INTO atendimento.mensagens (conversa_id, direcao, texto, status, tentativas)
+	           VALUES ($1, 'enviada', 'resposta que não chegou', 'falhou', 5)`, conversaID)
+	s.exec(t, `INSERT INTO atendimento.mensagens (conversa_id, direcao, texto, status, criada_em)
+	           VALUES ($1, 'enviada', 'resposta parada', 'pendente', now() - interval '1 hour')`, conversaID)
+
+	a = achados()
+	if f, ok := a["atendimento-falhas"]; !ok || !strings.HasPrefix(f.Titulo, "1 resposta") {
+		t.Fatalf("esperado alerta de resposta não entregue: %+v", a)
+	}
+	if _, ok := a["atendimento-fila"]; !ok {
+		t.Fatalf("esperado alerta de fila parada: %+v", a)
+	}
+	// Nome e telefone de quem conversou não entram no alerta: o e-mail do vigia não é lugar de
+	// dado de cliente.
+	for _, x := range a {
+		if strings.Contains(x.Titulo+x.Detalhe, "5511900080001") || strings.Contains(x.Titulo+x.Detalhe, "resposta que não chegou") {
+			t.Errorf("o alerta não pode levar dado da conversa: %+v", x)
+		}
+	}
+
+	// Serviço fora do ar: um alerta só, e a fila parada deixa de ser incidente (sem sessão,
+	// esperar é o certo).
+	srv.Close()
+	// O primeiro ciclo sem resposta marca o início da ausência; o alerta sai depois da
+	// tolerância — é assim que o laço de 5 min se comporta de verdade.
+	if a := achados(); len(a) > 1 {
+		t.Fatalf("o primeiro ciclo sem resposta não devia alertar do serviço: %+v", a)
+	}
+	avancar(11 * time.Minute)
+	a = achados()
+	if _, ok := a["atendimento-servico"]; !ok {
+		t.Fatalf("esperado alerta de serviço sem resposta: %+v", a)
+	}
+	if _, ok := a["atendimento-fila"]; ok {
+		t.Errorf("sem sessão, fila parada não é incidente: %+v", a)
 	}
 }

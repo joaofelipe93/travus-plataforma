@@ -116,6 +116,10 @@ type Servidor struct {
 	// goroutine do vigia mexe).
 	checkinSemRespostaDesde time.Time
 	whatsappForaDesde       time.Time
+	// Atendimento: desde quando o serviço está sem resposta, e desde quando o número de cada
+	// bot está fora (só a goroutine do vigia mexe).
+	atendimentoSemRespostaDesde time.Time
+	atendimentoBotForaDesde     map[string]time.Time
 
 	// Assistente: uma pergunta por vez e limite por hora, por pessoa.
 	limiteAssistente limitadorAssistente

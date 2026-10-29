@@ -24,6 +24,8 @@ services:
       VIGIA_BACKUP_DIR: /backups
       VIGIA_CERTIFICADO: ${DOMINIO_APP}:443
       VIGIA_CHECKIN: "true"
+      # Confere os bots: serviço sem resposta, número autorizado que caiu, fila parada.
+      VIGIA_ATENDIMENTO: "true"
     volumes:
       - ${BACKUP_DIR:?defina BACKUP_DIR em deploy/.env}:/backups:ro
     labels:
@@ -55,6 +57,22 @@ services:
 
   boletos-whatsapp:
     profiles: !reset []
+
+  # Atendimento no WhatsApp ligado em produção (localmente fica no perfil atendimento). Ele sobe
+  # mesmo sem bot cadastrado: zero bot é zero sessão, e o processo parado custa pouco. Nada é
+  # enviado enquanto ATENDIMENTO_ENVIO_HABILITADO e o interruptor de cada bot estiverem
+  # desligados — e, sem número pareado, não há nem como.
+  atendimento-whatsapp:
+    profiles: !reset []
+    environment:
+      # **Teto menor que o padrão do código (4) de propósito.** Cada sessão do Baileys custa
+      # memória, e esta VM tem 2 GB no total, dividida com Postgres, API, web, Traefik e os
+      # outros dois serviços de WhatsApp. Dois bots cabem; subir isto pede redimensionar a VM
+      # ANTES (docs/producao.md, seção 10).
+      MAX_SESSOES: ${ATENDIMENTO_MAX_SESSOES:-2}
+    # Limite coerente com o teto acima: o container morre e reinicia em vez de levar a VM
+    # inteira junto se alguma sessão vazar memória.
+    mem_limit: 512m
 
   # Um backup por dia, a partir de BACKUP_HORA, em BACKUP_DIR na própria VM.
   backup:
