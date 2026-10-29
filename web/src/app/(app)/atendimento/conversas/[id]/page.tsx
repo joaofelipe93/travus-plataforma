@@ -135,7 +135,7 @@ export default function PaginaConversa() {
           <Alert>
             <AlertDescription>
               {naoSaiu} mensagem(ns) desta conversa <strong>não chegaram</strong> à pessoa. Elas
-              aparecem abaixo marcadas, com o motivo — em ensaio é o esperado.
+              aparecem abaixo marcadas, com o motivo (teto da hora, ou falha na entrega).
             </AlertDescription>
           </Alert>
         )}

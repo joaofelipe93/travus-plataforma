@@ -59,9 +59,8 @@ services:
     profiles: !reset []
 
   # Atendimento no WhatsApp ligado em produção (localmente fica no perfil atendimento). Ele sobe
-  # mesmo sem bot cadastrado: zero bot é zero sessão, e o processo parado custa pouco. Nada é
-  # enviado enquanto ATENDIMENTO_ENVIO_HABILITADO e o interruptor de cada bot estiverem
-  # desligados — e, sem número pareado, não há nem como.
+  # mesmo sem bot cadastrado: zero bot é zero sessão, e o processo parado custa pouco. Bot nasce
+  # desligado, e sem número pareado não há como enviar nada.
   atendimento-whatsapp:
     profiles: !reset []
     environment:

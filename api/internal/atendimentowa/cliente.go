@@ -42,9 +42,7 @@ type Sessao struct {
 }
 
 type Status struct {
-	// Freio de mão do próprio worker, independente da API.
-	EnvioServico bool     `json:"envio_habilitado_servico"`
-	Sessoes      []Sessao `json:"sessoes"`
+	Sessoes []Sessao `json:"sessoes"`
 }
 
 // Da devolve a sessão de um bot, se o worker a conhece.

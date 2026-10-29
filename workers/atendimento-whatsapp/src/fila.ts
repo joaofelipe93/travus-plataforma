@@ -154,10 +154,6 @@ export function criarLacoDaFila(
   }
 
   function iniciar(): void {
-    if (!env.ENVIO_HABILITADO) {
-      log.warn('ENVIO_HABILITADO=false: o laço da fila não vai enviar nada (freio de mão local)')
-      return
-    }
     const rodar = () => {
       cicloAtual = ciclo()
         .catch((err) => log.error({ err }, 'falha no ciclo da fila'))

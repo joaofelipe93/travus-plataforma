@@ -42,9 +42,7 @@ const (
 
 // motivos de uma resposta que não saiu; a tela mostra este texto.
 const (
-	motivoEnsaioServidor = "ensaio: ATENDIMENTO_ENVIO_HABILITADO está desligada no servidor"
-	motivoEnsaioBot      = "ensaio: o envio deste bot está desligado"
-	motivoTetoHora       = "teto de respostas por hora deste bot"
+	motivoTetoHora = "teto de respostas por hora deste bot"
 )
 
 // resultadoAtendimento é o que aconteceu com uma mensagem recebida.
@@ -379,15 +377,12 @@ func (s *Servidor) responderAtendimento(ctx context.Context, bot db.AtendimentoB
 	return res, nil
 }
 
-// decidirEnvio diz se a resposta vai para a fila ou nasce cancelada. São três perguntas, na
-// ordem em que importam: a chave do servidor, a chave do bot e o teto da hora.
+// decidirEnvio diz se a resposta vai para a fila ou nasce cancelada.
+//
+// Antes eram três perguntas (chave do servidor, chave do bot e teto da hora). Hoje é uma: o teto
+// de respostas por hora — **bot ligado responde** (decisão do usuário em 29/10/2026: um botão
+// só). Quem não devia responder já não chegou aqui: conversa de bot desligado não abre.
 func (s *Servidor) decidirEnvio(ctx context.Context, bot db.AtendimentoBot) (status, motivo string, err error) {
-	if !s.cfg.AtendimentoEnvioHabilitado {
-		return "cancelada", motivoEnsaioServidor, nil
-	}
-	if !bot.EnvioHabilitado {
-		return "cancelada", motivoEnsaioBot, nil
-	}
 	naHora, err := s.q.ContarRespostasDaHora(ctx, bot.ID)
 	if err != nil {
 		return "", "", err

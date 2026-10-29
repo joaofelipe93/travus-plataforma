@@ -21,7 +21,6 @@ process.env.AUTH_DIR = join(dir, 'sessoes')
 process.env.LOG_LEVEL = 'fatal'
 // Fora de produção o logger usa o pino-pretty, que sobe uma worker thread e segura o processo.
 process.env.NODE_ENV = 'production'
-process.env.ENVIO_HABILITADO = 'true'
 process.env.LOTE = '5'
 process.env.MAX_SESSOES = '3'
 

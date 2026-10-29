@@ -21,7 +21,6 @@ export function rotasWhatsapp(gerente: Gerente) {
     app.addHook('preHandler', exigirTokenAdmin)
 
     app.get('/whatsapp/status', async () => ({
-      envio_habilitado_servico: env.ENVIO_HABILITADO,
       max_sessoes: env.MAX_SESSOES,
       // Bots ligados que não couberam no teto: a tela precisa poder explicar o número ausente.
       sem_sessao: gerente.semSessao(),

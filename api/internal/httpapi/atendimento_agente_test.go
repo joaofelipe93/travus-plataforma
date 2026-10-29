@@ -88,8 +88,9 @@ func jsonTexto(s string) string {
 	return string(b)
 }
 
-// botComFluxo cria um bot ativo com duas etapas e devolve o bot pronto para conversar.
-func botComFluxo(t *testing.T, s *Servidor, slug string, envioDoBot bool) db.AtendimentoBot {
+// botComFluxo cria um bot com duas etapas e devolve o bot pronto para conversar. `ligado` é o
+// único interruptor que existe: bot ligado responde (decisão do usuário em 29/10/2026).
+func botComFluxo(t *testing.T, s *Servidor, slug string, ligado bool) db.AtendimentoBot {
 	t.Helper()
 	ctx := context.Background()
 	bot, err := s.q.CriarBot(ctx, db.CriarBotParams{
@@ -113,27 +114,21 @@ func botComFluxo(t *testing.T, s *Servidor, slug string, envioDoBot bool) db.Ate
 		}
 	}
 	bot, err = s.q.AtualizarBot(ctx, db.AtualizarBotParams{
-		ID: bot.ID, Nome: bot.Nome, Modelo: bot.Modelo, Instrucoes: bot.Instrucoes, Ativo: true,
+		ID: bot.ID, Nome: bot.Nome, Modelo: bot.Modelo, Instrucoes: bot.Instrucoes, Ativo: ligado,
 		MaxMensagensHora: 60, MaxTokensConversa: 50000, PausaRespostaSegundos: 0,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if envioDoBot {
-		if bot, err = s.q.DefinirEnvioDoBot(ctx, db.DefinirEnvioDoBotParams{ID: bot.ID, EnvioHabilitado: true}); err != nil {
-			t.Fatal(err)
-		}
-	}
 	return bot
 }
 
 // servidorComBot monta o servidor com o dublê já ligado.
-func servidorComBot(t *testing.T, m *modeloRoteiroBot, envioDoServidor bool) *Servidor {
+func servidorComBot(t *testing.T, m *modeloRoteiroBot) *Servidor {
 	t.Helper()
 	s := novoServidorTeste(t)
 	limparAtendimento(t, s)
 	s.cfg.ModeloAtendimento = func(string) assistente.Modelo { return m }
-	s.cfg.AtendimentoEnvioHabilitado = envioDoServidor
 	return s
 }
 
@@ -142,7 +137,7 @@ func TestAtendimentoRespondeEColeta(t *testing.T) {
 		{ferramenta: "registrar_dado", entrada: `{"campo":"interesse","valor":"apartamento 2 quartos"}`},
 		{texto: "Perfeito! Em qual bairro?"},
 	}}
-	s := servidorComBot(t, m, true)
+	s := servidorComBot(t, m)
 	bot := botComFluxo(t, s, "imoveis", true)
 
 	res, err := s.responderAtendimento(context.Background(), bot, "5511900000000", "Fulano", "quero alugar um ap de 2 quartos")
@@ -177,59 +172,13 @@ func TestAtendimentoRespondeEColeta(t *testing.T) {
 	}
 }
 
-func TestAtendimentoEnsaioNaoManda(t *testing.T) {
-	casos := map[string]struct {
-		servidor, bot bool
-		motivo        string
-	}{
-		"chave do servidor desligada": {servidor: false, bot: true, motivo: "ATENDIMENTO_ENVIO_HABILITADO"},
-		"envio do bot desligado":      {servidor: true, bot: false, motivo: "envio deste bot"},
-	}
-	for nome, c := range casos {
-		t.Run(nome, func(t *testing.T) {
-			m := &modeloRoteiroBot{turnos: []turnoBot{{texto: "Oi! Como posso ajudar?"}}}
-			s := servidorComBot(t, m, c.servidor)
-			bot := botComFluxo(t, s, "ensaio", c.bot)
-
-			res, err := s.responderAtendimento(context.Background(), bot, "5511911111111", "", "oi")
-			if err != nil {
-				t.Fatal(err)
-			}
-			if res.Status != "cancelada" || !strings.Contains(res.Motivo, c.motivo) {
-				t.Fatalf("devia nascer cancelada com o motivo do ensaio: %+v", res)
-			}
-			// A resposta fica gravada: é assim que a tela mostra o que teria saído.
-			msgs, err := s.q.HistoricoDaConversa(context.Background(), db.HistoricoDaConversaParams{
-				ConversaID: res.ConversaID, Limite: 10,
-			})
-			if err != nil {
-				t.Fatal(err)
-			}
-			for _, msg := range msgs {
-				if msg.Direcao == "enviada" {
-					t.Error("mensagem cancelada não devia aparecer no histórico do modelo")
-				}
-			}
-			var texto string
-			if err := s.pool.QueryRow(context.Background(),
-				"SELECT texto FROM atendimento.mensagens WHERE conversa_id = $1 AND direcao = 'enviada'",
-				res.ConversaID).Scan(&texto); err != nil {
-				t.Fatalf("a resposta devia estar gravada mesmo cancelada: %v", err)
-			}
-			if texto == "" {
-				t.Error("o texto do que sairia precisa ficar guardado")
-			}
-		})
-	}
-}
-
 func TestAtendimentoEtapaSoAvancaComObrigatorio(t *testing.T) {
 	// O modelo tenta correr: pede para avançar antes de coletar o obrigatório.
 	m := &modeloRoteiroBot{turnos: []turnoBot{
 		{ferramenta: "avancar_etapa"},
 		{texto: "Me conta o que você procura?"},
 	}}
-	s := servidorComBot(t, m, true)
+	s := servidorComBot(t, m)
 	bot := botComFluxo(t, s, "apressado", true)
 
 	res, err := s.responderAtendimento(context.Background(), bot, "5511922222222", "", "oi")
@@ -253,7 +202,7 @@ func TestAtendimentoAvancaEEncerraNoFim(t *testing.T) {
 		{ferramenta: "avancar_etapa"}, // última etapa: avançar é terminar
 		{texto: "Obrigado! Um corretor vai te ligar."},
 	}}
-	s := servidorComBot(t, m, true)
+	s := servidorComBot(t, m)
 	bot := botComFluxo(t, s, "completo", true)
 
 	res, err := s.responderAtendimento(context.Background(), bot, "5511933333333", "", "quero uma kitnet, meu zap é 11988887777")
@@ -278,7 +227,7 @@ func TestAtendimentoEncerraPedidoDeHumano(t *testing.T) {
 		{ferramenta: "encerrar", entrada: `{"motivo":"pediu_humano"}`},
 		{texto: "Vou passar para a equipe, já te respondem por aqui."},
 	}}
-	s := servidorComBot(t, m, true)
+	s := servidorComBot(t, m)
 	bot := botComFluxo(t, s, "humano", true)
 
 	res, err := s.responderAtendimento(context.Background(), bot, "5511944444444", "", "quero falar com uma pessoa")
@@ -304,7 +253,7 @@ func TestAtendimentoMotivoDesconhecidoNaoEncerra(t *testing.T) {
 		{ferramenta: "encerrar", entrada: `{"motivo":"cansei"}`},
 		{texto: "Posso ajudar em mais algo?"},
 	}}
-	s := servidorComBot(t, m, true)
+	s := servidorComBot(t, m)
 	bot := botComFluxo(t, s, "motivo", true)
 
 	res, err := s.responderAtendimento(context.Background(), bot, "5511955555555", "", "tchau")
@@ -321,7 +270,7 @@ func TestAtendimentoMotivoDesconhecidoNaoEncerra(t *testing.T) {
 
 func TestAtendimentoTetoDeTokensEncerra(t *testing.T) {
 	m := &modeloRoteiroBot{turnos: []turnoBot{{texto: "Oi!"}}}
-	s := servidorComBot(t, m, true)
+	s := servidorComBot(t, m)
 	bot := botComFluxo(t, s, "teto-tokens", true)
 	// Teto baixo e conversa já gasta: a próxima mensagem encerra em vez de chamar o modelo.
 	if _, err := s.q.AtualizarBot(context.Background(), db.AtualizarBotParams{
@@ -349,7 +298,7 @@ func TestAtendimentoTetoDeTokensEncerra(t *testing.T) {
 
 func TestAtendimentoTetoDaHoraCancela(t *testing.T) {
 	m := &modeloRoteiroBot{turnos: []turnoBot{{texto: "Oi!"}, {texto: "Oi de novo!"}}}
-	s := servidorComBot(t, m, true)
+	s := servidorComBot(t, m)
 	bot := botComFluxo(t, s, "teto-hora", true)
 	s.exec(t, "UPDATE atendimento.bots SET max_mensagens_hora = 1 WHERE id = $1", bot.ID)
 	bot, _ = s.q.BuscarBot(context.Background(), bot.ID)
@@ -372,7 +321,7 @@ func TestAtendimentoTetoDaHoraCancela(t *testing.T) {
 
 func TestAtendimentoMesmoTelefoneContinuaAConversa(t *testing.T) {
 	m := &modeloRoteiroBot{turnos: []turnoBot{{texto: "Oi!"}, {texto: "Pois não?"}}}
-	s := servidorComBot(t, m, true)
+	s := servidorComBot(t, m)
 	bot := botComFluxo(t, s, "mesma-conversa", true)
 
 	a, err := s.responderAtendimento(context.Background(), bot, "5511999999999", "Fulano", "oi")
@@ -399,7 +348,7 @@ func TestAtendimentoMesmoTelefoneContinuaAConversa(t *testing.T) {
 
 func TestAtendimentoBotDesligadoNaoAbreConversa(t *testing.T) {
 	m := &modeloRoteiroBot{turnos: []turnoBot{{texto: "não devia chegar aqui"}}}
-	s := servidorComBot(t, m, true)
+	s := servidorComBot(t, m)
 	bot := botComFluxo(t, s, "desligado", true)
 	s.exec(t, "UPDATE atendimento.bots SET ativo = false WHERE id = $1", bot.ID)
 	bot, _ = s.q.BuscarBot(context.Background(), bot.ID)
@@ -431,7 +380,7 @@ func TestAtendimentoSemChaveNoServidor(t *testing.T) {
 
 func TestAtendimentoRotaInternaExigeToken(t *testing.T) {
 	m := &modeloRoteiroBot{turnos: []turnoBot{{texto: "Olá!"}}}
-	s := servidorComBot(t, m, true)
+	s := servidorComBot(t, m)
 	bot := botComFluxo(t, s, "interno", true)
 	interno := s.RotasInternas()
 

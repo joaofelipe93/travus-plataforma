@@ -61,7 +61,7 @@ func postar(t *testing.T, s *Servidor, perfil db.PerfilUsuario, caminho string, 
 }
 
 func TestAtendimentoLeadNasceDaConversaEncerrada(t *testing.T) {
-	s := servidorComBot(t, &modeloRoteiroBot{}, true)
+	s := servidorComBot(t, &modeloRoteiroBot{})
 	res := conversaQueRendeu(t, s, "leads", "5511900070001")
 
 	leads := leadsDoServidor(t, s, "novos")
@@ -97,7 +97,7 @@ func TestAtendimentoConversaSemDadoNaoViraLead(t *testing.T) {
 		{ferramenta: "encerrar", entrada: `{"motivo":"fora_do_escopo"}`},
 		{texto: "Isso não é com a gente, desculpe."},
 	}}
-	s := servidorComBot(t, m, true)
+	s := servidorComBot(t, m)
 	bot := botComFluxo(t, s, "sem-dado", true)
 	if _, err := s.responderAtendimento(context.Background(), bot, "5511900070002", "", "vocês vendem carro?"); err != nil {
 		t.Fatal(err)
@@ -108,7 +108,7 @@ func TestAtendimentoConversaSemDadoNaoViraLead(t *testing.T) {
 }
 
 func TestAtendimentoLeadViraCliente(t *testing.T) {
-	s := servidorComBot(t, &modeloRoteiroBot{}, true)
+	s := servidorComBot(t, &modeloRoteiroBot{})
 	conversaQueRendeu(t, s, "vira-cliente", "5511900070003")
 	lead := leadsDoServidor(t, s, "novos")[0]
 
@@ -172,7 +172,7 @@ func TestAtendimentoLeadViraCliente(t *testing.T) {
 
 // O caso que evita cadastro duplicado: alguém da carteira escreveu no WhatsApp.
 func TestAtendimentoLeadLigaAClienteExistente(t *testing.T) {
-	s := servidorComBot(t, &modeloRoteiroBot{}, true)
+	s := servidorComBot(t, &modeloRoteiroBot{})
 	nav := navegadorDoPerfil(t, s, db.PerfilUsuarioOperador)
 	criado := nav.cadastrarCliente(t, map[string]any{"nome": "Cliente Antigo"})
 
@@ -202,7 +202,7 @@ func TestAtendimentoLeadLigaAClienteExistente(t *testing.T) {
 }
 
 func TestAtendimentoLeadDescartado(t *testing.T) {
-	s := servidorComBot(t, &modeloRoteiroBot{}, true)
+	s := servidorComBot(t, &modeloRoteiroBot{})
 	conversaQueRendeu(t, s, "descarte", "5511900070005")
 	lead := leadsDoServidor(t, s, "novos")[0]
 
@@ -241,7 +241,7 @@ func TestAtendimentoLeadDescartado(t *testing.T) {
 
 // Lead é dado pessoal de quem escreveu, e promovê-lo mexe no cadastro: leitura não entra.
 func TestAtendimentoLeadNaoEDeLeitura(t *testing.T) {
-	s := servidorComBot(t, &modeloRoteiroBot{}, true)
+	s := servidorComBot(t, &modeloRoteiroBot{})
 	conversaQueRendeu(t, s, "privacidade-lead", "5511900070006")
 	lead := leadsDoServidor(t, s, "novos")[0]
 
@@ -256,7 +256,7 @@ func TestAtendimentoLeadNaoEDeLeitura(t *testing.T) {
 }
 
 func TestAtendimentoLeadNoResumoDoPainel(t *testing.T) {
-	s := servidorComBot(t, &modeloRoteiroBot{}, true)
+	s := servidorComBot(t, &modeloRoteiroBot{})
 	conversaQueRendeu(t, s, "resumo-lead", "5511900070007")
 
 	rec := pegar(t, s, db.PerfilUsuarioLeitura, "/atendimento/resumo")
@@ -275,7 +275,7 @@ func TestAtendimentoLeadNoResumoDoPainel(t *testing.T) {
 
 // A conversa aponta para o lead que ela originou: é o atalho de quem está lendo a conversa.
 func TestAtendimentoConversaApontaParaOLead(t *testing.T) {
-	s := servidorComBot(t, &modeloRoteiroBot{}, true)
+	s := servidorComBot(t, &modeloRoteiroBot{})
 	res := conversaQueRendeu(t, s, "aponta-lead", "5511900070008")
 
 	rec := pegar(t, s, db.PerfilUsuarioOperador, "/atendimento/conversas/"+idTexto(res.ConversaID))
@@ -309,7 +309,7 @@ func TestAtendimentoConversaApontaParaOLead(t *testing.T) {
 // alguém ligou o envio, a pessoa escreve, o bot responde e a resposta fica na fila porque o
 // número caiu. Sem vigia, isso se descobre pelo cliente reclamando.
 func TestVigiaAtendimento(t *testing.T) {
-	s := servidorComBot(t, &modeloRoteiroBot{}, true)
+	s := servidorComBot(t, &modeloRoteiroBot{})
 	ctx := context.Background()
 
 	// Dublê do serviço de WhatsApp dos bots: responde o status que o teste pedir.

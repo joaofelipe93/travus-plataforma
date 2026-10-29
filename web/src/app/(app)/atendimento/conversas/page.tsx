@@ -106,8 +106,7 @@ function Conversas() {
         <Skeleton className="h-64 w-full" />
       ) : lista.length === 0 ? (
         <Vazio>
-          Nenhuma conversa neste recorte. Elas aparecem quando alguém escreve para um bot — e
-          também em ensaio, com a resposta guardada em vez de enviada.
+          Nenhuma conversa neste recorte. Elas aparecem quando alguém escreve para um bot ligado.
         </Vazio>
       ) : (
         <>

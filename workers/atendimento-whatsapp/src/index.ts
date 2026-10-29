@@ -52,7 +52,6 @@ async function main() {
       port: env.PORT,
       authDir: env.AUTH_DIR,
       api: env.API_URL,
-      envioHabilitado: env.ENVIO_HABILITADO,
       maxSessoes: env.MAX_SESSOES,
       lote: env.LOTE,
       reconciliarSegundos: env.RECONCILIAR_SEGUNDOS,
@@ -74,9 +73,6 @@ async function main() {
   await app.listen({ port: env.PORT, host: env.HOST })
 
   logger.info({ port: env.PORT }, 'servidor pronto')
-  if (!env.ENVIO_HABILITADO) {
-    logger.warn('ENVIO_HABILITADO=false neste serviço: nenhuma sessão abre e nada é enviado (freio de mão local)')
-  }
 
   let encerrando = false
   const encerrar = async (sinal: string) => {

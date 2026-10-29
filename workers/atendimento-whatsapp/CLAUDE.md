@@ -33,7 +33,7 @@ laço (3s) → POST /internal/atendimento/fila/proxima {bots com sessão aberta}
 laço (30s) → GET /internal/atendimento/bots → abre sessão para bot novo, encerra a do que saiu
 ```
 
-Ele **não decide nada**: não sabe o que é etapa, teto, ensaio ou instrução de bot, não tem a
+Ele **não decide nada**: não sabe o que é etapa, teto ou instrução de bot, não tem a
 chave da Anthropic e não acessa o Postgres. É o carteiro — e é por isso que a peça que mais
 reinicia (o socket do WhatsApp) não tem regra de negócio dentro.
 
@@ -78,7 +78,7 @@ Pelo `make test` da raiz, é o container `atendimento-teste` (não precisa de ba
 |---|---|---|
 | `GET` | `/health` | estado do serviço e quantas sessões estão abertas |
 | `GET` | `/whatsapp/status` | **uma linha por sessão**: estado, número, **string do QR**, mais o freio e quem ficou sem sessão |
-| `POST` | `/whatsapp/:slug/teste` | mensagem de teste pelo número daquele bot (`{"telefone":"5511…"}`). **Vai para um número de verdade e sai mesmo em modo ensaio** |
+| `POST` | `/whatsapp/:slug/teste` | mensagem de teste pelo número daquele bot (`{"telefone":"5511…"}`). **Vai para um número de verdade e sai mesmo com o bot desligado** |
 | `POST` | `/whatsapp/:slug/desconectar` | desvincula o aparelho **daquele bot**, apaga a sessão e gera QR novo (`{"confirmar":true}`) |
 
 Todas exigem o `ADMIN_TOKEN` (`x-admin-token` ou `Authorization: Bearer`), que só a API tem.
@@ -88,8 +88,9 @@ Nunca publique a porta nem crie rota no Traefik para cá.
 ## Variáveis
 
 `ADMIN_TOKEN` (≥32), `API_URL` (a API na rede interna, porta 8081), `WORKER_TOKEN`,
-`WORKER_NOME`, `AUTH_DIR` (pasta das sessões, em volume), `ENVIO_HABILITADO` (freio de mão
-local, padrão `true`), `LOTE` (respostas por ciclo, padrão 5), `RECONCILIAR_SEGUNDOS` (padrão
-30), `MAX_SESSOES` (padrão 4), `PORT`/`HOST`/`LOG_LEVEL`/`LOG_FORMAT`. Faltando o obrigatório, o
+`WORKER_NOME`, `AUTH_DIR` (pasta das sessões, em volume), `LOTE` (respostas por ciclo, padrão 5),
+`RECONCILIAR_SEGUNDOS` (padrão 30), `MAX_SESSOES` (padrão 4),
+`PORT`/`HOST`/`LOG_LEVEL`/`LOG_FORMAT`. **Não há freio de envio aqui**: quem decide é o botão de
+cada bot, na plataforma (29/10/2026). Para parar este serviço, derrube o container. Faltando o obrigatório, o
 processo **não sobe** — e sem a API respondendo no boot ele também não sobe, porque abrir sessões
 sem ter a quem entregar as mensagens é pior do que não abrir.

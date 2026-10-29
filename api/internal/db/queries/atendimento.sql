@@ -45,18 +45,6 @@ RETURNING *;
 
 -- Liga ou desliga o envio de verdade. Só admin chega aqui (a rota barra operador). Quem ligou
 -- fica gravado; desligar não apaga o registro de quem havia ligado, que é o histórico útil.
--- name: DefinirEnvioDoBot :one
-UPDATE atendimento.bots SET
-    envio_habilitado     = @envio_habilitado,
-    envio_habilitado_por = CASE WHEN @envio_habilitado::boolean THEN sqlc.narg(por) ELSE envio_habilitado_por END,
-    envio_habilitado_em  = CASE WHEN @envio_habilitado::boolean THEN now() ELSE envio_habilitado_em END,
-    atualizado_por       = sqlc.narg(por),
-    atualizado_em        = now()
-WHERE id = @id
-RETURNING *;
-
--- Bot com conversa é histórico e não se exclui (mesma regra de cota com lance): a rota confere
--- antes e responde 409 pedindo para desativar.
 -- name: ExcluirBot :execrows
 DELETE FROM atendimento.bots WHERE id = @id;
 
@@ -165,7 +153,6 @@ SELECT * FROM atendimento.etapas WHERE id = @id;
 SELECT
     (SELECT count(*) FROM atendimento.bots b1)                                            AS bots,
     (SELECT count(*) FROM atendimento.bots b2 WHERE b2.ativo)                             AS bots_ativos,
-    (SELECT count(*) FROM atendimento.bots b3 WHERE b3.ativo AND b3.envio_habilitado)     AS bots_com_envio,
     (SELECT count(*) FROM atendimento.conversas c1 WHERE c1.status = 'aberta')            AS conversas_abertas,
     (SELECT count(*) FROM atendimento.conversas c2 WHERE c2.iniciada_em >= @desde_hoje)    AS conversas_hoje,
     (SELECT count(*) FROM atendimento.conversas c3
@@ -243,7 +230,7 @@ WITH alvo AS (
     JOIN atendimento.bots b ON b.id = c.bot_id
     WHERE m.status = 'pendente'
       AND m.proxima_tentativa_em <= now()
-      AND b.ativo AND b.envio_habilitado
+      AND b.ativo
       AND b.slug = ANY(@slugs::text[])
     ORDER BY m.proxima_tentativa_em, m.id
     FOR UPDATE OF m SKIP LOCKED

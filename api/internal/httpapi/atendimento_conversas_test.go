@@ -64,7 +64,7 @@ func TestAtendimentoResumoDoPainel(t *testing.T) {
 		{ferramenta: "registrar_dado", entrada: `{"campo":"interesse","valor":"apartamento"}`},
 		{texto: "Em qual bairro?"},
 	}}
-	s := servidorComBot(t, m, true)
+	s := servidorComBot(t, m)
 	bot := botComFluxo(t, s, "resumo", true)
 	conversaDeTeste(t, s, bot, "5511900010001", "Fulano", "quero um ap")
 
@@ -74,9 +74,8 @@ func TestAtendimentoResumoDoPainel(t *testing.T) {
 	}
 	var res struct {
 		Bots struct {
-			Total    int64 `json:"total"`
-			Ativos   int64 `json:"ativos"`
-			ComEnvio int64 `json:"com_envio"`
+			Total  int64 `json:"total"`
+			Ativos int64 `json:"ativos"`
 		} `json:"bots"`
 		Conversas struct {
 			Abertas int64 `json:"abertas"`
@@ -87,14 +86,13 @@ func TestAtendimentoResumoDoPainel(t *testing.T) {
 			Falharam      int64 `json:"falharam"`
 			CanceladasMes int64 `json:"canceladas_mes"`
 		} `json:"fila"`
-		DadosColetadosMes      int64 `json:"dados_coletados_mes"`
-		TokensMes              int64 `json:"tokens_mes"`
-		EnvioHabilitadoServico bool  `json:"envio_habilitado_servico"`
-		ModeloDisponivel       bool  `json:"modelo_disponivel"`
+		DadosColetadosMes int64 `json:"dados_coletados_mes"`
+		TokensMes         int64 `json:"tokens_mes"`
+		ModeloDisponivel  bool  `json:"modelo_disponivel"`
 	}
 	decodificarEm(t, rec, &res)
 
-	if res.Bots.Total != 1 || res.Bots.Ativos != 1 || res.Bots.ComEnvio != 1 {
+	if res.Bots.Total != 1 || res.Bots.Ativos != 1 {
 		t.Errorf("os bots deviam estar contados: %+v", res.Bots)
 	}
 	if res.Conversas.Abertas != 1 || res.Conversas.Hoje != 1 {
@@ -106,24 +104,19 @@ func TestAtendimentoResumoDoPainel(t *testing.T) {
 	if res.TokensMes == 0 {
 		t.Error("o gasto da conversa devia aparecer: é o que mostra o custo do serviço")
 	}
-	if !res.EnvioHabilitadoServico || !res.ModeloDisponivel {
-		t.Errorf("as duas condições do servidor deviam estar ligadas neste teste: %+v", res)
+	if !res.ModeloDisponivel {
+		t.Errorf("o dublê está ligado: o modelo devia constar como disponível: %+v", res)
 	}
 }
 
-// Com a chave do servidor desligada o painel precisa dizer isso — é a diferença entre "o bot
-// está conversando" e "o bot está ensaiando".
-func TestAtendimentoResumoMostraEnsaio(t *testing.T) {
-	s := servidorComBot(t, &modeloRoteiroBot{}, false)
-	rec := pegar(t, s, db.PerfilUsuarioLeitura, "/atendimento/resumo")
+// Sem a chave da Anthropic nenhum bot responde, mesmo ligado: o painel precisa dizer isso, em
+// vez de deixar alguém montar um fluxo que nunca vai rodar.
+func TestAtendimentoResumoSemChaveDaAnthropic(t *testing.T) {
+	s := servidorComBot(t, &modeloRoteiroBot{})
 	var res struct {
-		EnvioHabilitadoServico bool `json:"envio_habilitado_servico"`
-		ModeloDisponivel       bool `json:"modelo_disponivel"`
+		ModeloDisponivel bool `json:"modelo_disponivel"`
 	}
-	decodificarEm(t, rec, &res)
-	if res.EnvioHabilitadoServico {
-		t.Error("a chave está desligada: o painel não podia dizer que o envio está ligado")
-	}
+	decodificarEm(t, pegar(t, s, db.PerfilUsuarioLeitura, "/atendimento/resumo"), &res)
 	if !res.ModeloDisponivel {
 		t.Error("o dublê está ligado: o modelo devia constar como disponível")
 	}
@@ -131,8 +124,7 @@ func TestAtendimentoResumoMostraEnsaio(t *testing.T) {
 	semChave := novoServidorTeste(t)
 	limparAtendimento(t, semChave)
 	semChave.cfg.ModeloAtendimento = nil
-	rec = pegar(t, semChave, db.PerfilUsuarioLeitura, "/atendimento/resumo")
-	decodificarEm(t, rec, &res)
+	decodificarEm(t, pegar(t, semChave, db.PerfilUsuarioLeitura, "/atendimento/resumo"), &res)
 	if res.ModeloDisponivel {
 		t.Error("sem ANTHROPIC_API_KEY o painel precisa avisar que nenhum bot responde")
 	}
@@ -140,7 +132,7 @@ func TestAtendimentoResumoMostraEnsaio(t *testing.T) {
 
 func TestAtendimentoListarConversas(t *testing.T) {
 	m := &modeloRoteiroBot{turnos: []turnoBot{{texto: "Oi! Como ajudo?"}, {texto: "Certo!"}}}
-	s := servidorComBot(t, m, true)
+	s := servidorComBot(t, m)
 	bot := botComFluxo(t, s, "lista", true)
 	conversaDeTeste(t, s, bot, "5511900020001", "Ana", "bom dia")
 	conversaDeTeste(t, s, bot, "5511900020002", "", "oi")
@@ -197,7 +189,7 @@ func TestAtendimentoListarConversas(t *testing.T) {
 // Reservas. Ele continua vendo o painel (contagem não é conteúdo).
 func TestAtendimentoConversaNaoEDeLeitura(t *testing.T) {
 	m := &modeloRoteiroBot{turnos: []turnoBot{{texto: "Oi!"}}}
-	s := servidorComBot(t, m, true)
+	s := servidorComBot(t, m)
 	bot := botComFluxo(t, s, "privacidade", true)
 	c := conversaDeTeste(t, s, bot, "5511900030001", "Bruno", "oi")
 
@@ -216,7 +208,7 @@ func TestAtendimentoConversaDetalhada(t *testing.T) {
 		{ferramenta: "registrar_dado", entrada: `{"campo":"interesse","valor":"kitnet no centro"}`},
 		{texto: "Anotado! Qual seu telefone?"},
 	}}
-	s := servidorComBot(t, m, true)
+	s := servidorComBot(t, m)
 	bot := botComFluxo(t, s, "detalhe", true)
 	c := conversaDeTeste(t, s, bot, "5511900040001", "Carla", "procuro uma kitnet no centro")
 
@@ -272,15 +264,27 @@ func TestAtendimentoConversaDetalhada(t *testing.T) {
 	}
 }
 
-// Em ensaio a tela precisa mostrar o que o bot DIRIA: a mensagem cancelada aparece na conversa,
-// com o motivo, mesmo que ela não tenha saído.
+// A tela precisa mostrar o que o bot DIRIA quando a resposta não sai. Com um botão só, o motivo
+// que sobra é o teto de respostas por hora — e ele continua aparecendo na conversa, com o texto.
 func TestAtendimentoConversaMostraOQueNaoSaiu(t *testing.T) {
-	m := &modeloRoteiroBot{turnos: []turnoBot{{texto: "Oi! Isto é um ensaio."}}}
-	s := servidorComBot(t, m, false) // chave do servidor desligada
-	bot := botComFluxo(t, s, "ensaio-tela", true)
-	c := conversaDeTeste(t, s, bot, "5511900050001", "", "oi")
+	m := &modeloRoteiroBot{turnos: []turnoBot{{texto: "Primeira resposta."}, {texto: "Segunda resposta."}}}
+	s := servidorComBot(t, m)
+	bot := botComFluxo(t, s, "nao-saiu", true)
+	s.exec(t, "UPDATE atendimento.bots SET max_mensagens_hora = 1 WHERE id = $1", bot.ID)
+	bot, _ = s.q.BuscarBot(context.Background(), bot.ID)
 
-	rec := pegar(t, s, db.PerfilUsuarioOperador, "/atendimento/conversas/"+idTexto(c.ConversaID))
+	if _, err := s.responderAtendimento(context.Background(), bot, "5511900050001", "", "oi"); err != nil {
+		t.Fatal(err)
+	}
+	segunda, err := s.responderAtendimento(context.Background(), bot, "5511900050002", "", "oi")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if segunda.Status != "cancelada" {
+		t.Fatalf("passado o teto da hora, a resposta nasce cancelada: %+v", segunda)
+	}
+
+	rec := pegar(t, s, db.PerfilUsuarioOperador, "/atendimento/conversas/"+idTexto(segunda.ConversaID))
 	var res struct {
 		Mensagens []struct {
 			Direcao string  `json:"direcao"`
@@ -303,6 +307,6 @@ func TestAtendimentoConversaMostraOQueNaoSaiu(t *testing.T) {
 		}
 	}
 	if !cancelada {
-		t.Errorf("a mensagem de ensaio devia aparecer na conversa: %+v", res.Mensagens)
+		t.Errorf("a mensagem que não saiu devia aparecer na conversa: %+v", res.Mensagens)
 	}
 }
