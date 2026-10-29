@@ -196,6 +196,62 @@ func (q *Queries) BuscarBotPorSlug(ctx context.Context, slug string) (Atendiment
 	return i, err
 }
 
+const buscarConversa = `-- name: BuscarConversa :one
+SELECT c.id, c.bot_id, b.nome AS bot_nome, b.slug AS bot_slug, c.telefone, c.contato_nome,
+       c.status, c.motivo, c.etapa_id, e.nome AS etapa_nome, e.ordem AS etapa_ordem,
+       c.tokens_entrada, c.tokens_saida, c.iniciada_em, c.ultima_em, c.encerrada_em,
+       (SELECT count(*) FROM atendimento.etapas x WHERE x.bot_id = c.bot_id) AS etapas_do_bot
+FROM atendimento.conversas c
+JOIN atendimento.bots b ON b.id = c.bot_id
+LEFT JOIN atendimento.etapas e ON e.id = c.etapa_id
+WHERE c.id = $1
+`
+
+type BuscarConversaRow struct {
+	ID            int64
+	BotID         int64
+	BotNome       string
+	BotSlug       string
+	Telefone      string
+	ContatoNome   *string
+	Status        string
+	Motivo        *string
+	EtapaID       *int64
+	EtapaNome     *string
+	EtapaOrdem    *int32
+	TokensEntrada int32
+	TokensSaida   int32
+	IniciadaEm    time.Time
+	UltimaEm      time.Time
+	EncerradaEm   *time.Time
+	EtapasDoBot   int64
+}
+
+func (q *Queries) BuscarConversa(ctx context.Context, id int64) (BuscarConversaRow, error) {
+	row := q.db.QueryRow(ctx, buscarConversa, id)
+	var i BuscarConversaRow
+	err := row.Scan(
+		&i.ID,
+		&i.BotID,
+		&i.BotNome,
+		&i.BotSlug,
+		&i.Telefone,
+		&i.ContatoNome,
+		&i.Status,
+		&i.Motivo,
+		&i.EtapaID,
+		&i.EtapaNome,
+		&i.EtapaOrdem,
+		&i.TokensEntrada,
+		&i.TokensSaida,
+		&i.IniciadaEm,
+		&i.UltimaEm,
+		&i.EncerradaEm,
+		&i.EtapasDoBot,
+	)
+	return i, err
+}
+
 const buscarEtapa = `-- name: BuscarEtapa :one
 SELECT id, bot_id, ordem, nome, objetivo, instrucoes, campos, criado_em, atualizado_em FROM atendimento.etapas WHERE id = $1
 `
@@ -377,6 +433,48 @@ func (q *Queries) CriarEtapa(ctx context.Context, arg CriarEtapaParams) (Atendim
 		&i.AtualizadoEm,
 	)
 	return i, err
+}
+
+const dadosDaConversa = `-- name: DadosDaConversa :many
+SELECT k.campo, k.valor, k.criado_em, k.atualizado_em, e.nome AS etapa_nome
+FROM atendimento.coletas k
+LEFT JOIN atendimento.etapas e ON e.id = k.etapa_id
+WHERE k.conversa_id = $1
+ORDER BY k.criado_em, k.campo
+`
+
+type DadosDaConversaRow struct {
+	Campo        string
+	Valor        string
+	CriadoEm     time.Time
+	AtualizadoEm time.Time
+	EtapaNome    *string
+}
+
+func (q *Queries) DadosDaConversa(ctx context.Context, conversaID int64) ([]DadosDaConversaRow, error) {
+	rows, err := q.db.Query(ctx, dadosDaConversa, conversaID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []DadosDaConversaRow
+	for rows.Next() {
+		var i DadosDaConversaRow
+		if err := rows.Scan(
+			&i.Campo,
+			&i.Valor,
+			&i.CriadoEm,
+			&i.AtualizadoEm,
+			&i.EtapaNome,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const definirEnvioDoBot = `-- name: DefinirEnvioDoBot :one
@@ -675,6 +773,91 @@ func (q *Queries) ListarBots(ctx context.Context) ([]ListarBotsRow, error) {
 	return items, nil
 }
 
+const listarConversas = `-- name: ListarConversas :many
+SELECT c.id, c.bot_id, b.nome AS bot_nome, b.slug AS bot_slug, c.telefone, c.contato_nome,
+       c.status, c.motivo, e.nome AS etapa_nome, c.tokens_entrada, c.tokens_saida,
+       c.iniciada_em, c.ultima_em, c.encerrada_em,
+       (SELECT count(*) FROM atendimento.mensagens m WHERE m.conversa_id = c.id) AS mensagens,
+       (SELECT count(*) FROM atendimento.coletas k WHERE k.conversa_id = c.id)   AS dados,
+       coalesce((SELECT m.texto FROM atendimento.mensagens m WHERE m.conversa_id = c.id
+          ORDER BY m.id DESC LIMIT 1), '')::text                                 AS ultimo_texto,
+       coalesce((SELECT m.direcao FROM atendimento.mensagens m WHERE m.conversa_id = c.id
+          ORDER BY m.id DESC LIMIT 1), '')::text                                 AS ultima_direcao
+FROM atendimento.conversas c
+JOIN atendimento.bots b ON b.id = c.bot_id
+LEFT JOIN atendimento.etapas e ON e.id = c.etapa_id
+WHERE ($1::bigint IS NULL OR c.bot_id = $1::bigint)
+  AND ($2::text IS NULL OR c.status = $2::text)
+ORDER BY c.ultima_em DESC
+LIMIT $3
+`
+
+type ListarConversasParams struct {
+	BotID  *int64
+	Status *string
+	Limite int32
+}
+
+type ListarConversasRow struct {
+	ID            int64
+	BotID         int64
+	BotNome       string
+	BotSlug       string
+	Telefone      string
+	ContatoNome   *string
+	Status        string
+	Motivo        *string
+	EtapaNome     *string
+	TokensEntrada int32
+	TokensSaida   int32
+	IniciadaEm    time.Time
+	UltimaEm      time.Time
+	EncerradaEm   *time.Time
+	Mensagens     int64
+	Dados         int64
+	UltimoTexto   string
+	UltimaDirecao string
+}
+
+func (q *Queries) ListarConversas(ctx context.Context, arg ListarConversasParams) ([]ListarConversasRow, error) {
+	rows, err := q.db.Query(ctx, listarConversas, arg.BotID, arg.Status, arg.Limite)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListarConversasRow
+	for rows.Next() {
+		var i ListarConversasRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.BotID,
+			&i.BotNome,
+			&i.BotSlug,
+			&i.Telefone,
+			&i.ContatoNome,
+			&i.Status,
+			&i.Motivo,
+			&i.EtapaNome,
+			&i.TokensEntrada,
+			&i.TokensSaida,
+			&i.IniciadaEm,
+			&i.UltimaEm,
+			&i.EncerradaEm,
+			&i.Mensagens,
+			&i.Dados,
+			&i.UltimoTexto,
+			&i.UltimaDirecao,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listarEtapasDoBot = `-- name: ListarEtapasDoBot :many
 SELECT id, bot_id, ordem, nome, objetivo, instrucoes, campos, criado_em, atualizado_em FROM atendimento.etapas WHERE bot_id = $1 ORDER BY ordem
 `
@@ -698,6 +881,58 @@ func (q *Queries) ListarEtapasDoBot(ctx context.Context, botID int64) ([]Atendim
 			&i.Campos,
 			&i.CriadoEm,
 			&i.AtualizadoEm,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const mensagensDaConversa = `-- name: MensagensDaConversa :many
+SELECT id, direcao, texto, status, motivo, tentativas, ultimo_erro, criada_em, enviada_em
+FROM atendimento.mensagens
+WHERE conversa_id = $1
+ORDER BY id
+`
+
+type MensagensDaConversaRow struct {
+	ID         int64
+	Direcao    string
+	Texto      string
+	Status     string
+	Motivo     *string
+	Tentativas int32
+	UltimoErro *string
+	CriadaEm   time.Time
+	EnviadaEm  *time.Time
+}
+
+// Tudo o que a conversa teve, na ordem em que aconteceu — inclusive a mensagem `cancelada`, que
+// é o que o bot teria dito em ensaio. (Diferente de HistoricoDaConversa, que monta o que vai ao
+// modelo e por isso omite o que não saiu.)
+func (q *Queries) MensagensDaConversa(ctx context.Context, conversaID int64) ([]MensagensDaConversaRow, error) {
+	rows, err := q.db.Query(ctx, mensagensDaConversa, conversaID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []MensagensDaConversaRow
+	for rows.Next() {
+		var i MensagensDaConversaRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Direcao,
+			&i.Texto,
+			&i.Status,
+			&i.Motivo,
+			&i.Tentativas,
+			&i.UltimoErro,
+			&i.CriadaEm,
+			&i.EnviadaEm,
 		); err != nil {
 			return nil, err
 		}
@@ -756,6 +991,74 @@ func (q *Queries) RegistrarMensagemRecebida(ctx context.Context, arg RegistrarMe
 		&i.UltimoErro,
 		&i.CriadaEm,
 		&i.EnviadaEm,
+	)
+	return i, err
+}
+
+const resumoAtendimento = `-- name: ResumoAtendimento :one
+
+SELECT
+    (SELECT count(*) FROM atendimento.bots b1)                                            AS bots,
+    (SELECT count(*) FROM atendimento.bots b2 WHERE b2.ativo)                             AS bots_ativos,
+    (SELECT count(*) FROM atendimento.bots b3 WHERE b3.ativo AND b3.envio_habilitado)     AS bots_com_envio,
+    (SELECT count(*) FROM atendimento.conversas c1 WHERE c1.status = 'aberta')            AS conversas_abertas,
+    (SELECT count(*) FROM atendimento.conversas c2 WHERE c2.iniciada_em >= $1)    AS conversas_hoje,
+    (SELECT count(*) FROM atendimento.conversas c3
+       WHERE c3.encerrada_em >= $2 AND c3.motivo = 'pediu_humano')                AS pediram_humano_mes,
+    (SELECT count(*) FROM atendimento.conversas c4
+       WHERE c4.encerrada_em >= $2 AND c4.motivo = 'concluido')                   AS concluidas_mes,
+    (SELECT count(*) FROM atendimento.mensagens m1 WHERE m1.status = 'pendente')          AS fila_pendentes,
+    (SELECT count(*) FROM atendimento.mensagens m2 WHERE m2.status = 'falhou')            AS fila_falharam,
+    (SELECT count(*) FROM atendimento.mensagens m3
+       WHERE m3.status = 'cancelada' AND m3.criada_em >= $2)                      AS canceladas_mes,
+    (SELECT min(m4.proxima_tentativa_em) FROM atendimento.mensagens m4
+       WHERE m4.status = 'pendente')                                                      AS proxima_da_fila,
+    (SELECT count(*) FROM atendimento.coletas k1 WHERE k1.criado_em >= $2)        AS dados_mes,
+    (SELECT coalesce(sum(c5.tokens_entrada + c5.tokens_saida), 0) FROM atendimento.conversas c5
+       WHERE c5.ultima_em >= $2)::bigint                                          AS tokens_mes
+`
+
+type ResumoAtendimentoParams struct {
+	DesdeHoje time.Time
+	DesdeMes  *time.Time
+}
+
+type ResumoAtendimentoRow struct {
+	Bots             int64
+	BotsAtivos       int64
+	BotsComEnvio     int64
+	ConversasAbertas int64
+	ConversasHoje    int64
+	PediramHumanoMes int64
+	ConcluidasMes    int64
+	FilaPendentes    int64
+	FilaFalharam     int64
+	CanceladasMes    int64
+	ProximaDaFila    interface{}
+	DadosMes         int64
+	TokensMes        int64
+}
+
+// Etapa C (as telas). Consultas de LEITURA: o painel, a lista de conversas e a conversa aberta.
+// Os períodos ("hoje", "no mês") vêm calculados da API no fuso de Brasília, como no resto da
+// plataforma — o banco não decide onde o dia começa.
+func (q *Queries) ResumoAtendimento(ctx context.Context, arg ResumoAtendimentoParams) (ResumoAtendimentoRow, error) {
+	row := q.db.QueryRow(ctx, resumoAtendimento, arg.DesdeHoje, arg.DesdeMes)
+	var i ResumoAtendimentoRow
+	err := row.Scan(
+		&i.Bots,
+		&i.BotsAtivos,
+		&i.BotsComEnvio,
+		&i.ConversasAbertas,
+		&i.ConversasHoje,
+		&i.PediramHumanoMes,
+		&i.ConcluidasMes,
+		&i.FilaPendentes,
+		&i.FilaFalharam,
+		&i.CanceladasMes,
+		&i.ProximaDaFila,
+		&i.DadosMes,
+		&i.TokensMes,
 	)
 	return i, err
 }

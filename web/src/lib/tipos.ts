@@ -622,3 +622,132 @@ export type SituacaoWhatsappBoletos = {
   pausa_envio_segundos: number;
   fila: Partial<Record<StatusMensagemBoleto, number>>;
 };
+
+// ---------------------------------------------------------------------------
+// Atendimento (bots de WhatsApp, issue #100)
+// ---------------------------------------------------------------------------
+
+export type ModeloBot = {
+  id: string;
+  nome: string;
+  descricao: string;
+};
+
+// Um dado que uma etapa quer coletar. O `id` é o que o bot usa ao registrar.
+export type CampoEtapa = {
+  id: string;
+  rotulo: string;
+  obrigatorio: boolean;
+};
+
+export type EtapaBot = {
+  id: number;
+  ordem: number;
+  nome: string;
+  objetivo: string;
+  instrucoes: string | null;
+  campos: CampoEtapa[];
+};
+
+export type Bot = {
+  id: number;
+  nome: string;
+  slug: string;
+  modelo: string;
+  instrucoes: string;
+  saudacao: string | null;
+  ativo: boolean;
+  envio_habilitado: boolean;
+  max_mensagens_hora: number;
+  max_tokens_conversa: number;
+  pausa_resposta_segundos: number;
+  criado_em: string;
+  atualizado_em: string;
+  envio_habilitado_por_nome?: string | null;
+  envio_habilitado_em?: string | null;
+  // Só na lista.
+  etapas?: number;
+  conversas_abertas?: number;
+};
+
+export type DetalheBot = {
+  bot: Bot;
+  etapas: EtapaBot[];
+  conversas: { total: number; abertas: number };
+};
+
+export type StatusConversa = "aberta" | "encerrada" | "abandonada" | "erro";
+export type StatusMensagemBot = "recebida" | "pendente" | "enviada" | "falhou" | "cancelada";
+
+export type ConversaResumo = {
+  id: number;
+  bot_id: number;
+  bot_nome: string;
+  bot_slug: string;
+  telefone: string;
+  contato_nome: string | null;
+  status: StatusConversa;
+  motivo: string | null;
+  etapa_nome: string | null;
+  mensagens: number;
+  dados: number;
+  ultimo_texto: string;
+  ultima_direcao: string;
+  tokens: number;
+  iniciada_em: string;
+  ultima_em: string;
+  encerrada_em: string | null;
+};
+
+export type MensagemBot = {
+  id: number;
+  direcao: "recebida" | "enviada";
+  texto: string;
+  status: StatusMensagemBot;
+  motivo: string | null;
+  tentativas: number;
+  ultimo_erro: string | null;
+  criada_em: string;
+  enviada_em: string | null;
+};
+
+export type DadoColetado = {
+  campo: string;
+  valor: string;
+  etapa_nome: string | null;
+  criado_em: string;
+  atualizado_em: string;
+};
+
+export type DetalheConversa = {
+  conversa: {
+    id: number;
+    bot_id: number;
+    bot_nome: string;
+    bot_slug: string;
+    telefone: string;
+    contato_nome: string | null;
+    status: StatusConversa;
+    motivo: string | null;
+    etapa_nome: string | null;
+    etapa_ordem: number | null;
+    etapas_do_bot: number;
+    tokens_entrada: number;
+    tokens_saida: number;
+    iniciada_em: string;
+    ultima_em: string;
+    encerrada_em: string | null;
+  };
+  mensagens: MensagemBot[];
+  dados: DadoColetado[];
+};
+
+export type ResumoAtendimento = {
+  bots: { total: number; ativos: number; com_envio: number };
+  conversas: { abertas: number; hoje: number; concluidas_mes: number; pediram_humano_mes: number };
+  fila: { pendentes: number; falharam: number; canceladas_mes: number; proxima: string | null };
+  dados_coletados_mes: number;
+  tokens_mes: number;
+  envio_habilitado_servico: boolean;
+  modelo_disponivel: boolean;
+};

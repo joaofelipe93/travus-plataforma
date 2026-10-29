@@ -213,6 +213,11 @@ func (s *Servidor) Rotas() http.Handler {
 	mux.Handle("DELETE /atendimento/bots/{id}", s.autenticado(exigirPerfil(s.excluirBot, editores...)))
 	mux.Handle("PUT /atendimento/bots/{id}/etapas", s.autenticado(exigirPerfil(s.definirEtapasDoBot, editores...)))
 	mux.Handle("PUT /atendimento/bots/{id}/envio", s.autenticado(exigirPerfil(s.definirEnvioDoBot, admins...)))
+	// Etapa C: as telas. O painel é contagem, todo perfil vê; a conversa traz telefone e o que a
+	// pessoa escreveu, então fica com admin e operador (a mesma régua da tela de Reservas).
+	mux.Handle("GET /atendimento/resumo", s.autenticado(s.resumoAtendimento))
+	mux.Handle("GET /atendimento/conversas", s.autenticado(exigirPerfil(s.listarConversas, editores...)))
+	mux.Handle("GET /atendimento/conversas/{id}", s.autenticado(exigirPerfil(s.buscarConversa, editores...)))
 	mux.Handle("GET /cotas", s.autenticado(s.listarCotas))
 	mux.Handle("POST /cotas", s.autenticado(exigirPerfil(s.criarCota, editores...)))
 	mux.Handle("GET /cotas/grupos", s.autenticado(s.listarGrupos))
