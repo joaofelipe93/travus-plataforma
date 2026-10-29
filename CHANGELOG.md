@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.21.0](https://github.com/joaofelipe93/travus-plataforma/compare/v0.20.0...v0.21.0) (2026-10-29)
+
+
+### Novidades
+
+* **atendimento:** o WhatsApp dos bots, uma sessão por bot ([#106](https://github.com/joaofelipe93/travus-plataforma/issues/106)) ([49d2b23](https://github.com/joaofelipe93/travus-plataforma/commit/49d2b2348987e5b7f9ff8af9a788f3d02b8c91e4))
+
 ## [0.20.0](https://github.com/joaofelipe93/travus-plataforma/compare/v0.19.0...v0.20.0) (2026-10-29)
 
 
