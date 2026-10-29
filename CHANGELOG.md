@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.20.0](https://github.com/joaofelipe93/travus-plataforma/compare/v0.19.0...v0.20.0) (2026-10-29)
+
+
+### Novidades
+
+* **atendimento:** o agente do bot, com as travas do que sai ([#103](https://github.com/joaofelipe93/travus-plataforma/issues/103)) ([7ce2f8e](https://github.com/joaofelipe93/travus-plataforma/commit/7ce2f8e77ca9ca6da5212ae4b66d4d58757fb43f))
+* **atendimento:** o espaço do serviço, com o editor de fluxo ([#105](https://github.com/joaofelipe93/travus-plataforma/issues/105)) ([c934fa4](https://github.com/joaofelipe93/travus-plataforma/commit/c934fa4ad613e65f42d5ab016f18f4cf7eefb5c7))
+
 ## [0.19.0](https://github.com/joaofelipe93/travus-plataforma/compare/v0.18.0...v0.19.0) (2026-10-29)
 
 
