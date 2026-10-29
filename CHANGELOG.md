@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.19.0](https://github.com/joaofelipe93/travus-plataforma/compare/v0.18.0...v0.19.0) (2026-10-29)
+
+
+### Novidades
+
+* **atendimento:** banco e cadastro dos bots de WhatsApp ([#101](https://github.com/joaofelipe93/travus-plataforma/issues/101)) ([1415cc5](https://github.com/joaofelipe93/travus-plataforma/commit/1415cc585a823409fbda257035106a9df155f9fb))
+
 ## [0.18.0](https://github.com/joaofelipe93/travus-plataforma/compare/v0.17.0...v0.18.0) (2026-10-20)
 
 
