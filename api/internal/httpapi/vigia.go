@@ -36,6 +36,8 @@ type ConfigVigia struct {
 	// Confere o notificador de check-in (WhatsApp). Só em produção (VIGIA_CHECKIN=true): no
 	// ambiente local o serviço fica desligado.
 	Checkin bool
+	// Confere o atendimento no WhatsApp (os bots). Só em produção (VIGIA_ATENDIMENTO=true).
+	Atendimento bool
 }
 
 const (
@@ -116,6 +118,7 @@ func (s *Servidor) verificarSaude(ctx context.Context) ([]achado, bool) {
 		out = append(out, s.verificarLanceRealAutomatico(ctxBanco)...)
 	}
 	out = append(out, s.verificarCheckin(ctx, agora, bancoOk)...)
+	out = append(out, s.verificarAtendimento(ctx, agora, bancoOk)...)
 	out = append(out, s.verificarBackup(agora)...)
 	if a := s.verificarCertificado(ctx, agora); a != nil {
 		out = append(out, *a)
@@ -268,6 +271,125 @@ func (s *Servidor) verificarCheckin(ctx context.Context, agora time.Time, bancoO
 			Titulo: fmt.Sprintf("%d evento(s) do webhook de reserva não foram reconhecidos (últimas 24 h)", ignorados),
 			Detalhe: "Chegaram sem identificador de reserva e sem data de check-in: ficaram gravados e nada foi para o grupo.\n" +
 				"Ou outra automação do PMS está apontada para o webhook, ou um campo mudou de nome (ajuste domain/checkin.ts).",
+		})
+	}
+	return out
+}
+
+// verificarAtendimento: o serviço de WhatsApp dos bots sem resposta, bot autorizado a responder
+// cujo número caiu, respostas que desistiram e fila parada.
+//
+// O alerta que mais importa aqui é o do **bot autorizado sem sessão**: alguém ligou o envio, a
+// pessoa escreve, o bot compõe a resposta — e ela fica na fila porque o número desconectou. Sem
+// vigia, isso se descobre pelo cliente reclamando que ninguém respondeu.
+//
+// Nome e telefone de quem conversou **não entram no alerta**: o e-mail do vigia não é lugar de
+// dado de cliente. Vai o nome do bot e a contagem.
+func (s *Servidor) verificarAtendimento(ctx context.Context, agora time.Time, bancoOk bool) []achado {
+	if !s.cfg.Vigia.Atendimento {
+		return nil
+	}
+	var out []achado
+	tela := s.cfg.AppOrigin + "/atendimento/conexoes"
+
+	ctxStatus, cancel := context.WithTimeout(ctx, 15*time.Second)
+	st, err := s.cfg.AtendimentoWhatsapp.Status(ctxStatus)
+	cancel()
+	if err != nil {
+		if s.atendimentoSemRespostaDesde.IsZero() {
+			s.atendimentoSemRespostaDesde = agora
+		}
+		if d := agora.Sub(s.atendimentoSemRespostaDesde); d > checkinForaTolerancia {
+			out = append(out, achado{
+				Chave:   "atendimento-servico",
+				Titulo:  "Atendimento no WhatsApp sem resposta há " + textoTempo(d),
+				Detalhe: "Nenhum bot está recebendo nem respondendo mensagem (make logs s=atendimento-whatsapp).\n" + err.Error(),
+			})
+		}
+		// Sem falar com o worker não há como saber de sessão: o resto depende do banco.
+		return append(out, s.filaDeAtendimentoParada(ctx, bancoOk, false)...)
+	}
+	s.atendimentoSemRespostaDesde = time.Time{}
+
+	// Bots que deviam estar respondendo e estão sem número conectado.
+	if s.atendimentoBotForaDesde == nil {
+		s.atendimentoBotForaDesde = map[string]time.Time{}
+	}
+	autorizados, err := s.q.ListarBots(ctx)
+	if err != nil {
+		slog.Error("vigia: lista de bots", "erro", err)
+		autorizados = nil
+	}
+	vistos := map[string]bool{}
+	algumConectado := false
+	for _, b := range autorizados {
+		if !b.Ativo || !b.EnvioHabilitado {
+			continue
+		}
+		vistos[b.Slug] = true
+		sessao := st.Da(b.Slug)
+		if sessao != nil && sessao.Conectado {
+			algumConectado = true
+			delete(s.atendimentoBotForaDesde, b.Slug)
+			continue
+		}
+		if s.atendimentoBotForaDesde[b.Slug].IsZero() {
+			s.atendimentoBotForaDesde[b.Slug] = agora
+		}
+		d := agora.Sub(s.atendimentoBotForaDesde[b.Slug])
+		if d <= checkinForaTolerancia {
+			continue
+		}
+		titulo := "Bot " + b.Nome + ": WhatsApp desconectado há " + textoTempo(d)
+		detalhe := "O bot está ligado e autorizado a responder, mas o número não está conectado: as respostas esperam na fila. Veja " + tela
+		switch {
+		case sessao == nil:
+			titulo = "Bot " + b.Nome + ": sem sessão de WhatsApp há " + textoTempo(d)
+			detalhe = "O serviço não abriu sessão para este bot — ele pode estar acima do teto de sessões (MAX_SESSOES). Veja " + tela
+		case sessao.Estado == "qr":
+			titulo = "Bot " + b.Nome + ": esperando a leitura do QR há " + textoTempo(d)
+			detalhe = "A sessão foi encerrada (no celular ou pela tela). Um admin precisa escanear o QR em " + tela
+		}
+		out = append(out, achado{Chave: "atendimento-bot-" + b.Slug, Titulo: titulo, Detalhe: detalhe})
+	}
+	// Bot que saiu da lista (desligado ou excluído) não deve deixar estado para trás.
+	for slug := range s.atendimentoBotForaDesde {
+		if !vistos[slug] {
+			delete(s.atendimentoBotForaDesde, slug)
+		}
+	}
+
+	return append(out, s.filaDeAtendimentoParada(ctx, bancoOk, algumConectado)...)
+}
+
+// filaDeAtendimentoParada: respostas que desistiram e respostas paradas apesar de haver sessão.
+func (s *Servidor) filaDeAtendimentoParada(ctx context.Context, bancoOk, algumConectado bool) []achado {
+	if !bancoOk {
+		return nil
+	}
+	ctxBanco, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
+	c, err := s.q.VigiaAtendimento(ctxBanco)
+	if err != nil {
+		slog.Error("vigia: consulta do atendimento", "erro", err)
+		return nil
+	}
+	var out []achado
+	if c.Falharam > 0 {
+		out = append(out, achado{
+			Chave:  "atendimento-falhas",
+			Titulo: fmt.Sprintf("%d resposta(s) de bot não chegaram a quem escreveu (últimas 24 h)", c.Falharam),
+			Detalhe: "O envio desistiu depois das tentativas. Pode ser número sem WhatsApp — ou a conexão do bot. " +
+				"A conversa mostra o motivo em cada mensagem.",
+		})
+	}
+	// Fila parada só é incidente quando há como enviar: sem sessão, esperar é o comportamento
+	// correto (e o alerta do bot desconectado já cobre isso).
+	if c.Paradas > 0 && algumConectado {
+		out = append(out, achado{
+			Chave:   "atendimento-fila",
+			Titulo:  fmt.Sprintf("%d resposta(s) de bot paradas na fila há mais de 30 min com o WhatsApp conectado", c.Paradas),
+			Detalhe: "O envio está falhando ou travou (make logs s=atendimento-whatsapp).",
 		})
 	}
 	return out
