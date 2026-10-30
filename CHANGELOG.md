@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.26.0](https://github.com/joaofelipe93/travus-plataforma/compare/v0.25.0...v0.26.0) (2026-10-30)
+
+
+### Novidades
+
+* **atendimento:** a tela do bot em três abas ([#116](https://github.com/joaofelipe93/travus-plataforma/issues/116)) ([45dfddc](https://github.com/joaofelipe93/travus-plataforma/commit/45dfddc879561ac4af738ef9db96fdb53ee06ad2))
+
 ## [0.25.0](https://github.com/joaofelipe93/travus-plataforma/compare/v0.24.0...v0.25.0) (2026-10-30)
 
 
