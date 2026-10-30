@@ -13,7 +13,7 @@ RETURNING *;
 -- duas contagens evitam a tela pedir bot por bot.
 -- name: ListarBots :many
 SELECT b.*,
-       (SELECT count(*) FROM atendimento.etapas e WHERE e.bot_id = b.id)::int AS etapas,
+       (SELECT count(*) FROM atendimento.perguntas p WHERE p.bot_id = b.id)::int AS perguntas,
        (SELECT count(*) FROM atendimento.conversas c
         WHERE c.bot_id = b.id AND c.status = 'aberta')::int AS conversas_abertas
 FROM atendimento.bots b
@@ -53,19 +53,19 @@ SELECT count(*)::int AS total,
        count(*) FILTER (WHERE status = 'aberta')::int AS abertas
 FROM atendimento.conversas WHERE bot_id = @bot_id;
 
--- name: ListarEtapasDoBot :many
-SELECT * FROM atendimento.etapas WHERE bot_id = @bot_id ORDER BY ordem;
+-- name: ListarPerguntasDoBot :many
+SELECT * FROM atendimento.perguntas WHERE bot_id = @bot_id ORDER BY ordem;
 
--- O fluxo é gravado inteiro de uma vez, numa transação: apaga e recria na ordem que a tela
--- mandou. É mais simples e mais previsível que casar etapa por etapa, e a rota só deixa fazer
--- isso quando não há conversa aberta naquele bot — mudar o fluxo debaixo de uma conversa em
--- andamento deixaria a pessoa numa etapa que não existe mais.
--- name: ApagarEtapasDoBot :exec
-DELETE FROM atendimento.etapas WHERE bot_id = @bot_id;
+-- As perguntas são gravadas inteiras de uma vez, numa transação: apaga e recria na ordem que a
+-- tela mandou. É mais simples e mais previsível que casar pergunta por pergunta, e a rota só
+-- deixa fazer isso quando não há conversa aberta naquele bot — trocar as perguntas debaixo de
+-- uma conversa em andamento mudaria o que já foi perguntado.
+-- name: ApagarPerguntasDoBot :exec
+DELETE FROM atendimento.perguntas WHERE bot_id = @bot_id;
 
--- name: CriarEtapa :one
-INSERT INTO atendimento.etapas (bot_id, ordem, nome, objetivo, instrucoes, campos)
-VALUES (@bot_id, @ordem, @nome, @objetivo, sqlc.narg(instrucoes), @campos)
+-- name: CriarPergunta :one
+INSERT INTO atendimento.perguntas (bot_id, ordem, texto, campo, orientacao, obrigatoria)
+VALUES (@bot_id, @ordem, @texto, @campo, sqlc.narg(orientacao), @obrigatoria)
 RETURNING *;
 
 -- ===== Etapa B: a conversa =====
@@ -75,8 +75,8 @@ RETURNING *;
 -- Abre a conversa ou continua a que está aberta (o índice parcial garante uma por telefone em
 -- cada bot). O nome do contato é atualizado quando vem, e não se apaga quando não vem.
 -- name: AbrirOuContinuarConversa :one
-INSERT INTO atendimento.conversas (bot_id, telefone, contato_nome, etapa_id)
-VALUES (@bot_id, @telefone, sqlc.narg(contato_nome), sqlc.narg(etapa_id))
+INSERT INTO atendimento.conversas (bot_id, telefone, contato_nome)
+VALUES (@bot_id, @telefone, sqlc.narg(contato_nome))
 ON CONFLICT (bot_id, telefone) WHERE status = 'aberta' DO UPDATE SET
     contato_nome = coalesce(EXCLUDED.contato_nome, atendimento.conversas.contato_nome),
     ultima_em    = now()
@@ -100,18 +100,14 @@ WHERE conversa_id = @conversa_id AND status <> 'cancelada'
 ORDER BY id DESC
 LIMIT @limite;
 
--- name: SalvarColeta :exec
-INSERT INTO atendimento.coletas (conversa_id, etapa_id, campo, valor)
-VALUES (@conversa_id, sqlc.narg(etapa_id), @campo, @valor)
+-- name: SalvarResposta :exec
+INSERT INTO atendimento.coletas (conversa_id, pergunta_id, campo, valor)
+VALUES (@conversa_id, sqlc.narg(pergunta_id), @campo, @valor)
 ON CONFLICT (conversa_id, campo) DO UPDATE SET
-    valor = EXCLUDED.valor, etapa_id = EXCLUDED.etapa_id, atualizado_em = now();
+    valor = EXCLUDED.valor, pergunta_id = EXCLUDED.pergunta_id, atualizado_em = now();
 
 -- name: ColetasDaConversa :many
 SELECT campo, valor FROM atendimento.coletas WHERE conversa_id = @conversa_id ORDER BY campo;
-
--- name: DefinirEtapaDaConversa :one
-UPDATE atendimento.conversas SET etapa_id = sqlc.narg(etapa_id), ultima_em = now()
-WHERE id = @id RETURNING *;
 
 -- name: EncerrarConversa :one
 UPDATE atendimento.conversas SET
@@ -134,16 +130,6 @@ JOIN atendimento.conversas c ON c.id = m.conversa_id
 WHERE c.bot_id = @bot_id AND m.direcao = 'enviada'
   AND m.status IN ('pendente', 'enviada')
   AND m.criada_em > now() - interval '1 hour';
-
--- name: PrimeiraEtapaDoBot :one
-SELECT * FROM atendimento.etapas WHERE bot_id = @bot_id ORDER BY ordem LIMIT 1;
-
--- name: EtapaSeguinte :one
-SELECT * FROM atendimento.etapas
-WHERE bot_id = @bot_id AND ordem > @ordem ORDER BY ordem LIMIT 1;
-
--- name: BuscarEtapa :one
-SELECT * FROM atendimento.etapas WHERE id = @id;
 
 -- Etapa C (as telas). Consultas de LEITURA: o painel, a lista de conversas e a conversa aberta.
 -- Os períodos ("hoje", "no mês") vêm calculados da API no fuso de Brasília, como no resto da
@@ -171,7 +157,7 @@ SELECT
 
 -- name: ListarConversas :many
 SELECT c.id, c.bot_id, b.nome AS bot_nome, b.slug AS bot_slug, c.telefone, c.contato_nome,
-       c.status, c.motivo, e.nome AS etapa_nome, c.tokens_entrada, c.tokens_saida,
+       c.status, c.motivo, c.tokens_entrada, c.tokens_saida,
        c.iniciada_em, c.ultima_em, c.encerrada_em,
        (SELECT count(*) FROM atendimento.mensagens m WHERE m.conversa_id = c.id) AS mensagens,
        (SELECT count(*) FROM atendimento.coletas k WHERE k.conversa_id = c.id)   AS dados,
@@ -181,7 +167,6 @@ SELECT c.id, c.bot_id, b.nome AS bot_nome, b.slug AS bot_slug, c.telefone, c.con
           ORDER BY m.id DESC LIMIT 1), '')::text                                 AS ultima_direcao
 FROM atendimento.conversas c
 JOIN atendimento.bots b ON b.id = c.bot_id
-LEFT JOIN atendimento.etapas e ON e.id = c.etapa_id
 WHERE (sqlc.narg('bot_id')::bigint IS NULL OR c.bot_id = sqlc.narg('bot_id')::bigint)
   AND (sqlc.narg('status')::text IS NULL OR c.status = sqlc.narg('status')::text)
 ORDER BY c.ultima_em DESC
@@ -189,12 +174,12 @@ LIMIT @limite;
 
 -- name: BuscarConversa :one
 SELECT c.id, c.bot_id, b.nome AS bot_nome, b.slug AS bot_slug, c.telefone, c.contato_nome,
-       c.status, c.motivo, c.etapa_id, e.nome AS etapa_nome, e.ordem AS etapa_ordem,
+       c.status, c.motivo,
        c.tokens_entrada, c.tokens_saida, c.iniciada_em, c.ultima_em, c.encerrada_em,
-       (SELECT count(*) FROM atendimento.etapas x WHERE x.bot_id = c.bot_id) AS etapas_do_bot
+       (SELECT count(*) FROM atendimento.perguntas x WHERE x.bot_id = c.bot_id)   AS perguntas_do_bot,
+       (SELECT count(*) FROM atendimento.coletas k WHERE k.conversa_id = c.id)    AS respostas
 FROM atendimento.conversas c
 JOIN atendimento.bots b ON b.id = c.bot_id
-LEFT JOIN atendimento.etapas e ON e.id = c.etapa_id
 WHERE c.id = @id;
 
 -- Tudo o que a conversa teve, na ordem em que aconteceu — inclusive a mensagem `cancelada`, que
@@ -206,12 +191,14 @@ FROM atendimento.mensagens
 WHERE conversa_id = @conversa_id
 ORDER BY id;
 
+-- Respostas da conversa, na ordem das perguntas do bot (o que a pessoa disse sem ser
+-- perguntada vem no fim, porque não tem pergunta).
 -- name: DadosDaConversa :many
-SELECT k.campo, k.valor, k.criado_em, k.atualizado_em, e.nome AS etapa_nome
+SELECT k.campo, k.valor, k.criado_em, k.atualizado_em, p.texto AS pergunta_texto, p.ordem AS pergunta_ordem
 FROM atendimento.coletas k
-LEFT JOIN atendimento.etapas e ON e.id = k.etapa_id
+LEFT JOIN atendimento.perguntas p ON p.id = k.pergunta_id
 WHERE k.conversa_id = @conversa_id
-ORDER BY k.criado_em, k.campo;
+ORDER BY p.ordem NULLS LAST, k.criado_em;
 
 -- Etapa D (o worker de WhatsApp). A fila de envio vive aqui, e não no worker: ele não tem papel
 -- no Postgres e não sabe o que é ensaio, teto ou bot desligado — só transporta.

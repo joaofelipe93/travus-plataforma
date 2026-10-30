@@ -74,7 +74,7 @@ func statusDaMensagem(t *testing.T, s *Servidor, id int64) (string, int32, *stri
 func TestAtendimentoFilaEntregaEregistra(t *testing.T) {
 	m := &modeloRoteiroBot{turnos: []turnoBot{{texto: "Oi! Em qual bairro?"}}}
 	s := servidorComBot(t, m)
-	bot := botComFluxo(t, s, "fila", true)
+	bot := botComPerguntas(t, s, "fila", true)
 	res, err := s.responderAtendimento(context.Background(), bot, "5511900060001", "Ana", "oi")
 	if err != nil {
 		t.Fatal(err)
@@ -116,7 +116,7 @@ func TestAtendimentoFilaEntregaEregistra(t *testing.T) {
 func TestAtendimentoFilaNaoEntregaDeBotDesligado(t *testing.T) {
 	m := &modeloRoteiroBot{turnos: []turnoBot{{texto: "Oi!"}}}
 	s := servidorComBot(t, m)
-	bot := botComFluxo(t, s, "desligado-depois", true)
+	bot := botComPerguntas(t, s, "desligado-depois", true)
 	if _, err := s.responderAtendimento(context.Background(), bot, "5511900060002", "", "oi"); err != nil {
 		t.Fatal(err)
 	}
@@ -136,7 +136,7 @@ func TestAtendimentoFilaNaoEntregaDeBotDesligado(t *testing.T) {
 func TestAtendimentoFilaSoDeQuemTemSessao(t *testing.T) {
 	m := &modeloRoteiroBot{turnos: []turnoBot{{texto: "Oi!"}}}
 	s := servidorComBot(t, m)
-	bot := botComFluxo(t, s, "com-sessao", true)
+	bot := botComPerguntas(t, s, "com-sessao", true)
 	if _, err := s.responderAtendimento(context.Background(), bot, "5511900060003", "", "oi"); err != nil {
 		t.Fatal(err)
 	}
@@ -154,7 +154,7 @@ func TestAtendimentoFilaSoDeQuemTemSessao(t *testing.T) {
 func TestAtendimentoFilaFalhaVoltaOuDesiste(t *testing.T) {
 	m := &modeloRoteiroBot{turnos: []turnoBot{{texto: "Oi!"}}}
 	s := servidorComBot(t, m)
-	bot := botComFluxo(t, s, "falhas", true)
+	bot := botComPerguntas(t, s, "falhas", true)
 	res, err := s.responderAtendimento(context.Background(), bot, "5511900060004", "", "oi")
 	if err != nil {
 		t.Fatal(err)
@@ -204,7 +204,7 @@ func TestAtendimentoFilaFalhaVoltaOuDesiste(t *testing.T) {
 func TestAtendimentoFilaDesisteNoTeto(t *testing.T) {
 	m := &modeloRoteiroBot{turnos: []turnoBot{{texto: "Oi!"}}}
 	s := servidorComBot(t, m)
-	bot := botComFluxo(t, s, "teto-tentativas", true)
+	bot := botComPerguntas(t, s, "teto-tentativas", true)
 	res, err := s.responderAtendimento(context.Background(), bot, "5511900060005", "", "oi")
 	if err != nil {
 		t.Fatal(err)

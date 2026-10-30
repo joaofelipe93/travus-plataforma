@@ -1,6 +1,6 @@
 package httpapi
 
-// Serviço de Atendimento (issue #100), etapa A: o cadastro dos bots e do fluxo. O que estes
+// Serviço de Atendimento (issue #100): o cadastro dos bots e das perguntas. O que estes
 // testes guardam, além do caminho feliz, são as duas regras que protegem quem está do outro
 // lado da conversa: só admin autoriza o envio de verdade, e fluxo não muda debaixo de conversa
 // aberta. Precisam de Postgres (TEST_DATABASE_URL); rode com `make test`.
@@ -15,7 +15,7 @@ import (
 
 func limparAtendimento(t *testing.T, s *Servidor) {
 	t.Helper()
-	s.exec(t, "TRUNCATE atendimento.bots, atendimento.etapas, atendimento.conversas, atendimento.mensagens, atendimento.coletas RESTART IDENTITY CASCADE")
+	s.exec(t, "TRUNCATE atendimento.bots, atendimento.perguntas, atendimento.conversas, atendimento.mensagens, atendimento.coletas, atendimento.leads RESTART IDENTITY CASCADE")
 }
 
 // botDeTeste devolve o corpo de um bot válido, para cada teste mexer só no que lhe interessa.
@@ -23,7 +23,7 @@ func botDeTeste(slug string) map[string]any {
 	return map[string]any{
 		"nome":       "Atendimento " + slug,
 		"slug":       slug,
-		"instrucoes": "Você atende a imobiliária, responde sobre aluguel e nunca fala de preço de venda.",
+		"instrucoes": "Você é o primeiro atendimento da Travus e só afirma o que está aqui.",
 	}
 }
 
@@ -94,8 +94,8 @@ func TestAtendimentoCadastroDeBot(t *testing.T) {
 	lista := decodificar[struct {
 		Bots []botJSON `json:"bots"`
 	}](t, rec).Bots
-	if len(lista) != 1 || lista[0].Etapas == nil || *lista[0].Etapas != 0 {
-		t.Errorf("lista devia trazer 1 bot com 0 etapas: %+v", lista)
+	if len(lista) != 1 || lista[0].Perguntas == nil || *lista[0].Perguntas != 0 {
+		t.Errorf("lista devia trazer 1 bot com 0 perguntas: %+v", lista)
 	}
 
 	// Excluir bot sem conversa: sai.
@@ -165,69 +165,71 @@ func TestAtendimentoBotaoLigaEDesliga(t *testing.T) {
 	}
 }
 
-func TestAtendimentoFluxo(t *testing.T) {
+func TestAtendimentoPerguntas(t *testing.T) {
 	s := novoServidorTeste(t)
 	limparAtendimento(t, s)
 	criarUsuario(t, s, "op-fluxo@teste", db.PerfilUsuarioOperador)
 	h := s.Rotas()
 	op, _ := entrar(t, h, "op-fluxo@teste", senhaTeste)
 
-	rec := op.enviarJSON(http.MethodPost, "/atendimento/bots", botDeTeste("imoveis"))
+	rec := op.enviarJSON(http.MethodPost, "/atendimento/bots", botDeTeste("comercial"))
 	bot := decodificar[struct {
 		Bot botJSON `json:"bot"`
 	}](t, rec).Bot
-	rota := "/atendimento/bots/" + idTexto(bot.ID) + "/etapas"
+	rota := "/atendimento/bots/" + idTexto(bot.ID) + "/perguntas"
 
-	fluxo := map[string]any{"etapas": []map[string]any{
-		{"nome": "Interesse", "objetivo": "Descobrir o que a pessoa procura",
-			"campos": []map[string]any{{"id": "interesse", "rotulo": "Interesse", "obrigatorio": true}}},
-		{"nome": "Contato", "objetivo": "Pegar nome e telefone para o corretor ligar",
-			"campos": []map[string]any{{"id": "nome", "rotulo": "Nome", "obrigatorio": true}, {"id": "telefone", "rotulo": "Telefone", "obrigatorio": true}}},
+	// As perguntas vão na ordem da lista. O campo pode vir em branco: sai do texto.
+	perguntas := map[string]any{"perguntas": []map[string]any{
+		{"texto": "Qual é o nome da empresa?", "campo": "nome_da_empresa", "obrigatoria": true},
+		{"texto": "Quantas pessoas entrariam?", "obrigatoria": true},
 	}}
-	rec = op.enviarJSON(http.MethodPut, rota, fluxo)
+	rec = op.enviarJSON(http.MethodPut, rota, perguntas)
 	if rec.Code != http.StatusOK {
-		t.Fatalf("gravar fluxo: %d %s", rec.Code, rec.Body)
+		t.Fatalf("gravar perguntas: %d %s", rec.Code, rec.Body)
 	}
-	etapas := decodificar[struct {
-		Etapas []etapaJSON `json:"etapas"`
-	}](t, rec).Etapas
-	if len(etapas) != 2 || etapas[0].Ordem != 1 || etapas[1].Ordem != 2 {
-		t.Fatalf("a ordem devia sair 1 e 2, na ordem da lista: %+v", etapas)
+	lista := decodificar[struct {
+		Perguntas []perguntaJSON `json:"perguntas"`
+	}](t, rec).Perguntas
+	if len(lista) != 2 || lista[0].Ordem != 1 || lista[1].Ordem != 2 {
+		t.Fatalf("a ordem devia sair 1 e 2, na ordem da lista: %+v", lista)
 	}
-	if len(etapas[1].Campos) != 2 || etapas[1].Campos[0].ID != "nome" {
-		t.Errorf("os campos deviam voltar como foram mandados: %+v", etapas[1].Campos)
+	if lista[1].Campo != "quantas_pessoas_entrariam" {
+		t.Errorf("o campo devia sair do texto da pergunta: %q", lista[1].Campo)
+	}
+	if !lista[0].Obrigatoria {
+		t.Error("a pergunta foi mandada como obrigatória")
 	}
 
-	// Regravar substitui o fluxo inteiro e renumera.
-	rec = op.enviarJSON(http.MethodPut, rota, map[string]any{"etapas": []map[string]any{
-		{"nome": "Só uma", "objetivo": "Descobrir o que a pessoa procura"},
+	// Regravar substitui a lista inteira e renumera.
+	rec = op.enviarJSON(http.MethodPut, rota, map[string]any{"perguntas": []map[string]any{
+		{"texto": "Só esta pergunta agora?", "campo": "so_esta"},
 	}})
-	if etapas := decodificar[struct {
-		Etapas []etapaJSON `json:"etapas"`
-	}](t, rec).Etapas; len(etapas) != 1 || etapas[0].Ordem != 1 {
-		t.Errorf("regravar devia deixar só a etapa nova, na ordem 1: %+v", etapas)
+	if lista := decodificar[struct {
+		Perguntas []perguntaJSON `json:"perguntas"`
+	}](t, rec).Perguntas; len(lista) != 1 || lista[0].Ordem != 1 {
+		t.Errorf("regravar devia deixar só a pergunta nova, na ordem 1: %+v", lista)
 	}
 
-	// Campo repetido é 400 com a etapa no texto.
-	if rec := op.enviarJSON(http.MethodPut, rota, map[string]any{"etapas": []map[string]any{
-		{"nome": "X", "objetivo": "Descobrir o que a pessoa procura", "campos": []map[string]any{
-			{"id": "nome", "rotulo": "Nome"}, {"id": "nome", "rotulo": "De novo"}}},
+	// Duas perguntas no mesmo dado é 400: a segunda apagaria a primeira.
+	if rec := op.enviarJSON(http.MethodPut, rota, map[string]any{"perguntas": []map[string]any{
+		{"texto": "Qual é o seu nome?", "campo": "nome"},
+		{"texto": "E o nome da empresa?", "campo": "nome"},
 	}}); rec.Code != http.StatusBadRequest {
-		t.Errorf("campo repetido devia dar 400, veio %d", rec.Code)
+		t.Errorf("dado repetido devia dar 400, veio %d %s", rec.Code, rec.Body)
 	}
 
-	// Com conversa aberta, mudar o fluxo é recusado: a pessoa ficaria numa etapa inexistente.
+	// Com conversa aberta, mudar as perguntas é recusado: mudaria o atendimento no meio.
 	s.exec(t, "INSERT INTO atendimento.conversas (bot_id, telefone) VALUES ($1, '5511900000000')", bot.ID)
-	if rec := op.enviarJSON(http.MethodPut, rota, fluxo); rec.Code != http.StatusConflict {
-		t.Errorf("fluxo com conversa aberta devia dar 409, veio %d %s", rec.Code, rec.Body)
+	if rec := op.enviarJSON(http.MethodPut, rota, perguntas); rec.Code != http.StatusConflict {
+		t.Errorf("perguntas com conversa aberta devia dar 409, veio %d %s", rec.Code, rec.Body)
 	}
 	// E o bot com conversa não se exclui: é histórico.
 	if rec := op.enviarJSON(http.MethodDelete, "/atendimento/bots/"+idTexto(bot.ID), nil); rec.Code != http.StatusConflict {
 		t.Errorf("bot com conversa devia dar 409 ao excluir, veio %d", rec.Code)
 	}
-	// Encerrada a conversa, o fluxo volta a ser editável.
+	// Encerrada a conversa, as perguntas voltam a ser editáveis.
 	s.exec(t, "UPDATE atendimento.conversas SET status = 'encerrada' WHERE bot_id = $1", bot.ID)
-	if rec := op.enviarJSON(http.MethodPut, rota, fluxo); rec.Code != http.StatusOK {
+	if rec := op.enviarJSON(http.MethodPut, rota, perguntas); rec.Code != http.StatusOK {
 		t.Errorf("sem conversa aberta o fluxo devia gravar, veio %d %s", rec.Code, rec.Body)
 	}
 }

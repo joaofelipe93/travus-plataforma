@@ -95,11 +95,11 @@ type AtendimentoBot struct {
 type AtendimentoColeta struct {
 	ID           int64
 	ConversaID   int64
-	EtapaID      *int64
 	Campo        string
 	Valor        string
 	CriadoEm     time.Time
 	AtualizadoEm time.Time
+	PerguntaID   *int64
 }
 
 type AtendimentoConversa struct {
@@ -107,7 +107,6 @@ type AtendimentoConversa struct {
 	BotID         int64
 	Telefone      string
 	ContatoNome   *string
-	EtapaID       *int64
 	Status        string
 	Motivo        *string
 	TokensEntrada int32
@@ -115,18 +114,6 @@ type AtendimentoConversa struct {
 	IniciadaEm    time.Time
 	UltimaEm      time.Time
 	EncerradaEm   *time.Time
-}
-
-type AtendimentoEtapa struct {
-	ID           int64
-	BotID        int64
-	Ordem        int32
-	Nome         string
-	Objetivo     string
-	Instrucoes   *string
-	Campos       []byte
-	CriadoEm     time.Time
-	AtualizadoEm time.Time
 }
 
 type AtendimentoLead struct {
@@ -158,6 +145,18 @@ type AtendimentoMensagen struct {
 	UltimoErro         *string
 	CriadaEm           time.Time
 	EnviadaEm          *time.Time
+}
+
+type AtendimentoPergunta struct {
+	ID           int64
+	BotID        int64
+	Ordem        int32
+	Texto        string
+	Campo        string
+	Orientacao   *string
+	Obrigatoria  bool
+	CriadoEm     time.Time
+	AtualizadoEm time.Time
 }
 
 type Auditoria struct {

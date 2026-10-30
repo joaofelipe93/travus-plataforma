@@ -1,7 +1,6 @@
 package httpapi
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -21,14 +20,14 @@ import (
 // eram travas demais para o serviço falar pelo número da própria casa — quem liga o bot é quem
 // responde por ele. Para conferir um bot antes de divulgar o número, mande mensagem para ele.
 //
-// A regra que sobra: mudar o **fluxo** com conversa aberta é recusado (409), porque a pessoa
-// ficaria numa etapa que deixou de existir. Encerre as conversas ou espere elas fecharem.
+// A regra que sobra: mudar as **perguntas** com conversa aberta é recusado (409), porque mudaria
+// o atendimento de quem já está conversando. Encerre as conversas ou espere elas fecharem.
 
-// Limite do corpo: as instruções de um bot vão a 20 mil caracteres e o fluxo tem até 30 etapas,
-// cada uma com instruções próprias — por isso o do fluxo é maior que o de qualquer outra rota.
+// Limite do corpo: as instruções de um bot vão a 20 mil caracteres e o atendimento tem até 30
+// perguntas, cada uma com orientação própria — por isso o das perguntas é maior que o das outras.
 const (
-	limiteCorpoBot   = 64 << 10
-	limiteCorpoFluxo = 512 << 10
+	limiteCorpoBot       = 64 << 10
+	limiteCorpoPerguntas = 512 << 10
 )
 
 // botJSON é o bot como a tela recebe.
@@ -44,7 +43,7 @@ type botJSON struct {
 	MaxTokensConversa     int32   `json:"max_tokens_conversa"`
 	PausaRespostaSegundos int32   `json:"pausa_resposta_segundos"`
 	// Só na lista: ajuda a tela sem um pedido por bot.
-	Etapas           *int32 `json:"etapas,omitempty"`
+	Perguntas        *int32 `json:"perguntas,omitempty"`
 	ConversasAbertas *int32 `json:"conversas_abertas,omitempty"`
 }
 
@@ -57,26 +56,21 @@ func botParaJSON(b db.AtendimentoBot) botJSON {
 	}
 }
 
-type etapaJSON struct {
-	ID         int64               `json:"id"`
-	Ordem      int32               `json:"ordem"`
-	Nome       string              `json:"nome"`
-	Objetivo   string              `json:"objetivo"`
-	Instrucoes *string             `json:"instrucoes"`
-	Campos     []atendimento.Campo `json:"campos"`
+// perguntaJSON é uma pergunta do atendimento como a tela recebe.
+type perguntaJSON struct {
+	ID          int64   `json:"id"`
+	Ordem       int32   `json:"ordem"`
+	Texto       string  `json:"texto"`
+	Campo       string  `json:"campo"`
+	Orientacao  *string `json:"orientacao"`
+	Obrigatoria bool    `json:"obrigatoria"`
 }
 
-func etapaParaJSON(e db.AtendimentoEtapa) (etapaJSON, error) {
-	campos := []atendimento.Campo{}
-	if len(e.Campos) > 0 {
-		if err := json.Unmarshal(e.Campos, &campos); err != nil {
-			return etapaJSON{}, fmt.Errorf("campos da etapa %d: %w", e.ID, err)
-		}
+func perguntaParaJSON(q db.AtendimentoPergunta) perguntaJSON {
+	return perguntaJSON{
+		ID: q.ID, Ordem: q.Ordem, Texto: q.Texto, Campo: q.Campo,
+		Orientacao: q.Orientacao, Obrigatoria: q.Obrigatoria,
 	}
-	return etapaJSON{
-		ID: e.ID, Ordem: e.Ordem, Nome: e.Nome, Objetivo: e.Objetivo,
-		Instrucoes: e.Instrucoes, Campos: campos,
-	}, nil
 }
 
 // GET /atendimento/modelos — o catálogo, para a tela montar a escolha do modelo.
@@ -102,14 +96,14 @@ func (s *Servidor) listarBots(w http.ResponseWriter, r *http.Request, _ *Usuario
 			MaxMensagensHora: l.MaxMensagensHora, MaxTokensConversa: l.MaxTokensConversa,
 			PausaRespostaSegundos: l.PausaRespostaSegundos,
 		})
-		etapas, abertas := l.Etapas, l.ConversasAbertas
-		b.Etapas, b.ConversasAbertas = &etapas, &abertas
+		perguntas, abertas := l.Perguntas, l.ConversasAbertas
+		b.Perguntas, b.ConversasAbertas = &perguntas, &abertas
 		bots = append(bots, b)
 	}
 	responderJSON(w, http.StatusOK, map[string]any{"bots": bots})
 }
 
-// GET /atendimento/bots/{id} — o bot com o fluxo dele.
+// GET /atendimento/bots/{id} — o bot com as perguntas dele.
 func (s *Servidor) buscarBot(w http.ResponseWriter, r *http.Request, _ *UsuarioSessao) {
 	id, ok := idDoCaminho(r)
 	if !ok {
@@ -126,19 +120,14 @@ func (s *Servidor) buscarBot(w http.ResponseWriter, r *http.Request, _ *UsuarioS
 		erroInterno(w, r, err)
 		return
 	}
-	linhas, err := s.q.ListarEtapasDoBot(ctx, id)
+	linhas, err := s.q.ListarPerguntasDoBot(ctx, id)
 	if err != nil {
 		erroInterno(w, r, err)
 		return
 	}
-	etapas := make([]etapaJSON, 0, len(linhas))
+	perguntas := make([]perguntaJSON, 0, len(linhas))
 	for _, l := range linhas {
-		e, err := etapaParaJSON(l)
-		if err != nil {
-			erroInterno(w, r, err)
-			return
-		}
-		etapas = append(etapas, e)
+		perguntas = append(perguntas, perguntaParaJSON(l))
 	}
 	contagem, err := s.q.ContarConversasDoBot(ctx, id)
 	if err != nil {
@@ -146,8 +135,8 @@ func (s *Servidor) buscarBot(w http.ResponseWriter, r *http.Request, _ *UsuarioS
 		return
 	}
 	responderJSON(w, http.StatusOK, map[string]any{
-		"bot":    botParaJSON(bot),
-		"etapas": etapas,
+		"bot":       botParaJSON(bot),
+		"perguntas": perguntas,
 		"conversas": map[string]int32{
 			"total": contagem.Total, "abertas": contagem.Abertas,
 		},
@@ -321,35 +310,26 @@ func (s *Servidor) excluirBot(w http.ResponseWriter, r *http.Request, u *Usuario
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// PUT /atendimento/bots/{id}/etapas — o fluxo inteiro, na ordem da lista. Admin e operador.
+// PUT /atendimento/bots/{id}/perguntas — as perguntas inteiras, na ordem da lista. Admin e
+// operador.
 //
 // Grava numa transação, apagando e recriando: é previsível e a ordem é a que a tela mandou. Com
-// conversa aberta é recusado — mudar o fluxo no meio deixaria a pessoa numa etapa que não existe.
-func (s *Servidor) definirEtapasDoBot(w http.ResponseWriter, r *http.Request, u *UsuarioSessao) {
+// conversa aberta é recusado — trocar as perguntas no meio mudaria o atendimento de quem já está
+// conversando.
+func (s *Servidor) definirPerguntasDoBot(w http.ResponseWriter, r *http.Request, u *UsuarioSessao) {
 	id, ok := idDoCaminho(r)
 	if !ok {
 		responderErro(w, http.StatusBadRequest, "id inválido")
 		return
 	}
 	var p struct {
-		Etapas []struct {
-			Nome       string              `json:"nome"`
-			Objetivo   string              `json:"objetivo"`
-			Instrucoes *string             `json:"instrucoes"`
-			Campos     []atendimento.Campo `json:"campos"`
-		} `json:"etapas"`
+		Perguntas []atendimento.Pergunta `json:"perguntas"`
 	}
-	if err := lerJSON(w, r, &p, limiteCorpoFluxo); err != nil {
+	if err := lerJSON(w, r, &p, limiteCorpoPerguntas); err != nil {
 		responderErro(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	brutas := make([]atendimento.Etapa, 0, len(p.Etapas))
-	for _, e := range p.Etapas {
-		brutas = append(brutas, atendimento.Etapa{
-			Nome: e.Nome, Objetivo: e.Objetivo, Instrucoes: e.Instrucoes, Campos: e.Campos,
-		})
-	}
-	etapas, err := atendimento.Etapas(brutas)
+	perguntas, err := atendimento.Perguntas(p.Perguntas)
 	if err != nil {
 		responderErroCadastro(w, r, err)
 		return
@@ -370,7 +350,7 @@ func (s *Servidor) definirEtapasDoBot(w http.ResponseWriter, r *http.Request, u 
 	}
 	if contagem.Abertas > 0 {
 		responderErro(w, http.StatusConflict, fmt.Sprintf(
-			"este bot tem %d conversa(s) aberta(s): mudar o fluxo agora deixaria essas pessoas numa etapa que não existe mais. Espere encerrarem ou desative o bot.",
+			"este bot tem %d conversa(s) aberta(s): mudar as perguntas agora mudaria o atendimento no meio da conversa. Espere encerrarem ou desligue o bot.",
 			contagem.Abertas))
 		return
 	}
@@ -383,37 +363,35 @@ func (s *Servidor) definirEtapasDoBot(w http.ResponseWriter, r *http.Request, u 
 	defer tx.Rollback(ctx) //nolint:errcheck // rollback depois do commit é no-op
 	qtx := s.q.WithTx(tx)
 
-	if err := qtx.ApagarEtapasDoBot(ctx, id); err != nil {
+	if err := qtx.ApagarPerguntasDoBot(ctx, id); err != nil {
 		erroInterno(w, r, err)
 		return
 	}
-	saida := make([]etapaJSON, 0, len(etapas))
-	for i, e := range etapas {
-		campos, err := json.Marshal(e.Campos)
-		if err != nil {
-			erroInterno(w, r, err)
-			return
-		}
-		linha, err := qtx.CriarEtapa(ctx, db.CriarEtapaParams{
-			BotID: id, Ordem: int32(i + 1), Nome: e.Nome, Objetivo: e.Objetivo,
-			Instrucoes: e.Instrucoes, Campos: campos,
+	saida := make([]perguntaJSON, 0, len(perguntas))
+	for i, q := range perguntas {
+		linha, err := qtx.CriarPergunta(ctx, db.CriarPerguntaParams{
+			BotID: id, Ordem: int32(i + 1), Texto: q.Texto, Campo: q.Campo,
+			Orientacao: q.Orientacao, Obrigatoria: q.Obrigatoria,
 		})
 		if err != nil {
 			responderErroCadastro(w, r, err)
 			return
 		}
-		j, err := etapaParaJSON(linha)
-		if err != nil {
-			erroInterno(w, r, err)
-			return
-		}
-		saida = append(saida, j)
+		saida = append(saida, perguntaParaJSON(linha))
 	}
 	if err := tx.Commit(ctx); err != nil {
 		erroInterno(w, r, err)
 		return
 	}
-	s.auditar(ctx, r, &u.ID, "atendimento_fluxo_atualizado", "atendimento_bot", idTexto(id),
-		map[string]any{"etapas": len(saida)})
-	responderJSON(w, http.StatusOK, map[string]any{"etapas": saida})
+	s.auditar(ctx, r, &u.ID, "atendimento_perguntas_atualizadas", "atendimento_bot", idTexto(id),
+		map[string]any{"perguntas": len(saida)})
+	responderJSON(w, http.StatusOK, map[string]any{"perguntas": saida})
+}
+
+// GET /atendimento/pontos-de-partida — os bots pré-escritos que a tela oferece em "Novo bot".
+//
+// A Travus trabalha com vários segmentos, então isto é um catálogo, não um padrão: quem cria
+// escolhe (inclusive "em branco") e edita o que quiser. O texto é copiado na criação.
+func (s *Servidor) listarPontosDePartida(w http.ResponseWriter, r *http.Request, _ *UsuarioSessao) {
+	responderJSON(w, http.StatusOK, map[string]any{"pontos_de_partida": atendimento.PontosDePartida})
 }

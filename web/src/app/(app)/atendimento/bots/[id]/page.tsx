@@ -5,7 +5,7 @@ import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useState } from "react";
 import { toast } from "sonner";
-import { FluxoDoBot } from "@/components/fluxo-bot";
+import { PerguntasDoBot } from "@/components/perguntas-bot";
 import { Colunas, Secao } from "@/components/pagina";
 import { Bloco, Estados } from "@/components/painel";
 import {
@@ -67,7 +67,7 @@ export default function PaginaBot() {
     return <Skeleton className="h-96 w-full max-w-4xl" />;
   }
 
-  const { bot, etapas, conversas } = consulta.data;
+  const { bot, perguntas, conversas } = consulta.data;
   return (
     <Colunas
       lateral={
@@ -109,21 +109,21 @@ export default function PaginaBot() {
       />
 
       <Secao
-        titulo="O fluxo"
-        descricao="As etapas que o bot conduz, em ordem. Em cada uma ele persegue um objetivo e coleta os dados; com os obrigatórios coletados, passa para a próxima."
+        titulo="As perguntas"
+        descricao="O que este atendimento precisa descobrir, de cima para baixo. O bot faz uma por vez, com as palavras dele, conforme a conversa."
       >
         {conversas.abertas > 0 && (
           <Alert>
             <AlertTitle>Há {conversas.abertas} conversa(s) aberta(s)</AlertTitle>
             <AlertDescription>
-              O fluxo não se altera agora: ninguém troca o chão debaixo de quem está conversando.
+              As perguntas não se alteram agora: mudaria o atendimento de quem já está conversando.
               Espere as conversas encerrarem.
             </AlertDescription>
           </Alert>
         )}
-        <FluxoDoBot
+        <PerguntasDoBot
           botId={bot.id}
-          etapas={etapas}
+          perguntas={perguntas}
           podeEditar={podeEditar && conversas.abertas === 0}
         />
       </Secao>

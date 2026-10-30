@@ -61,17 +61,18 @@ func ModeloValido(id string) bool {
 }
 
 // Limites do que a tela pode mandar. São generosos: existem para barrar absurdo (instrução de
-// 1 MB, 500 etapas) e para a mensagem de erro ser clara, não para apertar quem escreve.
+// 1 MB, 500 perguntas) e para a mensagem de erro ser clara, não para apertar quem escreve.
 const (
 	MaxNome       = 80
 	MaxInstrucoes = 20000
 	MinInstrucoes = 20
 	MaxSaudacao   = 1000
-	MaxEtapas     = 30
-	MaxObjetivo   = 500
-	MinObjetivo   = 10
-	MaxCampos     = 20
-	MaxRotulo     = 60
+	// Perguntas de um atendimento. Trinta é muito para uma conversa de WhatsApp — quem chegar
+	// perto disso tem um formulário, não um atendimento —, mas o limite existe para barrar
+	// absurdo, não para dar palpite.
+	MaxPerguntas = 30
+	MaxPergunta  = 300
+	MinPergunta  = 5
 )
 
 // O slug é a pasta da sessão do WhatsApp no volume do worker e o id do bot nas rotas internas:
@@ -86,12 +87,17 @@ func erro(formato string, args ...any) error {
 	return cadastro.Erro{Mensagem: fmt.Sprintf(formato, args...)}
 }
 
-// Campo que uma etapa precisa coletar. Vira argumento da ferramenta `registrar_dado` e chave em
-// atendimento.coletas.
-type Campo struct {
-	ID          string `json:"id"`
-	Rotulo      string `json:"rotulo"`
-	Obrigatorio bool   `json:"obrigatorio"`
+// Pergunta do atendimento, já validada e pronta para gravar. A ordem é a da lista que a tela
+// mandou: o bot faz uma por vez, de cima para baixo (decisão do usuário em 29/10/2026).
+//
+// `Campo` é onde a resposta é guardada (chave em atendimento.coletas e no lead) e o argumento da
+// ferramenta `registrar_resposta`. `Texto` é a pergunta como quem configurou escreveu — o bot
+// **não** a repete literalmente: reescreve conforme a conversa.
+type Pergunta struct {
+	Texto       string  `json:"texto"`
+	Campo       string  `json:"campo"`
+	Orientacao  *string `json:"orientacao"`
+	Obrigatoria bool    `json:"obrigatoria"`
 }
 
 // Texto obrigatório, com limite de tamanho. Devolve o valor já sem espaço nas pontas.
@@ -174,67 +180,66 @@ func Teto(campo string, bruto *int, padrao, minimo, maximo int) (int, error) {
 	return *bruto, nil
 }
 
-// Etapa do fluxo, já validada e pronta para gravar.
-type Etapa struct {
-	Nome       string
-	Objetivo   string
-	Instrucoes *string
-	Campos     []Campo
-}
-
-// Etapas valida o fluxo inteiro: a ordem é a da lista que a tela mandou (a primeira é a etapa 1),
-// os ids de campo não se repetem dentro da etapa e todo campo tem rótulo.
+// Perguntas valida a lista inteira: a ordem é a da lista que a tela mandou (a primeira é a
+// pergunta 1), o campo de cada uma é único no bot e todo campo tem um texto de pergunta.
 //
-// Fluxo vazio é permitido de propósito: um bot pode ser só de tirar dúvida, sem coletar nada.
-func Etapas(brutas []Etapa) ([]Etapa, error) {
-	if len(brutas) > MaxEtapas {
-		return nil, erro("o fluxo passa de %d etapas", MaxEtapas)
+// Lista vazia é permitida de propósito: um bot pode ser só de tirar dúvida, sem perguntar nada.
+func Perguntas(brutas []Pergunta) ([]Pergunta, error) {
+	if len(brutas) > MaxPerguntas {
+		return nil, erro("o atendimento passa de %d perguntas", MaxPerguntas)
 	}
-	saida := make([]Etapa, 0, len(brutas))
-	for i, e := range brutas {
-		nome, err := texto(fmt.Sprintf("o nome da etapa %d", i+1), e.Nome, 1, MaxNome)
+	vistos := make(map[string]bool, len(brutas))
+	saida := make([]Pergunta, 0, len(brutas))
+	for i, q := range brutas {
+		texto, err := texto(fmt.Sprintf("a pergunta %d", i+1), q.Texto, MinPergunta, MaxPergunta)
 		if err != nil {
 			return nil, err
 		}
-		objetivo, err := texto(fmt.Sprintf("o objetivo da etapa %q", nome), e.Objetivo, MinObjetivo, MaxObjetivo)
+		campo := strings.TrimSpace(strings.ToLower(q.Campo))
+		if campo == "" {
+			campo = CampoDaPergunta(texto)
+		}
+		if !reCampoID.MatchString(campo) {
+			return nil, erro("o nome do dado da pergunta %d é inválido: %q (use só minúscula, número e _, começando com letra)", i+1, q.Campo)
+		}
+		if vistos[campo] {
+			return nil, erro("duas perguntas guardam a resposta no mesmo dado (%q): a segunda apagaria a primeira", campo)
+		}
+		vistos[campo] = true
+		orientacao, err := opcional(fmt.Sprintf("a orientação da pergunta %d", i+1), valorOuVazio(q.Orientacao), MaxInstrucoes)
 		if err != nil {
 			return nil, err
 		}
-		instrucoes, err := opcional(fmt.Sprintf("as instruções da etapa %q", nome), valorOuVazio(e.Instrucoes), MaxInstrucoes)
-		if err != nil {
-			return nil, err
-		}
-		campos, err := validarCampos(nome, e.Campos)
-		if err != nil {
-			return nil, err
-		}
-		saida = append(saida, Etapa{Nome: nome, Objetivo: objetivo, Instrucoes: instrucoes, Campos: campos})
+		saida = append(saida, Pergunta{Texto: texto, Campo: campo, Orientacao: orientacao, Obrigatoria: q.Obrigatoria})
 	}
 	return saida, nil
 }
 
-func validarCampos(etapa string, brutos []Campo) ([]Campo, error) {
-	if len(brutos) > MaxCampos {
-		return nil, erro("a etapa %q passa de %d campos", etapa, MaxCampos)
+// CampoDaPergunta sugere o nome do dado a partir do texto da pergunta: "Quantas vidas vocês
+// querem?" → "quantas_vidas_voces_querem". A tela faz o mesmo ao digitar; isto é a rede de
+// segurança de quem chama a API direto.
+func CampoDaPergunta(pergunta string) string {
+	semAcento := strings.NewReplacer(
+		"á", "a", "à", "a", "ã", "a", "â", "a", "é", "e", "ê", "e", "í", "i",
+		"ó", "o", "õ", "o", "ô", "o", "ú", "u", "ü", "u", "ç", "c",
+	).Replace(strings.ToLower(strings.TrimSpace(pergunta)))
+	var sb strings.Builder
+	for _, r := range semAcento {
+		switch {
+		case r >= 'a' && r <= 'z', r >= '0' && r <= '9':
+			sb.WriteRune(r)
+		case sb.Len() > 0 && !strings.HasSuffix(sb.String(), "_"):
+			sb.WriteRune('_')
+		}
 	}
-	vistos := make(map[string]bool, len(brutos))
-	campos := make([]Campo, 0, len(brutos))
-	for _, c := range brutos {
-		id := strings.TrimSpace(strings.ToLower(c.ID))
-		if !reCampoID.MatchString(id) {
-			return nil, erro("campo inválido na etapa %q: %q (use só minúscula, número e _, começando com letra)", etapa, c.ID)
-		}
-		if vistos[id] {
-			return nil, erro("a etapa %q tem o campo %q duas vezes", etapa, id)
-		}
-		vistos[id] = true
-		rotulo, err := texto(fmt.Sprintf("o rótulo do campo %q", id), c.Rotulo, 1, MaxRotulo)
-		if err != nil {
-			return nil, err
-		}
-		campos = append(campos, Campo{ID: id, Rotulo: rotulo, Obrigatorio: c.Obrigatorio})
+	campo := strings.Trim(sb.String(), "_")
+	// Precisa começar com letra (vira nome de argumento da ferramenta do modelo).
+	campo = strings.TrimLeft(campo, "0123456789_")
+	if len([]rune(campo)) > 31 {
+		campo = string([]rune(campo)[:31])
+		campo = strings.Trim(campo, "_")
 	}
-	return campos, nil
+	return campo
 }
 
 func valorOuVazio(p *string) string {

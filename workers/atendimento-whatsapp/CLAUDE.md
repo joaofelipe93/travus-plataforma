@@ -33,7 +33,7 @@ laço (3s) → POST /internal/atendimento/fila/proxima {bots com sessão aberta}
 laço (30s) → GET /internal/atendimento/bots → abre sessão para bot novo, encerra a do que saiu
 ```
 
-Ele **não decide nada**: não sabe o que é etapa, teto ou instrução de bot, não tem a
+Ele **não decide nada**: não sabe o que é pergunta, teto ou instrução de bot, não tem a
 chave da Anthropic e não acessa o Postgres. É o carteiro — e é por isso que a peça que mais
 reinicia (o socket do WhatsApp) não tem regra de negócio dentro.
 

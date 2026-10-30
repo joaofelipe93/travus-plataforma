@@ -88,27 +88,28 @@ func jsonTexto(s string) string {
 	return string(b)
 }
 
-// botComFluxo cria um bot com duas etapas e devolve o bot pronto para conversar. `ligado` é o
-// único interruptor que existe: bot ligado responde (decisão do usuário em 29/10/2026).
-func botComFluxo(t *testing.T, s *Servidor, slug string, ligado bool) db.AtendimentoBot {
+// botComPerguntas cria um bot com duas perguntas e devolve o bot pronto para conversar.
+// `ligado` é o único interruptor que existe (29/10/2026). Os exemplos são genéricos: a Travus
+// trabalha com vários segmentos.
+func botComPerguntas(t *testing.T, s *Servidor, slug string, ligado bool) db.AtendimentoBot {
 	t.Helper()
 	ctx := context.Background()
 	bot, err := s.q.CriarBot(ctx, db.CriarBotParams{
 		Nome: "Bot " + slug, Slug: slug, Modelo: "claude-haiku-5-5",
-		Instrucoes:       "Você atende a imobiliária e só fala de aluguel.",
+		Instrucoes:       "Você é o primeiro atendimento da Travus e fala só do que está aqui.",
 		MaxMensagensHora: 60, MaxTokensConversa: 50000, PausaRespostaSegundos: 0,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	for i, e := range []struct {
-		nome, objetivo, campos string
+	for i, q := range []struct {
+		texto, campo string
 	}{
-		{"Interesse", "Descobrir o que a pessoa procura", `[{"id":"interesse","rotulo":"Interesse","obrigatorio":true}]`},
-		{"Contato", "Pegar o telefone para o corretor ligar", `[{"id":"telefone","rotulo":"Telefone","obrigatorio":true}]`},
+		{"Qual é o nome da empresa?", "nome_da_empresa"},
+		{"Qual o melhor telefone para a equipe ligar?", "melhor_telefone"},
 	} {
-		if _, err := s.q.CriarEtapa(ctx, db.CriarEtapaParams{
-			BotID: bot.ID, Ordem: int32(i + 1), Nome: e.nome, Objetivo: e.objetivo, Campos: []byte(e.campos),
+		if _, err := s.q.CriarPergunta(ctx, db.CriarPerguntaParams{
+			BotID: bot.ID, Ordem: int32(i + 1), Texto: q.texto, Campo: q.campo, Obrigatoria: true,
 		}); err != nil {
 			t.Fatal(err)
 		}
@@ -134,11 +135,11 @@ func servidorComBot(t *testing.T, m *modeloRoteiroBot) *Servidor {
 
 func TestAtendimentoRespondeEColeta(t *testing.T) {
 	m := &modeloRoteiroBot{turnos: []turnoBot{
-		{ferramenta: "registrar_dado", entrada: `{"campo":"interesse","valor":"apartamento 2 quartos"}`},
+		{ferramenta: "registrar_resposta", entrada: `{"campo":"nome_da_empresa","valor":"Acme Ltda"}`},
 		{texto: "Perfeito! Em qual bairro?"},
 	}}
 	s := servidorComBot(t, m)
-	bot := botComFluxo(t, s, "imoveis", true)
+	bot := botComPerguntas(t, s, "imoveis", true)
 
 	res, err := s.responderAtendimento(context.Background(), bot, "5511900000000", "Fulano", "quero alugar um ap de 2 quartos")
 	if err != nil {
@@ -156,69 +157,112 @@ func TestAtendimentoRespondeEColeta(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(coletas) != 1 || coletas[0].Campo != "interesse" {
+	if len(coletas) != 1 || coletas[0].Campo != "nome_da_empresa" {
 		t.Fatalf("a coleta devia estar gravada: %+v", coletas)
 	}
 	// O prompt precisa dizer quem o bot é, as regras da casa e a etapa atual.
 	prompt := strings.Join(m.sistema, "\n")
-	for _, esperado := range []string{"imobiliária", "atendimento automático", "Etapa atual: Interesse", "interesse (Interesse, obrigatório)"} {
+	for _, esperado := range []string{
+		"Travus", "atendimento automático",
+		"1. Qual é o nome da empresa?",
+		"Agora trate da pergunta 1", // o prompt é montado antes de a ferramenta rodar
+	} {
 		if !strings.Contains(prompt, esperado) {
 			t.Errorf("o prompt devia conter %q", esperado)
 		}
 	}
-	// Com o obrigatório coletado, a ferramenta avisa o modelo que a etapa fechou.
-	if !strings.Contains(strings.Join(m.resultados, " "), "etapa_completa") {
-		t.Errorf("registrar_dado devia dizer que a etapa fechou: %q", m.resultados)
+	// A ferramenta devolve ao modelo qual é a próxima pergunta.
+	if !strings.Contains(strings.Join(m.resultados, " "), "proxima_pergunta") {
+		t.Errorf("registrar_resposta devia dizer a próxima pergunta: %q", m.resultados)
 	}
 }
 
-func TestAtendimentoEtapaSoAvancaComObrigatorio(t *testing.T) {
-	// O modelo tenta correr: pede para avançar antes de coletar o obrigatório.
+// A próxima pergunta é a primeira sem resposta: não existe "avançar". Registrar a resposta é o
+// que faz a lista andar — e é a plataforma que calcula, não o modelo.
+func TestAtendimentoListaAndaComAResposta(t *testing.T) {
 	m := &modeloRoteiroBot{turnos: []turnoBot{
-		{ferramenta: "avancar_etapa"},
-		{texto: "Me conta o que você procura?"},
+		{ferramenta: "registrar_resposta", entrada: `{"campo":"nome_da_empresa","valor":"Acme Ltda"}`},
+		{texto: "Obrigado! Qual o melhor telefone?"},
 	}}
 	s := servidorComBot(t, m)
-	bot := botComFluxo(t, s, "apressado", true)
+	bot := botComPerguntas(t, s, "andando", true)
 
-	res, err := s.responderAtendimento(context.Background(), bot, "5511922222222", "", "oi")
+	res, err := s.responderAtendimento(context.Background(), bot, "5511922222222", "", "somos a Acme")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if res.EtapaAtual == nil || *res.EtapaAtual != "Interesse" {
-		t.Fatalf("a conversa devia ficar na primeira etapa: %+v", res)
+	// Respondida a primeira, a pergunta da vez passa a ser a segunda.
+	if res.PerguntaAtual == nil || *res.PerguntaAtual != "Qual o melhor telefone para a equipe ligar?" {
+		t.Fatalf("a próxima pergunta devia ser a segunda: %+v", res.PerguntaAtual)
 	}
-	// A recusa volta para o modelo dizendo o que falta — é assim que ele corrige sozinho.
-	if !strings.Contains(strings.Join(m.resultados, " "), "interesse") {
-		t.Errorf("a ferramenta devia dizer qual dado falta: %q", m.resultados)
+	if res.Encerrada {
+		t.Error("ainda falta uma pergunta: não devia encerrar")
+	}
+	// A ferramenta devolve ao modelo qual é a próxima — é assim que ele sabe o que perguntar.
+	if !strings.Contains(strings.Join(m.resultados, " "), "melhor telefone") {
+		t.Errorf("a ferramenta devia dizer a próxima pergunta: %q", m.resultados)
 	}
 }
 
-func TestAtendimentoAvancaEEncerraNoFim(t *testing.T) {
+// Dado que não é de pergunta nenhuma é recusado: senão o modelo inventa chave e a tela mostra
+// dado que ninguém pediu. A recusa volta para ele, que corrige sozinho.
+func TestAtendimentoRecusaDadoDesconhecido(t *testing.T) {
 	m := &modeloRoteiroBot{turnos: []turnoBot{
-		{ferramenta: "registrar_dado", entrada: `{"campo":"interesse","valor":"kitnet"}`},
-		{ferramenta: "avancar_etapa"},
-		{ferramenta: "registrar_dado", entrada: `{"campo":"telefone","valor":"11988887777"}`},
-		{ferramenta: "avancar_etapa"}, // última etapa: avançar é terminar
-		{texto: "Obrigado! Um corretor vai te ligar."},
+		{ferramenta: "registrar_resposta", entrada: `{"campo":"cor_favorita","valor":"azul"}`},
+		{texto: "Qual é o nome da empresa?"},
 	}}
 	s := servidorComBot(t, m)
-	bot := botComFluxo(t, s, "completo", true)
+	bot := botComPerguntas(t, s, "inventado", true)
 
-	res, err := s.responderAtendimento(context.Background(), bot, "5511933333333", "", "quero uma kitnet, meu zap é 11988887777")
+	res, err := s.responderAtendimento(context.Background(), bot, "5511922222223", "", "oi")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.PerguntaAtual == nil || *res.PerguntaAtual != "Qual é o nome da empresa?" {
+		t.Errorf("nada foi registrado: a pergunta da vez continua a primeira: %+v", res.PerguntaAtual)
+	}
+	juntos := strings.Join(m.resultados, " ")
+	if !strings.Contains(juntos, "nome_da_empresa") || !strings.Contains(juntos, "melhor_telefone") {
+		t.Errorf("a recusa devia listar os dados que existem: %q", m.resultados)
+	}
+	var quantas int
+	if err := s.pool.QueryRow(context.Background(),
+		"SELECT count(*) FROM atendimento.coletas WHERE conversa_id = $1", res.ConversaID).Scan(&quantas); err != nil {
+		t.Fatal(err)
+	}
+	if quantas != 0 {
+		t.Errorf("o dado inventado não podia ser gravado: %d coleta(s)", quantas)
+	}
+}
+
+// Respondidas todas, o bot encerra — e a última mensagem ainda sai.
+func TestAtendimentoEncerraQuandoRespondeTudo(t *testing.T) {
+	m := &modeloRoteiroBot{turnos: []turnoBot{
+		{ferramenta: "registrar_resposta", entrada: `{"campo":"nome_da_empresa","valor":"Acme Ltda"}`},
+		{ferramenta: "registrar_resposta", entrada: `{"campo":"melhor_telefone","valor":"11988887777"}`},
+		{ferramenta: "encerrar", entrada: `{"motivo":"concluido"}`},
+		{texto: "Obrigado! A equipe vai falar com você."},
+	}}
+	s := servidorComBot(t, m)
+	bot := botComPerguntas(t, s, "completo", true)
+
+	res, err := s.responderAtendimento(context.Background(), bot, "5511933333333",
+		"", "somos a Acme Ltda, meu telefone é 11988887777")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !res.Encerrada || res.Motivo != "concluido" {
-		t.Fatalf("o fluxo acabou: devia encerrar como concluído: %+v", res)
+		t.Fatalf("devia encerrar como concluído: %+v", res)
 	}
-	// A última mensagem ainda sai: encerrar não pode cancelar a despedida.
 	if res.Status != "pendente" || res.MensagemID == nil {
 		t.Errorf("a última resposta devia entrar na fila: %+v", res)
 	}
-	coletas, _ := s.q.ColetasDaConversa(context.Background(), res.ConversaID)
-	if len(coletas) != 2 {
-		t.Errorf("os dois dados deviam estar gravados: %+v", coletas)
+	if res.PerguntaAtual != nil {
+		t.Errorf("não há próxima pergunta: %+v", res.PerguntaAtual)
+	}
+	respostas, _ := s.q.ColetasDaConversa(context.Background(), res.ConversaID)
+	if len(respostas) != 2 {
+		t.Errorf("as duas respostas deviam estar gravadas: %+v", respostas)
 	}
 }
 
@@ -228,7 +272,7 @@ func TestAtendimentoEncerraPedidoDeHumano(t *testing.T) {
 		{texto: "Vou passar para a equipe, já te respondem por aqui."},
 	}}
 	s := servidorComBot(t, m)
-	bot := botComFluxo(t, s, "humano", true)
+	bot := botComPerguntas(t, s, "humano", true)
 
 	res, err := s.responderAtendimento(context.Background(), bot, "5511944444444", "", "quero falar com uma pessoa")
 	if err != nil {
@@ -254,7 +298,7 @@ func TestAtendimentoMotivoDesconhecidoNaoEncerra(t *testing.T) {
 		{texto: "Posso ajudar em mais algo?"},
 	}}
 	s := servidorComBot(t, m)
-	bot := botComFluxo(t, s, "motivo", true)
+	bot := botComPerguntas(t, s, "motivo", true)
 
 	res, err := s.responderAtendimento(context.Background(), bot, "5511955555555", "", "tchau")
 	if err != nil {
@@ -271,7 +315,7 @@ func TestAtendimentoMotivoDesconhecidoNaoEncerra(t *testing.T) {
 func TestAtendimentoTetoDeTokensEncerra(t *testing.T) {
 	m := &modeloRoteiroBot{turnos: []turnoBot{{texto: "Oi!"}}}
 	s := servidorComBot(t, m)
-	bot := botComFluxo(t, s, "teto-tokens", true)
+	bot := botComPerguntas(t, s, "teto-tokens", true)
 	// Teto baixo e conversa já gasta: a próxima mensagem encerra em vez de chamar o modelo.
 	if _, err := s.q.AtualizarBot(context.Background(), db.AtualizarBotParams{
 		ID: bot.ID, Nome: bot.Nome, Modelo: bot.Modelo, Instrucoes: bot.Instrucoes, Ativo: true,
@@ -299,7 +343,7 @@ func TestAtendimentoTetoDeTokensEncerra(t *testing.T) {
 func TestAtendimentoTetoDaHoraCancela(t *testing.T) {
 	m := &modeloRoteiroBot{turnos: []turnoBot{{texto: "Oi!"}, {texto: "Oi de novo!"}}}
 	s := servidorComBot(t, m)
-	bot := botComFluxo(t, s, "teto-hora", true)
+	bot := botComPerguntas(t, s, "teto-hora", true)
 	s.exec(t, "UPDATE atendimento.bots SET max_mensagens_hora = 1 WHERE id = $1", bot.ID)
 	bot, _ = s.q.BuscarBot(context.Background(), bot.ID)
 
@@ -322,7 +366,7 @@ func TestAtendimentoTetoDaHoraCancela(t *testing.T) {
 func TestAtendimentoMesmoTelefoneContinuaAConversa(t *testing.T) {
 	m := &modeloRoteiroBot{turnos: []turnoBot{{texto: "Oi!"}, {texto: "Pois não?"}}}
 	s := servidorComBot(t, m)
-	bot := botComFluxo(t, s, "mesma-conversa", true)
+	bot := botComPerguntas(t, s, "mesma-conversa", true)
 
 	a, err := s.responderAtendimento(context.Background(), bot, "5511999999999", "Fulano", "oi")
 	if err != nil {
@@ -349,7 +393,7 @@ func TestAtendimentoMesmoTelefoneContinuaAConversa(t *testing.T) {
 func TestAtendimentoBotDesligadoNaoAbreConversa(t *testing.T) {
 	m := &modeloRoteiroBot{turnos: []turnoBot{{texto: "não devia chegar aqui"}}}
 	s := servidorComBot(t, m)
-	bot := botComFluxo(t, s, "desligado", true)
+	bot := botComPerguntas(t, s, "desligado", true)
 	s.exec(t, "UPDATE atendimento.bots SET ativo = false WHERE id = $1", bot.ID)
 	bot, _ = s.q.BuscarBot(context.Background(), bot.ID)
 
@@ -369,7 +413,7 @@ func TestAtendimentoSemChaveNoServidor(t *testing.T) {
 	s := novoServidorTeste(t)
 	limparAtendimento(t, s)
 	s.cfg.ModeloAtendimento = nil // sem ANTHROPIC_API_KEY
-	bot := botComFluxo(t, s, "sem-chave", true)
+	bot := botComPerguntas(t, s, "sem-chave", true)
 
 	if _, err := s.responderAtendimento(context.Background(), bot, "5511900000002", "", "oi"); err == nil {
 		t.Fatal("sem chave, responder devia falhar com erro claro")
@@ -381,7 +425,7 @@ func TestAtendimentoSemChaveNoServidor(t *testing.T) {
 func TestAtendimentoRotaInternaExigeToken(t *testing.T) {
 	m := &modeloRoteiroBot{turnos: []turnoBot{{texto: "Olá!"}}}
 	s := servidorComBot(t, m)
-	bot := botComFluxo(t, s, "interno", true)
+	bot := botComPerguntas(t, s, "interno", true)
 	interno := s.RotasInternas()
 
 	corpo := map[string]any{"bot": bot.Slug, "telefone": "5511900000003", "texto": "oi"}

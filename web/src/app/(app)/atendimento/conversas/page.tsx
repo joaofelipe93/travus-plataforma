@@ -128,7 +128,7 @@ function Conversas() {
                       <p className="mt-0.5 text-xs text-muted-foreground">
                         {c.contato_nome ? `${formatarNumeroWhatsapp(c.telefone)} · ` : ""}
                         {c.bot_nome}
-                        {c.etapa_nome ? ` · etapa ${c.etapa_nome}` : ""}
+
                       </p>
                     </div>
                     <div className="flex items-center gap-3">

@@ -49,7 +49,7 @@ func TestInstrucoesESaudacao(t *testing.T) {
 	if _, err := Instrucoes(strings.Repeat("a", MaxInstrucoes+1)); err == nil {
 		t.Error("instrução acima do limite devia falhar")
 	}
-	if v, err := Instrucoes("  Você atende a imobiliária e só fala de aluguel.  "); err != nil || strings.HasPrefix(v, " ") {
+	if v, err := Instrucoes("  Você é o primeiro atendimento da Travus no WhatsApp.  "); err != nil || strings.HasPrefix(v, " ") {
 		t.Errorf("devia aceitar e tirar espaço das pontas: %q (%v)", v, err)
 	}
 	if v, err := Saudacao("   "); err != nil || v != nil {
@@ -71,53 +71,122 @@ func TestTeto(t *testing.T) {
 	}
 }
 
-func TestEtapas(t *testing.T) {
-	ok := []Etapa{{
-		Nome:     "Entender o interesse",
-		Objetivo: "Descobrir o que a pessoa procura e em que bairro",
-		Campos:   []Campo{{ID: "interesse", Rotulo: "Interesse", Obrigatorio: true}, {ID: "bairro", Rotulo: "Bairro"}},
-	}}
-	saida, err := Etapas(ok)
-	if err != nil || len(saida) != 1 || len(saida[0].Campos) != 2 {
-		t.Fatalf("fluxo válido devia passar: %v", err)
+func TestPerguntas(t *testing.T) {
+	ok := []Pergunta{
+		{Texto: "Qual é o nome da empresa?", Campo: "nome_da_empresa", Obrigatoria: true},
+		{Texto: "Quantas pessoas entrariam?", Obrigatoria: true}, // campo vem do texto
 	}
-	// Fluxo vazio é legítimo: bot que só tira dúvida não coleta nada.
-	if _, err := Etapas(nil); err != nil {
-		t.Errorf("fluxo vazio devia passar: %v", err)
+	saida, err := Perguntas(ok)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(saida) != 2 {
+		t.Fatalf("devia devolver as duas: %+v", saida)
+	}
+	// Campo em branco sai do texto da pergunta — é o que a tela faz ao digitar.
+	if saida[1].Campo != "quantas_pessoas_entrariam" {
+		t.Errorf("o campo devia sair do texto: %q", saida[1].Campo)
 	}
 
-	casos := map[string][]Etapa{
-		"objetivo curto":   {{Nome: "X", Objetivo: "curto"}},
-		"nome vazio":       {{Nome: "  ", Objetivo: "Descobrir o que a pessoa procura"}},
-		"campo repetido":   {{Nome: "X", Objetivo: "Descobrir o que a pessoa procura", Campos: []Campo{{ID: "nome", Rotulo: "Nome"}, {ID: "nome", Rotulo: "Nome de novo"}}}},
-		"id de campo ruim": {{Nome: "X", Objetivo: "Descobrir o que a pessoa procura", Campos: []Campo{{ID: "Nome Completo", Rotulo: "Nome"}}}},
-		"campo sem rótulo": {{Nome: "X", Objetivo: "Descobrir o que a pessoa procura", Campos: []Campo{{ID: "nome"}}}},
+	// Lista vazia é permitida: bot só de tirar dúvida.
+	if _, err := Perguntas(nil); err != nil {
+		t.Errorf("atendimento sem perguntas devia ser aceito: %v", err)
 	}
-	for nome, etapas := range casos {
-		if _, err := Etapas(etapas); err == nil {
-			t.Errorf("%s: devia falhar", nome)
+
+	ruins := map[string][]Pergunta{
+		"pergunta vazia": {{Texto: "   ", Campo: "x_qualquer"}},
+		"pergunta curta": {{Texto: "Oi?", Campo: "oi"}},
+		"campo inválido": {{Texto: "Qual é o nome da empresa?", Campo: "Nome Da Empresa"}},
+		"campo repetido": {
+			{Texto: "Qual é o seu nome?", Campo: "nome"},
+			{Texto: "E o nome da empresa?", Campo: "nome"},
+		},
+	}
+	for nome, perguntas := range ruins {
+		if _, err := Perguntas(perguntas); err == nil {
+			t.Errorf("%s devia ser recusado", nome)
 		}
 	}
 
-	demais := make([]Etapa, MaxEtapas+1)
+	demais := make([]Pergunta, MaxPerguntas+1)
 	for i := range demais {
-		demais[i] = Etapa{Nome: "X", Objetivo: "Descobrir o que a pessoa procura"}
+		demais[i] = Pergunta{Texto: "Pergunta de teste número " + string(rune('a'+i%26)) + "?"}
 	}
-	if _, err := Etapas(demais); err == nil {
-		t.Error("fluxo acima do limite de etapas devia falhar")
+	if _, err := Perguntas(demais); err == nil {
+		t.Errorf("mais de %d perguntas devia ser recusado", MaxPerguntas)
 	}
 }
 
-func TestEtapasNormalizaCampo(t *testing.T) {
-	saida, err := Etapas([]Etapa{{
-		Nome:     "X",
-		Objetivo: "Descobrir o que a pessoa procura",
-		Campos:   []Campo{{ID: "  TELEFONE  ", Rotulo: "  Telefone  "}},
+func TestPerguntasNormaliza(t *testing.T) {
+	saida, err := Perguntas([]Pergunta{{
+		Texto: "  Qual o melhor telefone?  ", Campo: "  MELHOR_TELEFONE  ", Obrigatoria: true,
 	}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if c := saida[0].Campos[0]; c.ID != "telefone" || c.Rotulo != "Telefone" {
-		t.Errorf("campo devia ser normalizado, veio id=%q rotulo=%q", c.ID, c.Rotulo)
+	if saida[0].Texto != "Qual o melhor telefone?" {
+		t.Errorf("o texto devia vir aparado: %q", saida[0].Texto)
+	}
+	if saida[0].Campo != "melhor_telefone" {
+		t.Errorf("o campo devia vir aparado e em minúscula: %q", saida[0].Campo)
+	}
+}
+
+func TestCampoDaPergunta(t *testing.T) {
+	casos := map[string]string{
+		"Qual é o nome da empresa?":   "qual_e_o_nome_da_empresa",
+		"Quantas vidas vocês querem?": "quantas_vidas_voces_querem",
+		"CNPJ?":                       "cnpj",
+		"3 perguntas?":                "perguntas",
+		"  Melhor horário!!!  ":       "melhor_horario",
+	}
+	for pergunta, esperado := range casos {
+		if v := CampoDaPergunta(pergunta); v != esperado {
+			t.Errorf("CampoDaPergunta(%q) = %q, esperava %q", pergunta, v, esperado)
+		}
+	}
+	// O nome do dado vira argumento da ferramenta do modelo: precisa começar com letra.
+	if v := CampoDaPergunta("123?"); v != "" {
+		t.Errorf("sem letra nenhuma devia dar vazio (a validação recusa): %q", v)
+	}
+}
+
+// Os pontos de partida são oferecidos na criação de um bot. A Travus tem vários segmentos, então
+// o que se garante aqui é que eles são válidos e que nenhum é imposto.
+func TestPontosDePartida(t *testing.T) {
+	if len(PontosDePartida) < 2 {
+		t.Fatal("o catálogo não devia estar vazio")
+	}
+	if PontosDePartida[0].ID != "em-branco" {
+		t.Error("o primeiro ponto de partida precisa ser o vazio: ninguém começa obrigado a um segmento")
+	}
+	if len(PontosDePartida[0].Perguntas) != 0 || PontosDePartida[0].Instrucoes != "" {
+		t.Error("o ponto de partida em branco não pode trazer texto")
+	}
+	vistos := map[string]bool{}
+	for _, p := range PontosDePartida {
+		if vistos[p.ID] {
+			t.Errorf("ponto de partida repetido: %s", p.ID)
+		}
+		vistos[p.ID] = true
+		if p.Nome == "" || p.Descricao == "" {
+			t.Errorf("%s: nome e descrição são o que a tela mostra", p.ID)
+		}
+		if p.ID == "em-branco" {
+			continue
+		}
+		// O que é copiado para o bot precisa passar na mesma validação da API.
+		if _, err := Instrucoes(p.Instrucoes); err != nil {
+			t.Errorf("%s: instruções inválidas: %v", p.ID, err)
+		}
+		if _, err := Perguntas(p.Perguntas); err != nil {
+			t.Errorf("%s: perguntas inválidas: %v", p.ID, err)
+		}
+		if _, err := Saudacao(p.Saudacao); err != nil {
+			t.Errorf("%s: saudação inválida: %v", p.ID, err)
+		}
+	}
+	if _, ok := PontoDePartidaPorID("nao-existe"); ok {
+		t.Error("id desconhecido não devia achar nada")
 	}
 }
