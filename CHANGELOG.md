@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.25.0](https://github.com/joaofelipe93/travus-plataforma/compare/v0.24.0...v0.25.0) (2026-10-30)
+
+
+### ⚠ BREAKING CHANGES
+
+* **atendimento:** perguntas na ordem e pontos de partida por segmento ([#114](https://github.com/joaofelipe93/travus-plataforma/issues/114))
+
+### Novidades
+
+* **atendimento:** perguntas na ordem e pontos de partida por segmento ([#114](https://github.com/joaofelipe93/travus-plataforma/issues/114)) ([abac701](https://github.com/joaofelipe93/travus-plataforma/commit/abac70148620bd6986783e92cc8b4f0ee0c9ad01))
+
 ## [0.24.0](https://github.com/joaofelipe93/travus-plataforma/compare/v0.23.0...v0.24.0) (2026-10-29)
 
 
