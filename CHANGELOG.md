@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.27.1](https://github.com/joaofelipe93/travus-plataforma/compare/v0.27.0...v0.27.1) (2026-10-30)
+
+
+### Correções
+
+* **atendimento:** "Novo bot" quebrava a tela, e mais dois defeitos ao lado ([#121](https://github.com/joaofelipe93/travus-plataforma/issues/121)) ([87e75ea](https://github.com/joaofelipe93/travus-plataforma/commit/87e75ea5234dcbad01df9169aac69c8f1d6ec3cb))
+
 ## [0.27.0](https://github.com/joaofelipe93/travus-plataforma/compare/v0.26.0...v0.27.0) (2026-10-30)
 
 
