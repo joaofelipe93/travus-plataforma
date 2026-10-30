@@ -653,7 +653,9 @@ export type PontoDePartida = {
   descricao: string;
   instrucoes: string;
   saudacao: string;
-  perguntas: { texto: string; campo: string; orientacao: string | null; obrigatoria: boolean }[];
+  // A API manda `[]`; o tipo admite a lista ausente porque lista vazia em Go pode vir `null` se
+  // alguém esquecer de inicializá-la — e a tela não deve quebrar por isso.
+  perguntas: { texto: string; campo: string; orientacao: string | null; obrigatoria: boolean }[] | null;
 };
 
 export type Bot = {

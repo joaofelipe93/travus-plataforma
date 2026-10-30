@@ -382,7 +382,12 @@ function AbaAjustes({ dados, podeEditar }: { dados: DetalheBot; podeEditar: bool
             <Label htmlFor="modelo" className="sr-only">
               Modelo
             </Label>
-            <Select value={modelo} onValueChange={(v) => setModelo(v ?? bot.modelo)} disabled={!podeEditar}>
+            <Select
+              items={(modelos.data?.modelos ?? []).map((m) => ({ value: m.id, label: m.nome }))}
+              value={modelo}
+              onValueChange={(v) => setModelo(v ?? bot.modelo)}
+              disabled={!podeEditar}
+            >
               <SelectTrigger id="modelo">
                 <SelectValue />
               </SelectTrigger>

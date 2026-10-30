@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 
@@ -42,6 +43,10 @@ type botJSON struct {
 	MaxMensagensHora      int32   `json:"max_mensagens_hora"`
 	MaxTokensConversa     int32   `json:"max_tokens_conversa"`
 	PausaRespostaSegundos int32   `json:"pausa_resposta_segundos"`
+	// A tela mostra "criado em" e usa `atualizado_em` para remontar o formulário com o valor
+	// novo depois de salvar. Faltavam aqui: a tela mostrava "—" e a remontagem nunca acontecia.
+	CriadoEm     time.Time `json:"criado_em"`
+	AtualizadoEm time.Time `json:"atualizado_em"`
 	// Só na lista: ajuda a tela sem um pedido por bot.
 	Perguntas        *int32 `json:"perguntas,omitempty"`
 	ConversasAbertas *int32 `json:"conversas_abertas,omitempty"`
@@ -53,6 +58,7 @@ func botParaJSON(b db.AtendimentoBot) botJSON {
 		Saudacao: b.Saudacao, Ativo: b.Ativo,
 		MaxMensagensHora: b.MaxMensagensHora, MaxTokensConversa: b.MaxTokensConversa,
 		PausaRespostaSegundos: b.PausaRespostaSegundos,
+		CriadoEm:              b.CriadoEm, AtualizadoEm: b.AtualizadoEm,
 	}
 }
 
@@ -95,6 +101,7 @@ func (s *Servidor) listarBots(w http.ResponseWriter, r *http.Request, _ *Usuario
 			Saudacao: l.Saudacao, Ativo: l.Ativo,
 			MaxMensagensHora: l.MaxMensagensHora, MaxTokensConversa: l.MaxTokensConversa,
 			PausaRespostaSegundos: l.PausaRespostaSegundos,
+			CriadoEm:              l.CriadoEm, AtualizadoEm: l.AtualizadoEm,
 		})
 		perguntas, abertas := l.Perguntas, l.ConversasAbertas
 		b.Perguntas, b.ConversasAbertas = &perguntas, &abertas
