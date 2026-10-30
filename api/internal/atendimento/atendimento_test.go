@@ -1,6 +1,7 @@
 package atendimento
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 )
@@ -188,5 +189,25 @@ func TestPontosDePartida(t *testing.T) {
 	}
 	if _, ok := PontoDePartidaPorID("nao-existe"); ok {
 		t.Error("id desconhecido não devia achar nada")
+	}
+}
+
+// O JSON de um ponto de partida não pode ter `"perguntas": null`: a tela faz `perguntas.length`
+// e quebra com "Cannot read properties of null" — aconteceu em 30/10/2026 ao abrir "Novo bot",
+// porque o ponto de partida em branco tinha a lista nil (e é ele o escolhido por padrão).
+//
+// Vale para todos: lista nil em Go é null no JSON, e a tela não devia precisar saber disso.
+func TestPontosDePartidaNaoMandamNullNoJSON(t *testing.T) {
+	for _, p := range PontosDePartida {
+		if p.Perguntas == nil {
+			t.Errorf("%s: perguntas nil viram null no JSON; use []Pergunta{}", p.ID)
+		}
+		bruto, err := json.Marshal(p)
+		if err != nil {
+			t.Fatalf("%s: %v", p.ID, err)
+		}
+		if strings.Contains(string(bruto), `"perguntas":null`) {
+			t.Errorf("%s: o JSON tem \"perguntas\":null — a tela quebra nisso\n%s", p.ID, bruto)
+		}
 	}
 }

@@ -315,11 +315,14 @@ function SheetNovoBot({ aberto, aoFechar }: { aberto: boolean; aoFechar: () => v
           saudacao: pontoEscolhido?.saudacao ?? "",
         },
       });
-      // As perguntas do ponto de partida entram na sequência, pela rota delas.
-      if (pontoEscolhido && pontoEscolhido.perguntas.length > 0) {
+      // As perguntas do ponto de partida entram na sequência, pela rota delas. O `?? []` é
+      // cinto: lista vazia em Go vira `null` no JSON se alguém esquecer de inicializá-la, e a
+      // tela não deve quebrar por causa disso (foi o que aconteceu em 30/10/2026).
+      const doPonto = pontoEscolhido?.perguntas ?? [];
+      if (doPonto.length > 0) {
         await api(`/atendimento/bots/${res.bot.id}/perguntas`, {
           metodo: "PUT",
-          json: { perguntas: pontoEscolhido.perguntas },
+          json: { perguntas: doPonto },
         });
       }
       return res;
@@ -366,6 +369,7 @@ function SheetNovoBot({ aberto, aoFechar }: { aberto: boolean; aoFechar: () => v
             <div className="flex flex-col gap-2">
               <Label htmlFor="bot-partida">Ponto de partida</Label>
               <Select
+                items={(pontos.data?.pontos_de_partida ?? []).map((p) => ({ value: p.id, label: p.nome }))}
                 value={partida}
                 onValueChange={(v) => {
                   const id = v ?? "em-branco";
@@ -390,8 +394,8 @@ function SheetNovoBot({ aberto, aoFechar }: { aberto: boolean; aoFechar: () => v
               {pontoEscolhido && (
                 <p className="text-xs text-muted-foreground">
                   {pontoEscolhido.descricao}
-                  {pontoEscolhido.perguntas.length > 0 &&
-                    ` Vem com ${pontoEscolhido.perguntas.length} pergunta(s), que você edita depois.`}
+                  {(pontoEscolhido.perguntas?.length ?? 0) > 0 &&
+                    ` Vem com ${pontoEscolhido.perguntas?.length} pergunta(s), que você edita depois.`}
                 </p>
               )}
             </div>
@@ -430,7 +434,11 @@ function SheetNovoBot({ aberto, aoFechar }: { aberto: boolean; aoFechar: () => v
             </div>
             <div className="flex flex-col gap-2">
               <Label htmlFor="bot-modelo">Modelo</Label>
-              <Select value={escolhido} onValueChange={(v) => setModelo(v ?? "")}>
+              <Select
+                items={(modelos.data?.modelos ?? []).map((m) => ({ value: m.id, label: m.nome }))}
+                value={escolhido}
+                onValueChange={(v) => setModelo(v ?? "")}
+              >
                 <SelectTrigger id="bot-modelo">
                   <SelectValue placeholder="Escolha o modelo" />
                 </SelectTrigger>

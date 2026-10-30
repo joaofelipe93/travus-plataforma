@@ -67,7 +67,14 @@ function Conversas() {
       descricao="Cada linha é uma pessoa que escreveu para um bot. Abra para ler a conversa inteira e os dados que ela rendeu."
       acoes={
         <div className="flex flex-wrap items-center gap-2">
-          <Select value={bot} onValueChange={(v) => setBot(v ?? "todos")}>
+          <Select
+            items={[
+              { value: "todos", label: "Todos os bots" },
+              ...(bots.data?.bots ?? []).map((b) => ({ value: String(b.id), label: b.nome })),
+            ]}
+            value={bot}
+            onValueChange={(v) => setBot(v ?? "todos")}
+          >
             <SelectTrigger className="w-48" aria-label="Filtrar por bot">
               <SelectValue />
             </SelectTrigger>
@@ -80,7 +87,15 @@ function Conversas() {
               ))}
             </SelectContent>
           </Select>
-          <Select value={situacao} onValueChange={(v) => setSituacao((v ?? "todas") as Situacao)}>
+          <Select
+            items={[
+              { value: "todas", label: "Todas" },
+              { value: "abertas", label: "Abertas" },
+              { value: "encerradas", label: "Encerradas" },
+            ]}
+            value={situacao}
+            onValueChange={(v) => setSituacao((v ?? "todas") as Situacao)}
+          >
             <SelectTrigger className="w-40" aria-label="Filtrar por situação">
               <SelectValue />
             </SelectTrigger>

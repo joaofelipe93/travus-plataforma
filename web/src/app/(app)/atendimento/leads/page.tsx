@@ -107,7 +107,16 @@ export default function PaginaLeads() {
           titulo="Leads"
           descricao="Novos primeiro. A revisão abre ao lado."
           acoes={
-            <Select value={situacao} onValueChange={(v) => setSituacao((v ?? "novos") as Situacao)}>
+            <Select
+              items={[
+                { value: "novos", label: "Esperando revisão" },
+                { value: "aproveitados", label: "Aproveitados" },
+                { value: "descartados", label: "Descartados" },
+                { value: "todos", label: "Todos" },
+              ]}
+              value={situacao}
+              onValueChange={(v) => setSituacao((v ?? "novos") as Situacao)}
+            >
               <SelectTrigger className="w-48" aria-label="Filtrar por situação">
                 <SelectValue />
               </SelectTrigger>

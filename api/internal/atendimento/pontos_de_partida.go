@@ -16,12 +16,12 @@ package atendimento
 
 // PontoDePartida é um bot pré-escrito: instruções, saudação e as perguntas, na ordem.
 type PontoDePartida struct {
-	ID        string     `json:"id"`
-	Nome      string     `json:"nome"`
-	Descricao string     `json:"descricao"`
-	Instrucoes string    `json:"instrucoes"`
-	Saudacao  string     `json:"saudacao"`
-	Perguntas []Pergunta `json:"perguntas"`
+	ID         string     `json:"id"`
+	Nome       string     `json:"nome"`
+	Descricao  string     `json:"descricao"`
+	Instrucoes string     `json:"instrucoes"`
+	Saudacao   string     `json:"saudacao"`
+	Perguntas  []Pergunta `json:"perguntas"`
 }
 
 func pergunta(texto, campo string, obrigatoria bool, orientacao string) Pergunta {
@@ -39,6 +39,11 @@ var PontosDePartida = []PontoDePartida{
 		ID:        "em-branco",
 		Nome:      "Começar em branco",
 		Descricao: "Sem nada escrito: você define as instruções e as perguntas.",
+		// `[]Pergunta{}` e não nil: lista nil vira **null** no JSON, e a tela que faz
+		// `perguntas.length` quebra com "Cannot read properties of null". Aconteceu de verdade,
+		// em 30/10/2026, ao abrir "Novo bot" (o em branco é o escolhido por padrão). O teste
+		// deste pacote confere o JSON de todos os pontos de partida.
+		Perguntas: []Pergunta{},
 	},
 	{
 		ID:        "plano-saude-empresarial",
