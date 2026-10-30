@@ -22,14 +22,13 @@ import (
 //
 // O que esta camada garante, independente do que o modelo faça:
 //
-//   - **nada sai sem as duas chaves ligadas** (a do servidor e a do bot). Desligadas, a resposta
-//     é composta e gravada como `cancelada` com o motivo: é o modo ensaio, e é assim que se vê o
-//     que o bot diria sem mandar nada a ninguém;
+//   - **bot desligado não responde** (é o único interruptor do serviço);
 //   - **teto de tokens por conversa** e **teto de respostas por hora por bot**: o primeiro
 //     encerra a conversa, o segundo cancela a resposta. Conversa automática dos dois lados é um
 //     laço infinito à espera de acontecer, e o número é o que paga a conta;
-//   - **a etapa só avança quando os campos obrigatórios estão coletados** — quem confere é
-//     `atendimento.CamposPendentes`, não o modelo.
+//   - **a próxima pergunta é a primeira sem resposta** — calculada por `atendimento.Proxima`, e
+//     não um estado que a conversa guarda. O modelo não decide quando "avançar": ele registra o
+//     que a pessoa disse, e a lista anda sozinha.
 
 const (
 	// Histórico que vai para o modelo. Conversa de WhatsApp é curta; mais que isto é custo sem
@@ -47,13 +46,15 @@ const (
 
 // resultadoAtendimento é o que aconteceu com uma mensagem recebida.
 type resultadoAtendimento struct {
-	ConversaID  int64   `json:"conversa_id"`
-	MensagemID  *int64  `json:"mensagem_id,omitempty"`
-	Status      string  `json:"status"` // pendente | cancelada | sem_resposta
-	Motivo      string  `json:"motivo,omitempty"`
-	Encerrada   bool    `json:"encerrada"`
-	EtapaAtual  *string `json:"etapa_atual,omitempty"`
-	TokensGasto int32   `json:"tokens_gasto"`
+	ConversaID int64  `json:"conversa_id"`
+	MensagemID *int64 `json:"mensagem_id,omitempty"`
+	Status     string `json:"status"` // pendente | cancelada | sem_resposta
+	Motivo     string `json:"motivo,omitempty"`
+	Encerrada  bool   `json:"encerrada"`
+	// A pergunta da vez depois desta resposta (nil quando acabaram, ou quando o bot não tem
+	// perguntas). Serve ao log do worker e aos testes.
+	PerguntaAtual *string `json:"pergunta_atual,omitempty"`
+	TokensGasto   int32   `json:"tokens_gasto"`
 }
 
 // sessaoBot junta o que as ferramentas precisam mexer durante uma resposta. As ferramentas
@@ -63,72 +64,70 @@ type sessaoBot struct {
 	s        *Servidor
 	bot      db.AtendimentoBot
 	conversa db.AtendimentoConversa
-	etapas   []db.AtendimentoEtapa
-	// Índice da etapa atual em `etapas`; -1 quando a conversa não está em etapa nenhuma.
-	indice   int
-	coletado map[string]string
+	// As perguntas do bot, na ordem, e o que já foi respondido nesta conversa.
+	perguntas  []db.AtendimentoPergunta
+	respondido map[string]string
 
-	avancou  bool
 	encerrou bool
 	motivo   string
 }
 
-// etapaAtual devolve a etapa da conversa, ou nil quando o bot não tem fluxo (ou ele acabou).
-func (z *sessaoBot) etapaAtual() *db.AtendimentoEtapa {
-	if z.indice < 0 || z.indice >= len(z.etapas) {
-		return nil
+// paraPrompt traduz as perguntas do banco no que o pacote atendimento precisa, já com o que foi
+// respondido. Devolve também o que foi registrado e não casa com pergunta nenhuma (o modelo
+// anotou algo a mais, ou a pergunta foi tirada depois).
+func (z *sessaoBot) paraPrompt() ([]atendimento.PerguntaPrompt, map[string]string) {
+	lista := make([]atendimento.PerguntaPrompt, 0, len(z.perguntas))
+	daLista := make(map[string]bool, len(z.perguntas))
+	for _, q := range z.perguntas {
+		daLista[q.Campo] = true
+		lista = append(lista, atendimento.PerguntaPrompt{
+			Texto: q.Texto, Campo: q.Campo, Orientacao: q.Orientacao,
+			Obrigatoria: q.Obrigatoria, Resposta: z.respondido[q.Campo],
+		})
 	}
-	return &z.etapas[z.indice]
-}
-
-// paraPrompt traduz a etapa do banco no que o pacote atendimento precisa para montar o texto.
-func (z *sessaoBot) paraPrompt() (*atendimento.EtapaPrompt, error) {
-	e := z.etapaAtual()
-	if e == nil {
-		return nil, nil
-	}
-	campos := []atendimento.Campo{}
-	if len(e.Campos) > 0 {
-		if err := json.Unmarshal(e.Campos, &campos); err != nil {
-			return nil, fmt.Errorf("campos da etapa %d: %w", e.ID, err)
+	extras := map[string]string{}
+	for campo, valor := range z.respondido {
+		if !daLista[campo] {
+			extras[campo] = valor
 		}
 	}
-	return &atendimento.EtapaPrompt{
-		Nome: e.Nome, Objetivo: e.Objetivo, Instrucoes: e.Instrucoes, Campos: campos,
-		Posicao: z.indice + 1, Total: len(z.etapas),
-	}, nil
+	return lista, extras
 }
 
-// ferramentas do bot. São três de propósito: coletar, avançar e encerrar. Nenhuma delas fala com
-// o mundo (nada de mandar e-mail, criar cliente ou consultar outro serviço) — o que sai desta
-// conversa é texto para a pessoa e dado no banco, e a etapa E decide o que fazer com o dado.
+// perguntaPorCampo acha a pergunta de um campo, para a coleta apontar para ela.
+func (z *sessaoBot) perguntaPorCampo(campo string) *db.AtendimentoPergunta {
+	for i := range z.perguntas {
+		if z.perguntas[i].Campo == campo {
+			return &z.perguntas[i]
+		}
+	}
+	return nil
+}
+
+// ferramentas do bot. São **duas**: registrar uma resposta e encerrar. Nenhuma delas fala com o
+// mundo (nada de mandar e-mail, criar cliente ou consultar outro serviço) — o que sai desta
+// conversa é texto para a pessoa e dado no banco, e o lead decide o que fazer com o dado.
+//
+// A terceira ferramenta (`avancar_etapa`) deixou de existir em 29/10/2026, quando as etapas
+// viraram perguntas na ordem: não há o que avançar, a próxima pergunta é a primeira sem resposta.
 func (z *sessaoBot) ferramentas(ctx context.Context) []assistente.Ferramenta {
 	return []assistente.Ferramenta{
 		{
-			Nome: "registrar_dado",
-			Descricao: "Guarda um dado que a pessoa informou. Chame assim que ela disser, uma vez por dado. " +
-				"Use só os identificadores de campo listados nas instruções da etapa.",
+			Nome: "registrar_resposta",
+			Descricao: "Guarda o que a pessoa informou. Chame assim que ela disser, uma vez por dado. " +
+				"Use os nomes de dado listados nas perguntas do atendimento.",
 			Parametros: map[string]any{
-				"campo": map[string]any{"type": "string", "description": "O identificador do campo, como está nas instruções da etapa."},
+				"campo": map[string]any{"type": "string", "description": "O nome do dado, como está entre colchetes na lista de perguntas."},
 				"valor": map[string]any{"type": "string", "description": "O que a pessoa informou, em texto, sem reformatar."},
 			},
 			Obrigatorio: []string{"campo", "valor"},
 			Rotulo:      "Registrando o que a pessoa informou",
-			Executar:    z.registrarDado,
-		},
-		{
-			Nome: "avancar_etapa",
-			Descricao: "Passa para a próxima etapa do atendimento. Só funciona quando os campos obrigatórios " +
-				"da etapa atual já foram registrados; se faltar algum, a resposta diz quais.",
-			Parametros:  map[string]any{},
-			Obrigatorio: nil,
-			Rotulo:      "Avançando o atendimento",
-			Executar:    z.avancarEtapa,
+			Executar:    z.registrarResposta,
 		},
 		{
 			Nome: "encerrar",
-			Descricao: "Encerra o atendimento. Use quando o fluxo terminou, quando a pessoa desistiu, quando " +
-				"ela pediu para falar com uma pessoa da equipe, ou quando o assunto não é o seu.",
+			Descricao: "Encerra o atendimento. Use quando as perguntas terminaram, quando a pessoa desistiu, " +
+				"quando ela pediu para falar com uma pessoa da equipe, ou quando o assunto não é o seu.",
 			Parametros: map[string]any{
 				"motivo": map[string]any{
 					"type": "string", "enum": atendimento.MotivosEncerramento,
@@ -142,7 +141,7 @@ func (z *sessaoBot) ferramentas(ctx context.Context) []assistente.Ferramenta {
 	}
 }
 
-func (z *sessaoBot) registrarDado(ctx context.Context, entrada json.RawMessage) (string, error) {
+func (z *sessaoBot) registrarResposta(ctx context.Context, entrada json.RawMessage) (string, error) {
 	var p struct {
 		Campo string `json:"campo"`
 		Valor string `json:"valor"`
@@ -155,66 +154,37 @@ func (z *sessaoBot) registrarDado(ctx context.Context, entrada json.RawMessage) 
 	if campo == "" || valor == "" {
 		return "", errors.New("campo e valor são obrigatórios")
 	}
-	// Campo de fora da etapa é recusado: o modelo inventaria chave e a tela mostraria dado que
-	// ninguém pediu. A mensagem diz o que vale, e o modelo corrige sozinho.
-	prompt, err := z.paraPrompt()
-	if err != nil {
-		return "", err
-	}
-	if prompt != nil {
-		conhecido := false
-		nomes := make([]string, 0, len(prompt.Campos))
-		for _, c := range prompt.Campos {
-			nomes = append(nomes, c.ID)
-			if c.ID == campo {
-				conhecido = true
-			}
+	// Campo que não é de pergunta nenhuma é recusado quando o bot TEM perguntas: senão o modelo
+	// inventaria chave e a tela mostraria dado que ninguém pediu. A mensagem diz o que vale, e o
+	// modelo corrige sozinho. Bot sem perguntas aceita qualquer campo — ali o dado solto é o
+	// único jeito de anotar algo.
+	pergunta := z.perguntaPorCampo(campo)
+	if pergunta == nil && len(z.perguntas) > 0 {
+		nomes := make([]string, 0, len(z.perguntas))
+		for _, q := range z.perguntas {
+			nomes = append(nomes, q.Campo)
 		}
-		if !conhecido {
-			return "", fmt.Errorf("campo %q não existe nesta etapa (os desta etapa são: %s)", campo, strings.Join(nomes, ", "))
-		}
+		return "", fmt.Errorf("dado %q não existe neste atendimento (os dados são: %s)", campo, strings.Join(nomes, ", "))
 	}
-	var etapaID *int64
-	if e := z.etapaAtual(); e != nil {
-		etapaID = &e.ID
+	var perguntaID *int64
+	if pergunta != nil {
+		perguntaID = &pergunta.ID
 	}
-	if err := z.s.q.SalvarColeta(ctx, db.SalvarColetaParams{
-		ConversaID: z.conversa.ID, EtapaID: etapaID, Campo: campo, Valor: valor,
+	if err := z.s.q.SalvarResposta(ctx, db.SalvarRespostaParams{
+		ConversaID: z.conversa.ID, PerguntaID: perguntaID, Campo: campo, Valor: valor,
 	}); err != nil {
 		return "", err
 	}
-	z.coletado[campo] = valor
-	faltam := atendimento.CamposPendentes(prompt, z.coletado)
-	if len(faltam) > 0 {
+	z.respondido[campo] = valor
+
+	lista, _ := z.paraPrompt()
+	if proxima := atendimento.Proxima(lista); proxima != nil {
+		return fmt.Sprintf(`{"ok":true,"proxima_pergunta":%q}`, proxima.Texto), nil
+	}
+	if faltam := atendimento.Pendentes(lista); len(faltam) > 0 {
 		return fmt.Sprintf(`{"ok":true,"ainda_faltam":%q}`, strings.Join(faltam, ", ")), nil
 	}
-	return `{"ok":true,"etapa_completa":true}`, nil
-}
-
-func (z *sessaoBot) avancarEtapa(ctx context.Context, _ json.RawMessage) (string, error) {
-	prompt, err := z.paraPrompt()
-	if err != nil {
-		return "", err
-	}
-	if faltam := atendimento.CamposPendentes(prompt, z.coletado); len(faltam) > 0 {
-		// Não é erro de sistema: é o modelo tentando correr. A mensagem volta para ele e a
-		// conversa continua na mesma etapa.
-		return "", fmt.Errorf("ainda faltam estes dados obrigatórios: %s", strings.Join(faltam, ", "))
-	}
-	if z.indice < 0 || z.indice+1 >= len(z.etapas) {
-		// Última etapa: avançar é terminar.
-		z.encerrou, z.motivo = true, "concluido"
-		return `{"ok":true,"fim_do_fluxo":true}`, nil
-	}
-	z.indice++
-	z.avancou = true
-	nova := z.etapas[z.indice]
-	if _, err := z.s.q.DefinirEtapaDaConversa(ctx, db.DefinirEtapaDaConversaParams{
-		ID: z.conversa.ID, EtapaID: &nova.ID,
-	}); err != nil {
-		return "", err
-	}
-	return fmt.Sprintf(`{"ok":true,"etapa":%q,"objetivo":%q}`, nova.Nome, nova.Objetivo), nil
+	return `{"ok":true,"todas_respondidas":true}`, nil
 }
 
 func (z *sessaoBot) encerrar(_ context.Context, entrada json.RawMessage) (string, error) {
@@ -246,16 +216,12 @@ func (s *Servidor) responderAtendimento(ctx context.Context, bot db.AtendimentoB
 		return resultadoAtendimento{Status: "sem_resposta", Motivo: "o bot está desligado"}, nil
 	}
 
-	etapas, err := s.q.ListarEtapasDoBot(ctx, bot.ID)
+	perguntas, err := s.q.ListarPerguntasDoBot(ctx, bot.ID)
 	if err != nil {
 		return resultadoAtendimento{}, err
 	}
-	var primeira *int64
-	if len(etapas) > 0 {
-		primeira = &etapas[0].ID
-	}
 	conversa, err := s.q.AbrirOuContinuarConversa(ctx, db.AbrirOuContinuarConversaParams{
-		BotID: bot.ID, Telefone: telefone, ContatoNome: textoOuNil(contato), EtapaID: primeira,
+		BotID: bot.ID, Telefone: telefone, ContatoNome: textoOuNil(contato),
 	})
 	if err != nil {
 		return resultadoAtendimento{}, err
@@ -283,23 +249,15 @@ func (s *Servidor) responderAtendimento(ctx context.Context, bot db.AtendimentoB
 		return res, nil
 	}
 
-	z := &sessaoBot{s: s, bot: bot, conversa: conversa, etapas: etapas, indice: -1, coletado: map[string]string{}}
-	for i, e := range etapas {
-		if conversa.EtapaID != nil && e.ID == *conversa.EtapaID {
-			z.indice = i
-		}
-	}
-	coletas, err := s.q.ColetasDaConversa(ctx, conversa.ID)
+	z := &sessaoBot{s: s, bot: bot, conversa: conversa, perguntas: perguntas, respondido: map[string]string{}}
+	respostas, err := s.q.ColetasDaConversa(ctx, conversa.ID)
 	if err != nil {
 		return res, err
 	}
-	for _, c := range coletas {
-		z.coletado[c.Campo] = c.Valor
+	for _, r := range respostas {
+		z.respondido[r.Campo] = r.Valor
 	}
-	prompt, err := z.paraPrompt()
-	if err != nil {
-		return res, err
-	}
+	lista, extras := z.paraPrompt()
 	historico, err := s.historicoParaModelo(ctx, conversa.ID)
 	if err != nil {
 		return res, err
@@ -308,7 +266,7 @@ func (s *Servidor) responderAtendimento(ctx context.Context, bot db.AtendimentoB
 	agente := &assistente.Agente{
 		Modelo: s.cfg.ModeloAtendimento(bot.Modelo),
 		Instrucoes: atendimento.Prompt(
-			atendimento.BotPrompt{Nome: bot.Nome, Instrucoes: bot.Instrucoes}, prompt, z.coletado),
+			atendimento.BotPrompt{Nome: bot.Nome, Instrucoes: bot.Instrucoes}, lista, extras),
 		Contexto:    atendimento.Contexto(s.agora(), valorOuVazio(conversa.ContatoNome)),
 		Ferramentas: z.ferramentas(ctx),
 	}
@@ -333,9 +291,12 @@ func (s *Servidor) responderAtendimento(ctx context.Context, bot db.AtendimentoB
 		return res, err
 	}
 
-	if e := z.etapaAtual(); e != nil {
-		nome := e.Nome
-		res.EtapaAtual = &nome
+	// A pergunta da vez, depois do que esta resposta registrou.
+	if depois, _ := z.paraPrompt(); true {
+		if proxima := atendimento.Proxima(depois); proxima != nil {
+			texto := proxima.Texto
+			res.PerguntaAtual = &texto
+		}
 	}
 
 	textoResposta := strings.TrimSpace(resposta.String())

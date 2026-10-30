@@ -138,7 +138,7 @@ export default function PaginaPainelAtendimento() {
                       {b.nome}
                     </Link>
                     <p className="mt-0.5 text-xs text-muted-foreground">
-                      {b.etapas ?? 0} etapa(s) · {b.conversas_abertas ?? 0} conversa(s) aberta(s)
+                      {b.perguntas ?? 0} pergunta(s) · {b.conversas_abertas ?? 0} conversa(s) aberta(s)
                     </p>
                   </div>
                   <span className="flex items-center gap-2">

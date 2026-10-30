@@ -186,8 +186,9 @@ derrube o container (`docker compose stop atendimento-whatsapp`). O que existe d
 botão, são os **tetos** de cada bot (tokens por conversa, respostas por hora).
 
 1. **Criar o bot** (admin ou operador): `https://app.<domínio>/atendimento/bots` → "Novo bot".
-   Escreva as instruções (o que ele pode responder e o que não pode) e monte o fluxo em
-   Atendimento → Bots → *o bot* → **O fluxo**. Ele nasce **desligado**.
+   Escolha um **ponto de partida** (em branco, plano de saúde empresarial, consórcio ou
+   qualificação genérica), ajuste as instruções e confira **as perguntas** em Atendimento → Bots →
+   *o bot*. Ele nasce **desligado**.
 2. **Parear antes de ligar**: deixe o bot desligado e pareie o número (passo 3). Com ele
    desligado, nada é respondido — e a mensagem de teste (passo 4) continua funcionando.
 3. **Parear o número** (admin): Atendimento → **Conexões** → o cartão daquele bot mostra o QR.

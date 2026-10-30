@@ -61,11 +61,11 @@ func conversaDeTeste(t *testing.T, s *Servidor, bot db.AtendimentoBot, telefone,
 
 func TestAtendimentoResumoDoPainel(t *testing.T) {
 	m := &modeloRoteiroBot{turnos: []turnoBot{
-		{ferramenta: "registrar_dado", entrada: `{"campo":"interesse","valor":"apartamento"}`},
+		{ferramenta: "registrar_resposta", entrada: `{"campo":"nome_da_empresa","valor":"Acme Ltda"}`},
 		{texto: "Em qual bairro?"},
 	}}
 	s := servidorComBot(t, m)
-	bot := botComFluxo(t, s, "resumo", true)
+	bot := botComPerguntas(t, s, "resumo", true)
 	conversaDeTeste(t, s, bot, "5511900010001", "Fulano", "quero um ap")
 
 	rec := pegar(t, s, db.PerfilUsuarioLeitura, "/atendimento/resumo")
@@ -133,7 +133,7 @@ func TestAtendimentoResumoSemChaveDaAnthropic(t *testing.T) {
 func TestAtendimentoListarConversas(t *testing.T) {
 	m := &modeloRoteiroBot{turnos: []turnoBot{{texto: "Oi! Como ajudo?"}, {texto: "Certo!"}}}
 	s := servidorComBot(t, m)
-	bot := botComFluxo(t, s, "lista", true)
+	bot := botComPerguntas(t, s, "lista", true)
 	conversaDeTeste(t, s, bot, "5511900020001", "Ana", "bom dia")
 	conversaDeTeste(t, s, bot, "5511900020002", "", "oi")
 
@@ -190,7 +190,7 @@ func TestAtendimentoListarConversas(t *testing.T) {
 func TestAtendimentoConversaNaoEDeLeitura(t *testing.T) {
 	m := &modeloRoteiroBot{turnos: []turnoBot{{texto: "Oi!"}}}
 	s := servidorComBot(t, m)
-	bot := botComFluxo(t, s, "privacidade", true)
+	bot := botComPerguntas(t, s, "privacidade", true)
 	c := conversaDeTeste(t, s, bot, "5511900030001", "Bruno", "oi")
 
 	for _, caminho := range []string{"/atendimento/conversas", "/atendimento/conversas/" + idTexto(c.ConversaID)} {
@@ -205,11 +205,11 @@ func TestAtendimentoConversaNaoEDeLeitura(t *testing.T) {
 
 func TestAtendimentoConversaDetalhada(t *testing.T) {
 	m := &modeloRoteiroBot{turnos: []turnoBot{
-		{ferramenta: "registrar_dado", entrada: `{"campo":"interesse","valor":"kitnet no centro"}`},
+		{ferramenta: "registrar_resposta", entrada: `{"campo":"nome_da_empresa","valor":"Acme Ltda"}`},
 		{texto: "Anotado! Qual seu telefone?"},
 	}}
 	s := servidorComBot(t, m)
-	bot := botComFluxo(t, s, "detalhe", true)
+	bot := botComPerguntas(t, s, "detalhe", true)
 	c := conversaDeTeste(t, s, bot, "5511900040001", "Carla", "procuro uma kitnet no centro")
 
 	rec := pegar(t, s, db.PerfilUsuarioAdmin, "/atendimento/conversas/"+idTexto(c.ConversaID))
@@ -218,13 +218,13 @@ func TestAtendimentoConversaDetalhada(t *testing.T) {
 	}
 	var res struct {
 		Conversa struct {
-			ID          int64   `json:"id"`
-			BotNome     string  `json:"bot_nome"`
-			Telefone    string  `json:"telefone"`
-			ContatoNome *string `json:"contato_nome"`
-			Status      string  `json:"status"`
-			EtapaNome   *string `json:"etapa_nome"`
-			EtapasDoBot int64   `json:"etapas_do_bot"`
+			ID             int64   `json:"id"`
+			BotNome        string  `json:"bot_nome"`
+			Telefone       string  `json:"telefone"`
+			ContatoNome    *string `json:"contato_nome"`
+			Status         string  `json:"status"`
+			PerguntasDoBot int64   `json:"perguntas_do_bot"`
+			Respostas      int64   `json:"respostas"`
 		} `json:"conversa"`
 		Mensagens []struct {
 			Direcao string  `json:"direcao"`
@@ -233,18 +233,18 @@ func TestAtendimentoConversaDetalhada(t *testing.T) {
 			Motivo  *string `json:"motivo"`
 		} `json:"mensagens"`
 		Dados []struct {
-			Campo     string  `json:"campo"`
-			Valor     string  `json:"valor"`
-			EtapaNome *string `json:"etapa_nome"`
+			Campo    string  `json:"campo"`
+			Valor    string  `json:"valor"`
+			Pergunta *string `json:"pergunta"`
 		} `json:"dados"`
 	}
 	decodificarEm(t, rec, &res)
 
-	if res.Conversa.Telefone != "5511900040001" || res.Conversa.EtapasDoBot != 2 {
+	if res.Conversa.Telefone != "5511900040001" || res.Conversa.PerguntasDoBot != 2 {
 		t.Errorf("o cabeçalho da conversa está errado: %+v", res.Conversa)
 	}
-	if res.Conversa.EtapaNome == nil || *res.Conversa.EtapaNome != "Interesse" {
-		t.Errorf("a etapa atual devia vir pelo nome: %+v", res.Conversa.EtapaNome)
+	if res.Conversa.Respostas != 1 {
+		t.Errorf("uma resposta foi registrada: %+v", res.Conversa)
 	}
 	// As duas pontas da conversa, na ordem: o que a pessoa disse e o que o bot respondeu.
 	if len(res.Mensagens) != 2 || res.Mensagens[0].Direcao != "recebida" || res.Mensagens[1].Direcao != "enviada" {
@@ -253,11 +253,12 @@ func TestAtendimentoConversaDetalhada(t *testing.T) {
 	if res.Mensagens[0].Texto != "procuro uma kitnet no centro" {
 		t.Errorf("o texto de quem escreveu precisa aparecer igual: %q", res.Mensagens[0].Texto)
 	}
-	if len(res.Dados) != 1 || res.Dados[0].Campo != "interesse" || res.Dados[0].Valor != "kitnet no centro" {
-		t.Errorf("o dado coletado devia vir com a etapa: %+v", res.Dados)
+	if len(res.Dados) != 1 || res.Dados[0].Campo != "nome_da_empresa" || res.Dados[0].Valor != "Acme Ltda" {
+		t.Errorf("a resposta devia vir na lista: %+v", res.Dados)
 	}
-	if res.Dados[0].EtapaNome == nil || *res.Dados[0].EtapaNome != "Interesse" {
-		t.Errorf("a etapa em que o dado apareceu devia vir: %+v", res.Dados[0].EtapaNome)
+	// A resposta vem com a pergunta que a originou: é o que a tela mostra ao lado do valor.
+	if res.Dados[0].Pergunta == nil || *res.Dados[0].Pergunta != "Qual é o nome da empresa?" {
+		t.Errorf("a pergunta que originou a resposta devia vir: %+v", res.Dados[0].Pergunta)
 	}
 	if rec := pegar(t, s, db.PerfilUsuarioAdmin, "/atendimento/conversas/999999"); rec.Code != http.StatusNotFound {
 		t.Errorf("conversa que não existe devia dar 404, veio %d", rec.Code)
@@ -269,7 +270,7 @@ func TestAtendimentoConversaDetalhada(t *testing.T) {
 func TestAtendimentoConversaMostraOQueNaoSaiu(t *testing.T) {
 	m := &modeloRoteiroBot{turnos: []turnoBot{{texto: "Primeira resposta."}, {texto: "Segunda resposta."}}}
 	s := servidorComBot(t, m)
-	bot := botComFluxo(t, s, "nao-saiu", true)
+	bot := botComPerguntas(t, s, "nao-saiu", true)
 	s.exec(t, "UPDATE atendimento.bots SET max_mensagens_hora = 1 WHERE id = $1", bot.ID)
 	bot, _ = s.q.BuscarBot(context.Background(), bot.ID)
 

@@ -113,7 +113,7 @@ func (s *Servidor) listarConversas(w http.ResponseWriter, r *http.Request, _ *Us
 		ContatoNome   *string    `json:"contato_nome"`
 		Status        string     `json:"status"`
 		Motivo        *string    `json:"motivo"`
-		EtapaNome     *string    `json:"etapa_nome"`
+		Respostas     int64      `json:"respostas"`
 		Mensagens     int64      `json:"mensagens"`
 		Dados         int64      `json:"dados"`
 		UltimoTexto   string     `json:"ultimo_texto"`
@@ -128,7 +128,7 @@ func (s *Servidor) listarConversas(w http.ResponseWriter, r *http.Request, _ *Us
 		conversas = append(conversas, conversaJSON{
 			ID: l.ID, BotID: l.BotID, BotNome: l.BotNome, BotSlug: l.BotSlug,
 			Telefone: l.Telefone, ContatoNome: l.ContatoNome, Status: l.Status, Motivo: l.Motivo,
-			EtapaNome: l.EtapaNome, Mensagens: l.Mensagens, Dados: l.Dados,
+			Respostas: l.Dados, Mensagens: l.Mensagens, Dados: l.Dados,
 			UltimoTexto: l.UltimoTexto, UltimaDirecao: l.UltimaDirecao,
 			Tokens:     l.TokensEntrada + l.TokensSaida,
 			IniciadaEm: l.IniciadaEm, UltimaEm: l.UltimaEm, EncerradaEm: l.EncerradaEm,
@@ -185,16 +185,17 @@ func (s *Servidor) buscarConversa(w http.ResponseWriter, r *http.Request, _ *Usu
 		})
 	}
 	type dadoJSON struct {
-		Campo        string    `json:"campo"`
-		Valor        string    `json:"valor"`
-		EtapaNome    *string   `json:"etapa_nome"`
+		Campo string `json:"campo"`
+		Valor string `json:"valor"`
+		// A pergunta que originou a resposta; nula quando a pessoa contou algo sem ser perguntada.
+		Pergunta     *string   `json:"pergunta"`
 		CriadoEm     time.Time `json:"criado_em"`
 		AtualizadoEm time.Time `json:"atualizado_em"`
 	}
 	coletados := make([]dadoJSON, 0, len(dados))
 	for _, d := range dados {
 		coletados = append(coletados, dadoJSON{
-			Campo: d.Campo, Valor: d.Valor, EtapaNome: d.EtapaNome,
+			Campo: d.Campo, Valor: d.Valor, Pergunta: d.PerguntaTexto,
 			CriadoEm: d.CriadoEm, AtualizadoEm: d.AtualizadoEm,
 		})
 	}
@@ -214,7 +215,7 @@ func (s *Servidor) buscarConversa(w http.ResponseWriter, r *http.Request, _ *Usu
 			"id": c.ID, "bot_id": c.BotID, "bot_nome": c.BotNome, "bot_slug": c.BotSlug,
 			"telefone": c.Telefone, "contato_nome": c.ContatoNome,
 			"status": c.Status, "motivo": c.Motivo,
-			"etapa_nome": c.EtapaNome, "etapa_ordem": c.EtapaOrdem, "etapas_do_bot": c.EtapasDoBot,
+			"perguntas_do_bot": c.PerguntasDoBot, "respostas": c.Respostas,
 			"tokens_entrada": c.TokensEntrada, "tokens_saida": c.TokensSaida,
 			"iniciada_em": c.IniciadaEm, "ultima_em": c.UltimaEm, "encerrada_em": c.EncerradaEm,
 		},

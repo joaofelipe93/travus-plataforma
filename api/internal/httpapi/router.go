@@ -216,12 +216,13 @@ func (s *Servidor) Rotas() http.Handler {
 	// um. Todo perfil enxerga; admin e operador mexem. `envio_habilitado` — o que autoriza a
 	// plataforma a falar com cliente de verdade — é **só admin**, como aprovar lance real.
 	mux.Handle("GET /atendimento/modelos", s.autenticado(s.listarModelosAtendimento))
+	mux.Handle("GET /atendimento/pontos-de-partida", s.autenticado(s.listarPontosDePartida))
 	mux.Handle("GET /atendimento/bots", s.autenticado(s.listarBots))
 	mux.Handle("POST /atendimento/bots", s.autenticado(exigirPerfil(s.criarBot, editores...)))
 	mux.Handle("GET /atendimento/bots/{id}", s.autenticado(s.buscarBot))
 	mux.Handle("PUT /atendimento/bots/{id}", s.autenticado(exigirPerfil(s.atualizarBot, editores...)))
 	mux.Handle("DELETE /atendimento/bots/{id}", s.autenticado(exigirPerfil(s.excluirBot, editores...)))
-	mux.Handle("PUT /atendimento/bots/{id}/etapas", s.autenticado(exigirPerfil(s.definirEtapasDoBot, editores...)))
+	mux.Handle("PUT /atendimento/bots/{id}/perguntas", s.autenticado(exigirPerfil(s.definirPerguntasDoBot, editores...)))
 	// Etapa D: Conexões do Atendimento. Só admin: quem vê o QR pareia um aparelho na conta do
 	// WhatsApp daquele bot, e a mensagem de teste sai para um telefone de verdade.
 	mux.Handle("GET /atendimento/whatsapp", s.autenticado(exigirPerfil(s.situacaoWhatsappAtendimento, admins...)))

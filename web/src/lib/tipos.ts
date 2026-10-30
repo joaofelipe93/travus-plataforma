@@ -633,20 +633,27 @@ export type ModeloBot = {
   descricao: string;
 };
 
-// Um dado que uma etapa quer coletar. O `id` é o que o bot usa ao registrar.
-export type CampoEtapa = {
-  id: string;
-  rotulo: string;
-  obrigatorio: boolean;
-};
-
-export type EtapaBot = {
+// Uma pergunta do atendimento. O bot faz uma por vez, na ordem, com as palavras dele — o texto
+// aqui é o que ele precisa descobrir, não a frase que vai enviar.
+export type PerguntaBot = {
   id: number;
   ordem: number;
+  texto: string;
+  // Onde a resposta é guardada: vira campo do lead.
+  campo: string;
+  orientacao: string | null;
+  obrigatoria: boolean;
+};
+
+// Um bot pré-escrito que a tela oferece em "Novo bot" (a Travus tem vários segmentos, então é
+// catálogo, não padrão).
+export type PontoDePartida = {
+  id: string;
   nome: string;
-  objetivo: string;
-  instrucoes: string | null;
-  campos: CampoEtapa[];
+  descricao: string;
+  instrucoes: string;
+  saudacao: string;
+  perguntas: { texto: string; campo: string; orientacao: string | null; obrigatoria: boolean }[];
 };
 
 export type Bot = {
@@ -663,13 +670,13 @@ export type Bot = {
   criado_em: string;
   atualizado_em: string;
   // Só na lista.
-  etapas?: number;
+  perguntas?: number;
   conversas_abertas?: number;
 };
 
 export type DetalheBot = {
   bot: Bot;
-  etapas: EtapaBot[];
+  perguntas: PerguntaBot[];
   conversas: { total: number; abertas: number };
 };
 
@@ -685,7 +692,6 @@ export type ConversaResumo = {
   contato_nome: string | null;
   status: StatusConversa;
   motivo: string | null;
-  etapa_nome: string | null;
   mensagens: number;
   dados: number;
   ultimo_texto: string;
@@ -711,7 +717,8 @@ export type MensagemBot = {
 export type DadoColetado = {
   campo: string;
   valor: string;
-  etapa_nome: string | null;
+  // A pergunta que originou a resposta; nula quando a pessoa contou sem ser perguntada.
+  pergunta: string | null;
   criado_em: string;
   atualizado_em: string;
 };
@@ -728,9 +735,8 @@ export type DetalheConversa = {
     contato_nome: string | null;
     status: StatusConversa;
     motivo: string | null;
-    etapa_nome: string | null;
-    etapa_ordem: number | null;
-    etapas_do_bot: number;
+    perguntas_do_bot: number;
+    respostas: number;
     tokens_entrada: number;
     tokens_saida: number;
     iniciada_em: string;

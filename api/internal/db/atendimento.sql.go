@@ -12,19 +12,18 @@ import (
 
 const abrirOuContinuarConversa = `-- name: AbrirOuContinuarConversa :one
 
-INSERT INTO atendimento.conversas (bot_id, telefone, contato_nome, etapa_id)
-VALUES ($1, $2, $3, $4)
+INSERT INTO atendimento.conversas (bot_id, telefone, contato_nome)
+VALUES ($1, $2, $3)
 ON CONFLICT (bot_id, telefone) WHERE status = 'aberta' DO UPDATE SET
     contato_nome = coalesce(EXCLUDED.contato_nome, atendimento.conversas.contato_nome),
     ultima_em    = now()
-RETURNING id, bot_id, telefone, contato_nome, etapa_id, status, motivo, tokens_entrada, tokens_saida, iniciada_em, ultima_em, encerrada_em
+RETURNING id, bot_id, telefone, contato_nome, status, motivo, tokens_entrada, tokens_saida, iniciada_em, ultima_em, encerrada_em
 `
 
 type AbrirOuContinuarConversaParams struct {
 	BotID       int64
 	Telefone    string
 	ContatoNome *string
-	EtapaID     *int64
 }
 
 // ===== Etapa B: a conversa =====
@@ -33,19 +32,13 @@ type AbrirOuContinuarConversaParams struct {
 // Abre a conversa ou continua a que está aberta (o índice parcial garante uma por telefone em
 // cada bot). O nome do contato é atualizado quando vem, e não se apaga quando não vem.
 func (q *Queries) AbrirOuContinuarConversa(ctx context.Context, arg AbrirOuContinuarConversaParams) (AtendimentoConversa, error) {
-	row := q.db.QueryRow(ctx, abrirOuContinuarConversa,
-		arg.BotID,
-		arg.Telefone,
-		arg.ContatoNome,
-		arg.EtapaID,
-	)
+	row := q.db.QueryRow(ctx, abrirOuContinuarConversa, arg.BotID, arg.Telefone, arg.ContatoNome)
 	var i AtendimentoConversa
 	err := row.Scan(
 		&i.ID,
 		&i.BotID,
 		&i.Telefone,
 		&i.ContatoNome,
-		&i.EtapaID,
 		&i.Status,
 		&i.Motivo,
 		&i.TokensEntrada,
@@ -57,16 +50,16 @@ func (q *Queries) AbrirOuContinuarConversa(ctx context.Context, arg AbrirOuConti
 	return i, err
 }
 
-const apagarEtapasDoBot = `-- name: ApagarEtapasDoBot :exec
-DELETE FROM atendimento.etapas WHERE bot_id = $1
+const apagarPerguntasDoBot = `-- name: ApagarPerguntasDoBot :exec
+DELETE FROM atendimento.perguntas WHERE bot_id = $1
 `
 
-// O fluxo é gravado inteiro de uma vez, numa transação: apaga e recria na ordem que a tela
-// mandou. É mais simples e mais previsível que casar etapa por etapa, e a rota só deixa fazer
-// isso quando não há conversa aberta naquele bot — mudar o fluxo debaixo de uma conversa em
-// andamento deixaria a pessoa numa etapa que não existe mais.
-func (q *Queries) ApagarEtapasDoBot(ctx context.Context, botID int64) error {
-	_, err := q.db.Exec(ctx, apagarEtapasDoBot, botID)
+// As perguntas são gravadas inteiras de uma vez, numa transação: apaga e recria na ordem que a
+// tela mandou. É mais simples e mais previsível que casar pergunta por pergunta, e a rota só
+// deixa fazer isso quando não há conversa aberta naquele bot — trocar as perguntas debaixo de
+// uma conversa em andamento mudaria o que já foi perguntado.
+func (q *Queries) ApagarPerguntasDoBot(ctx context.Context, botID int64) error {
+	_, err := q.db.Exec(ctx, apagarPerguntasDoBot, botID)
 	return err
 }
 
@@ -270,33 +263,31 @@ func (q *Queries) BuscarBotPorSlug(ctx context.Context, slug string) (Atendiment
 
 const buscarConversa = `-- name: BuscarConversa :one
 SELECT c.id, c.bot_id, b.nome AS bot_nome, b.slug AS bot_slug, c.telefone, c.contato_nome,
-       c.status, c.motivo, c.etapa_id, e.nome AS etapa_nome, e.ordem AS etapa_ordem,
+       c.status, c.motivo,
        c.tokens_entrada, c.tokens_saida, c.iniciada_em, c.ultima_em, c.encerrada_em,
-       (SELECT count(*) FROM atendimento.etapas x WHERE x.bot_id = c.bot_id) AS etapas_do_bot
+       (SELECT count(*) FROM atendimento.perguntas x WHERE x.bot_id = c.bot_id)   AS perguntas_do_bot,
+       (SELECT count(*) FROM atendimento.coletas k WHERE k.conversa_id = c.id)    AS respostas
 FROM atendimento.conversas c
 JOIN atendimento.bots b ON b.id = c.bot_id
-LEFT JOIN atendimento.etapas e ON e.id = c.etapa_id
 WHERE c.id = $1
 `
 
 type BuscarConversaRow struct {
-	ID            int64
-	BotID         int64
-	BotNome       string
-	BotSlug       string
-	Telefone      string
-	ContatoNome   *string
-	Status        string
-	Motivo        *string
-	EtapaID       *int64
-	EtapaNome     *string
-	EtapaOrdem    *int32
-	TokensEntrada int32
-	TokensSaida   int32
-	IniciadaEm    time.Time
-	UltimaEm      time.Time
-	EncerradaEm   *time.Time
-	EtapasDoBot   int64
+	ID             int64
+	BotID          int64
+	BotNome        string
+	BotSlug        string
+	Telefone       string
+	ContatoNome    *string
+	Status         string
+	Motivo         *string
+	TokensEntrada  int32
+	TokensSaida    int32
+	IniciadaEm     time.Time
+	UltimaEm       time.Time
+	EncerradaEm    *time.Time
+	PerguntasDoBot int64
+	Respostas      int64
 }
 
 func (q *Queries) BuscarConversa(ctx context.Context, id int64) (BuscarConversaRow, error) {
@@ -311,36 +302,13 @@ func (q *Queries) BuscarConversa(ctx context.Context, id int64) (BuscarConversaR
 		&i.ContatoNome,
 		&i.Status,
 		&i.Motivo,
-		&i.EtapaID,
-		&i.EtapaNome,
-		&i.EtapaOrdem,
 		&i.TokensEntrada,
 		&i.TokensSaida,
 		&i.IniciadaEm,
 		&i.UltimaEm,
 		&i.EncerradaEm,
-		&i.EtapasDoBot,
-	)
-	return i, err
-}
-
-const buscarEtapa = `-- name: BuscarEtapa :one
-SELECT id, bot_id, ordem, nome, objetivo, instrucoes, campos, criado_em, atualizado_em FROM atendimento.etapas WHERE id = $1
-`
-
-func (q *Queries) BuscarEtapa(ctx context.Context, id int64) (AtendimentoEtapa, error) {
-	row := q.db.QueryRow(ctx, buscarEtapa, id)
-	var i AtendimentoEtapa
-	err := row.Scan(
-		&i.ID,
-		&i.BotID,
-		&i.Ordem,
-		&i.Nome,
-		&i.Objetivo,
-		&i.Instrucoes,
-		&i.Campos,
-		&i.CriadoEm,
-		&i.AtualizadoEm,
+		&i.PerguntasDoBot,
+		&i.Respostas,
 	)
 	return i, err
 }
@@ -584,45 +552,6 @@ func (q *Queries) CriarBot(ctx context.Context, arg CriarBotParams) (Atendimento
 	return i, err
 }
 
-const criarEtapa = `-- name: CriarEtapa :one
-INSERT INTO atendimento.etapas (bot_id, ordem, nome, objetivo, instrucoes, campos)
-VALUES ($1, $2, $3, $4, $5, $6)
-RETURNING id, bot_id, ordem, nome, objetivo, instrucoes, campos, criado_em, atualizado_em
-`
-
-type CriarEtapaParams struct {
-	BotID      int64
-	Ordem      int32
-	Nome       string
-	Objetivo   string
-	Instrucoes *string
-	Campos     []byte
-}
-
-func (q *Queries) CriarEtapa(ctx context.Context, arg CriarEtapaParams) (AtendimentoEtapa, error) {
-	row := q.db.QueryRow(ctx, criarEtapa,
-		arg.BotID,
-		arg.Ordem,
-		arg.Nome,
-		arg.Objetivo,
-		arg.Instrucoes,
-		arg.Campos,
-	)
-	var i AtendimentoEtapa
-	err := row.Scan(
-		&i.ID,
-		&i.BotID,
-		&i.Ordem,
-		&i.Nome,
-		&i.Objetivo,
-		&i.Instrucoes,
-		&i.Campos,
-		&i.CriadoEm,
-		&i.AtualizadoEm,
-	)
-	return i, err
-}
-
 const criarLeadDaConversa = `-- name: CriarLeadDaConversa :one
 
 INSERT INTO atendimento.leads (conversa_id, bot_id, nome, telefone, email, observacoes, dados)
@@ -676,22 +605,64 @@ func (q *Queries) CriarLeadDaConversa(ctx context.Context, arg CriarLeadDaConver
 	return i, err
 }
 
+const criarPergunta = `-- name: CriarPergunta :one
+INSERT INTO atendimento.perguntas (bot_id, ordem, texto, campo, orientacao, obrigatoria)
+VALUES ($1, $2, $3, $4, $5, $6)
+RETURNING id, bot_id, ordem, texto, campo, orientacao, obrigatoria, criado_em, atualizado_em
+`
+
+type CriarPerguntaParams struct {
+	BotID       int64
+	Ordem       int32
+	Texto       string
+	Campo       string
+	Orientacao  *string
+	Obrigatoria bool
+}
+
+func (q *Queries) CriarPergunta(ctx context.Context, arg CriarPerguntaParams) (AtendimentoPergunta, error) {
+	row := q.db.QueryRow(ctx, criarPergunta,
+		arg.BotID,
+		arg.Ordem,
+		arg.Texto,
+		arg.Campo,
+		arg.Orientacao,
+		arg.Obrigatoria,
+	)
+	var i AtendimentoPergunta
+	err := row.Scan(
+		&i.ID,
+		&i.BotID,
+		&i.Ordem,
+		&i.Texto,
+		&i.Campo,
+		&i.Orientacao,
+		&i.Obrigatoria,
+		&i.CriadoEm,
+		&i.AtualizadoEm,
+	)
+	return i, err
+}
+
 const dadosDaConversa = `-- name: DadosDaConversa :many
-SELECT k.campo, k.valor, k.criado_em, k.atualizado_em, e.nome AS etapa_nome
+SELECT k.campo, k.valor, k.criado_em, k.atualizado_em, p.texto AS pergunta_texto, p.ordem AS pergunta_ordem
 FROM atendimento.coletas k
-LEFT JOIN atendimento.etapas e ON e.id = k.etapa_id
+LEFT JOIN atendimento.perguntas p ON p.id = k.pergunta_id
 WHERE k.conversa_id = $1
-ORDER BY k.criado_em, k.campo
+ORDER BY p.ordem NULLS LAST, k.criado_em
 `
 
 type DadosDaConversaRow struct {
-	Campo        string
-	Valor        string
-	CriadoEm     time.Time
-	AtualizadoEm time.Time
-	EtapaNome    *string
+	Campo         string
+	Valor         string
+	CriadoEm      time.Time
+	AtualizadoEm  time.Time
+	PerguntaTexto *string
+	PerguntaOrdem *int32
 }
 
+// Respostas da conversa, na ordem das perguntas do bot (o que a pessoa disse sem ser
+// perguntada vem no fim, porque não tem pergunta).
 func (q *Queries) DadosDaConversa(ctx context.Context, conversaID int64) ([]DadosDaConversaRow, error) {
 	rows, err := q.db.Query(ctx, dadosDaConversa, conversaID)
 	if err != nil {
@@ -706,7 +677,8 @@ func (q *Queries) DadosDaConversa(ctx context.Context, conversaID int64) ([]Dado
 			&i.Valor,
 			&i.CriadoEm,
 			&i.AtualizadoEm,
-			&i.EtapaNome,
+			&i.PerguntaTexto,
+			&i.PerguntaOrdem,
 		); err != nil {
 			return nil, err
 		}
@@ -716,36 +688,6 @@ func (q *Queries) DadosDaConversa(ctx context.Context, conversaID int64) ([]Dado
 		return nil, err
 	}
 	return items, nil
-}
-
-const definirEtapaDaConversa = `-- name: DefinirEtapaDaConversa :one
-UPDATE atendimento.conversas SET etapa_id = $1, ultima_em = now()
-WHERE id = $2 RETURNING id, bot_id, telefone, contato_nome, etapa_id, status, motivo, tokens_entrada, tokens_saida, iniciada_em, ultima_em, encerrada_em
-`
-
-type DefinirEtapaDaConversaParams struct {
-	EtapaID *int64
-	ID      int64
-}
-
-func (q *Queries) DefinirEtapaDaConversa(ctx context.Context, arg DefinirEtapaDaConversaParams) (AtendimentoConversa, error) {
-	row := q.db.QueryRow(ctx, definirEtapaDaConversa, arg.EtapaID, arg.ID)
-	var i AtendimentoConversa
-	err := row.Scan(
-		&i.ID,
-		&i.BotID,
-		&i.Telefone,
-		&i.ContatoNome,
-		&i.EtapaID,
-		&i.Status,
-		&i.Motivo,
-		&i.TokensEntrada,
-		&i.TokensSaida,
-		&i.IniciadaEm,
-		&i.UltimaEm,
-		&i.EncerradaEm,
-	)
-	return i, err
 }
 
 const descartarLead = `-- name: DescartarLead :one
@@ -812,7 +754,7 @@ func (q *Queries) DesistirDaMensagemDeAtendimento(ctx context.Context, arg Desis
 const encerrarConversa = `-- name: EncerrarConversa :one
 UPDATE atendimento.conversas SET
     status = $1, motivo = $2, ultima_em = now(), encerrada_em = now()
-WHERE id = $3 RETURNING id, bot_id, telefone, contato_nome, etapa_id, status, motivo, tokens_entrada, tokens_saida, iniciada_em, ultima_em, encerrada_em
+WHERE id = $3 RETURNING id, bot_id, telefone, contato_nome, status, motivo, tokens_entrada, tokens_saida, iniciada_em, ultima_em, encerrada_em
 `
 
 type EncerrarConversaParams struct {
@@ -829,7 +771,6 @@ func (q *Queries) EncerrarConversa(ctx context.Context, arg EncerrarConversaPara
 		&i.BotID,
 		&i.Telefone,
 		&i.ContatoNome,
-		&i.EtapaID,
 		&i.Status,
 		&i.Motivo,
 		&i.TokensEntrada,
@@ -876,33 +817,6 @@ func (q *Queries) EnfileirarResposta(ctx context.Context, arg EnfileirarResposta
 		&i.UltimoErro,
 		&i.CriadaEm,
 		&i.EnviadaEm,
-	)
-	return i, err
-}
-
-const etapaSeguinte = `-- name: EtapaSeguinte :one
-SELECT id, bot_id, ordem, nome, objetivo, instrucoes, campos, criado_em, atualizado_em FROM atendimento.etapas
-WHERE bot_id = $1 AND ordem > $2 ORDER BY ordem LIMIT 1
-`
-
-type EtapaSeguinteParams struct {
-	BotID int64
-	Ordem int32
-}
-
-func (q *Queries) EtapaSeguinte(ctx context.Context, arg EtapaSeguinteParams) (AtendimentoEtapa, error) {
-	row := q.db.QueryRow(ctx, etapaSeguinte, arg.BotID, arg.Ordem)
-	var i AtendimentoEtapa
-	err := row.Scan(
-		&i.ID,
-		&i.BotID,
-		&i.Ordem,
-		&i.Nome,
-		&i.Objetivo,
-		&i.Instrucoes,
-		&i.Campos,
-		&i.CriadoEm,
-		&i.AtualizadoEm,
 	)
 	return i, err
 }
@@ -1043,7 +957,7 @@ func (q *Queries) LeadsDoCliente(ctx context.Context, clienteID *int64) ([]Leads
 
 const listarBots = `-- name: ListarBots :many
 SELECT b.id, b.nome, b.slug, b.modelo, b.instrucoes, b.saudacao, b.ativo, b.max_mensagens_hora, b.max_tokens_conversa, b.pausa_resposta_segundos, b.criado_por, b.atualizado_por, b.criado_em, b.atualizado_em,
-       (SELECT count(*) FROM atendimento.etapas e WHERE e.bot_id = b.id)::int AS etapas,
+       (SELECT count(*) FROM atendimento.perguntas p WHERE p.bot_id = b.id)::int AS perguntas,
        (SELECT count(*) FROM atendimento.conversas c
         WHERE c.bot_id = b.id AND c.status = 'aberta')::int AS conversas_abertas
 FROM atendimento.bots b
@@ -1065,7 +979,7 @@ type ListarBotsRow struct {
 	AtualizadoPor         *int64
 	CriadoEm              time.Time
 	AtualizadoEm          time.Time
-	Etapas                int32
+	Perguntas             int32
 	ConversasAbertas      int32
 }
 
@@ -1095,7 +1009,7 @@ func (q *Queries) ListarBots(ctx context.Context) ([]ListarBotsRow, error) {
 			&i.AtualizadoPor,
 			&i.CriadoEm,
 			&i.AtualizadoEm,
-			&i.Etapas,
+			&i.Perguntas,
 			&i.ConversasAbertas,
 		); err != nil {
 			return nil, err
@@ -1110,7 +1024,7 @@ func (q *Queries) ListarBots(ctx context.Context) ([]ListarBotsRow, error) {
 
 const listarConversas = `-- name: ListarConversas :many
 SELECT c.id, c.bot_id, b.nome AS bot_nome, b.slug AS bot_slug, c.telefone, c.contato_nome,
-       c.status, c.motivo, e.nome AS etapa_nome, c.tokens_entrada, c.tokens_saida,
+       c.status, c.motivo, c.tokens_entrada, c.tokens_saida,
        c.iniciada_em, c.ultima_em, c.encerrada_em,
        (SELECT count(*) FROM atendimento.mensagens m WHERE m.conversa_id = c.id) AS mensagens,
        (SELECT count(*) FROM atendimento.coletas k WHERE k.conversa_id = c.id)   AS dados,
@@ -1120,7 +1034,6 @@ SELECT c.id, c.bot_id, b.nome AS bot_nome, b.slug AS bot_slug, c.telefone, c.con
           ORDER BY m.id DESC LIMIT 1), '')::text                                 AS ultima_direcao
 FROM atendimento.conversas c
 JOIN atendimento.bots b ON b.id = c.bot_id
-LEFT JOIN atendimento.etapas e ON e.id = c.etapa_id
 WHERE ($1::bigint IS NULL OR c.bot_id = $1::bigint)
   AND ($2::text IS NULL OR c.status = $2::text)
 ORDER BY c.ultima_em DESC
@@ -1142,7 +1055,6 @@ type ListarConversasRow struct {
 	ContatoNome   *string
 	Status        string
 	Motivo        *string
-	EtapaNome     *string
 	TokensEntrada int32
 	TokensSaida   int32
 	IniciadaEm    time.Time
@@ -1172,7 +1084,6 @@ func (q *Queries) ListarConversas(ctx context.Context, arg ListarConversasParams
 			&i.ContatoNome,
 			&i.Status,
 			&i.Motivo,
-			&i.EtapaNome,
 			&i.TokensEntrada,
 			&i.TokensSaida,
 			&i.IniciadaEm,
@@ -1182,40 +1093,6 @@ func (q *Queries) ListarConversas(ctx context.Context, arg ListarConversasParams
 			&i.Dados,
 			&i.UltimoTexto,
 			&i.UltimaDirecao,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
-const listarEtapasDoBot = `-- name: ListarEtapasDoBot :many
-SELECT id, bot_id, ordem, nome, objetivo, instrucoes, campos, criado_em, atualizado_em FROM atendimento.etapas WHERE bot_id = $1 ORDER BY ordem
-`
-
-func (q *Queries) ListarEtapasDoBot(ctx context.Context, botID int64) ([]AtendimentoEtapa, error) {
-	rows, err := q.db.Query(ctx, listarEtapasDoBot, botID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []AtendimentoEtapa
-	for rows.Next() {
-		var i AtendimentoEtapa
-		if err := rows.Scan(
-			&i.ID,
-			&i.BotID,
-			&i.Ordem,
-			&i.Nome,
-			&i.Objetivo,
-			&i.Instrucoes,
-			&i.Campos,
-			&i.CriadoEm,
-			&i.AtualizadoEm,
 		); err != nil {
 			return nil, err
 		}
@@ -1323,6 +1200,40 @@ func (q *Queries) ListarLeads(ctx context.Context, arg ListarLeadsParams) ([]Lis
 	return items, nil
 }
 
+const listarPerguntasDoBot = `-- name: ListarPerguntasDoBot :many
+SELECT id, bot_id, ordem, texto, campo, orientacao, obrigatoria, criado_em, atualizado_em FROM atendimento.perguntas WHERE bot_id = $1 ORDER BY ordem
+`
+
+func (q *Queries) ListarPerguntasDoBot(ctx context.Context, botID int64) ([]AtendimentoPergunta, error) {
+	rows, err := q.db.Query(ctx, listarPerguntasDoBot, botID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []AtendimentoPergunta
+	for rows.Next() {
+		var i AtendimentoPergunta
+		if err := rows.Scan(
+			&i.ID,
+			&i.BotID,
+			&i.Ordem,
+			&i.Texto,
+			&i.Campo,
+			&i.Orientacao,
+			&i.Obrigatoria,
+			&i.CriadoEm,
+			&i.AtualizadoEm,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const marcarMensagemDeAtendimentoEnviada = `-- name: MarcarMensagemDeAtendimentoEnviada :one
 UPDATE atendimento.mensagens
 SET status = 'enviada', enviada_em = now(), ultimo_erro = NULL
@@ -1392,27 +1303,6 @@ func (q *Queries) MensagensDaConversa(ctx context.Context, conversaID int64) ([]
 		return nil, err
 	}
 	return items, nil
-}
-
-const primeiraEtapaDoBot = `-- name: PrimeiraEtapaDoBot :one
-SELECT id, bot_id, ordem, nome, objetivo, instrucoes, campos, criado_em, atualizado_em FROM atendimento.etapas WHERE bot_id = $1 ORDER BY ordem LIMIT 1
-`
-
-func (q *Queries) PrimeiraEtapaDoBot(ctx context.Context, botID int64) (AtendimentoEtapa, error) {
-	row := q.db.QueryRow(ctx, primeiraEtapaDoBot, botID)
-	var i AtendimentoEtapa
-	err := row.Scan(
-		&i.ID,
-		&i.BotID,
-		&i.Ordem,
-		&i.Nome,
-		&i.Objetivo,
-		&i.Instrucoes,
-		&i.Campos,
-		&i.CriadoEm,
-		&i.AtualizadoEm,
-	)
-	return i, err
 }
 
 const reenfileirarMensagemDeAtendimento = `-- name: ReenfileirarMensagemDeAtendimento :one
@@ -1614,24 +1504,24 @@ func (q *Queries) ResumoAtendimento(ctx context.Context, arg ResumoAtendimentoPa
 	return i, err
 }
 
-const salvarColeta = `-- name: SalvarColeta :exec
-INSERT INTO atendimento.coletas (conversa_id, etapa_id, campo, valor)
+const salvarResposta = `-- name: SalvarResposta :exec
+INSERT INTO atendimento.coletas (conversa_id, pergunta_id, campo, valor)
 VALUES ($1, $2, $3, $4)
 ON CONFLICT (conversa_id, campo) DO UPDATE SET
-    valor = EXCLUDED.valor, etapa_id = EXCLUDED.etapa_id, atualizado_em = now()
+    valor = EXCLUDED.valor, pergunta_id = EXCLUDED.pergunta_id, atualizado_em = now()
 `
 
-type SalvarColetaParams struct {
+type SalvarRespostaParams struct {
 	ConversaID int64
-	EtapaID    *int64
+	PerguntaID *int64
 	Campo      string
 	Valor      string
 }
 
-func (q *Queries) SalvarColeta(ctx context.Context, arg SalvarColetaParams) error {
-	_, err := q.db.Exec(ctx, salvarColeta,
+func (q *Queries) SalvarResposta(ctx context.Context, arg SalvarRespostaParams) error {
+	_, err := q.db.Exec(ctx, salvarResposta,
 		arg.ConversaID,
-		arg.EtapaID,
+		arg.PerguntaID,
 		arg.Campo,
 		arg.Valor,
 	)

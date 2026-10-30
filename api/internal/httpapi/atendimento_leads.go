@@ -33,11 +33,14 @@ import (
 // Campos que, se o bot colheu, já entram preenchidos na revisão. O resto das coletas vai para
 // `dados` e aparece na tela do mesmo jeito — só não tem campo próprio.
 //
-// Os nomes são os que a tela de fluxo sugere ao operador (ver lib/atendimento.ts): se alguém
-// chamar o campo de outra coisa, o dado não se perde, apenas não vem pré-preenchido.
+// Os nomes são os que os pontos de partida geram (internal/atendimento/pontos_de_partida.go) e
+// os que a tela sugere ao digitar a pergunta: se alguém chamar o dado de outra coisa, ele não se
+// perde — só não vem pré-preenchido na revisão.
 var (
-	camposDeNome     = []string{"nome", "nome_completo", "nome_do_cliente"}
-	camposDeTelefone = []string{"telefone", "celular", "whatsapp", "telefone_de_contato"}
+	// Nome do lead: em venda para empresa (plano de saúde empresarial, por exemplo), o cliente
+	// do cadastro **é a empresa** — por isso `nome_da_empresa` conta como nome.
+	camposDeNome     = []string{"nome", "nome_completo", "nome_do_cliente", "nome_da_empresa", "razao_social"}
+	camposDeTelefone = []string{"telefone", "celular", "whatsapp", "telefone_de_contato", "melhor_telefone", "melhor_contato"}
 	camposDeEmail    = []string{"email", "e_mail", "email_de_contato"}
 )
 

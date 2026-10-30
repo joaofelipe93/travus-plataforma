@@ -67,17 +67,19 @@ export function slugSugerido(nome: string): string {
 }
 
 /**
- * Id de campo a partir do rótulo: o id é o que o modelo escreve ao registrar o dado, e o rótulo
- * é o que a equipe lê. "Telefone do responsável" → "telefone_do_responsavel".
+ * Nome do dado a partir do texto da pergunta: "Quantas vidas vocês querem?" →
+ * "quantas_vidas_voces_querem". É o que vai para o lead e para o cadastro, e precisa começar com
+ * letra (a API recusa o resto). A tela mostra isso escondido: é detalhe técnico, não decisão de
+ * quem escreve o atendimento.
  */
-export function idDeCampo(rotulo: string): string {
-  return rotulo
+export function campoDaPergunta(pergunta: string): string {
+  return pergunta
     .normalize("NFD")
-    .replace(/[̀-ͯ]/g, "")
+    .replace(/[\u0300-\u036f]/g, "")
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "_")
     .replace(/^_+|_+$/g, "")
-    // A API exige começar com letra (o id vira nome de argumento da ferramenta do modelo).
     .replace(/^[0-9_]+/, "")
-    .slice(0, 30);
+    .slice(0, 31)
+    .replace(/_+$/, "");
 }

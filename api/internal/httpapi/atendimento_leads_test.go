@@ -23,15 +23,14 @@ import (
 func conversaQueRendeu(t *testing.T, s *Servidor, slug, telefone string) resultadoAtendimento {
 	t.Helper()
 	m := &modeloRoteiroBot{turnos: []turnoBot{
-		{ferramenta: "registrar_dado", entrada: `{"campo":"interesse","valor":"apartamento 2 quartos"}`},
-		{ferramenta: "avancar_etapa"},
-		{ferramenta: "registrar_dado", entrada: `{"campo":"telefone","valor":"11988887777"}`},
-		{ferramenta: "avancar_etapa"},
-		{texto: "Obrigado! Um corretor vai te ligar."},
+		{ferramenta: "registrar_resposta", entrada: `{"campo":"nome_da_empresa","valor":"Acme Ltda"}`},
+		{ferramenta: "registrar_resposta", entrada: `{"campo":"melhor_telefone","valor":"11988887777"}`},
+		{ferramenta: "encerrar", entrada: `{"motivo":"concluido"}`},
+		{texto: "Obrigado! A equipe vai falar com você."},
 	}}
 	s.cfg.ModeloAtendimento = func(string) assistente.Modelo { return m }
-	bot := botComFluxo(t, s, slug, true)
-	res, err := s.responderAtendimento(context.Background(), bot, telefone, "Fulano de Teste", "quero um ap de 2 quartos, meu zap é 11988887777")
+	bot := botComPerguntas(t, s, slug, true)
+	res, err := s.responderAtendimento(context.Background(), bot, telefone, "Fulano de Teste", "somos a Acme Ltda, meu telefone é 11988887777")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -80,13 +79,36 @@ func TestAtendimentoLeadNasceDaConversaEncerrada(t *testing.T) {
 	if l.Observacoes == nil || *l.Observacoes == "" {
 		t.Error("o telefone informado na conversa devia virar observação")
 	}
-	// Sem campo de nome coletado, o nome do WhatsApp serve de ponto de partida.
-	if l.Nome == nil || *l.Nome != "Fulano de Teste" {
-		t.Errorf("o nome do contato devia vir pré-preenchido: %v", l.Nome)
+	// O nome coletado ganha do nome do WhatsApp: em venda para empresa, o cliente do cadastro é
+	// a empresa, e o push name é só o apelido do celular de quem escreveu.
+	if l.Nome == nil || *l.Nome != "Acme Ltda" {
+		t.Errorf("o nome devia vir do dado coletado: %v", valorOuVazio(l.Nome))
 	}
 	// Tudo o que o bot colheu fica no lead, inclusive o que não tem campo próprio.
-	if l.Dados["interesse"] != "apartamento 2 quartos" {
+	if l.Dados["nome_da_empresa"] != "Acme Ltda" {
 		t.Errorf("os dados crus deviam estar no lead: %+v", l.Dados)
+	}
+}
+
+// Sem nenhum nome coletado, o nome do WhatsApp serve de ponto de partida para a revisão.
+func TestAtendimentoLeadUsaONomeDoWhatsappQuandoNaoHaOutro(t *testing.T) {
+	m := &modeloRoteiroBot{turnos: []turnoBot{
+		{ferramenta: "registrar_resposta", entrada: `{"campo":"melhor_telefone","valor":"11977776666"}`},
+		{ferramenta: "encerrar", entrada: `{"motivo":"concluido"}`},
+		{texto: "Obrigado!"},
+	}}
+	s := servidorComBot(t, m)
+	s.cfg.ModeloAtendimento = func(string) assistente.Modelo { return m }
+	bot := botComPerguntas(t, s, "so-telefone", true)
+	if _, err := s.responderAtendimento(context.Background(), bot, "5511900070010", "Fulano de Teste", "meu telefone é 11977776666"); err != nil {
+		t.Fatal(err)
+	}
+	leads := leadsDoServidor(t, s, "novos")
+	if len(leads) != 1 {
+		t.Fatalf("devia ter um lead: %+v", leads)
+	}
+	if leads[0].Nome == nil || *leads[0].Nome != "Fulano de Teste" {
+		t.Errorf("sem nome coletado, o do WhatsApp serve de partida: %v", valorOuVazio(leads[0].Nome))
 	}
 }
 
@@ -98,7 +120,7 @@ func TestAtendimentoConversaSemDadoNaoViraLead(t *testing.T) {
 		{texto: "Isso não é com a gente, desculpe."},
 	}}
 	s := servidorComBot(t, m)
-	bot := botComFluxo(t, s, "sem-dado", true)
+	bot := botComPerguntas(t, s, "sem-dado", true)
 	if _, err := s.responderAtendimento(context.Background(), bot, "5511900070002", "", "vocês vendem carro?"); err != nil {
 		t.Fatal(err)
 	}
@@ -293,7 +315,7 @@ func TestAtendimentoConversaApontaParaOLead(t *testing.T) {
 	// Conversa sem lead devolve null, não erro.
 	m := &modeloRoteiroBot{turnos: []turnoBot{{texto: "Oi!"}}}
 	s.cfg.ModeloAtendimento = func(string) assistente.Modelo { return m }
-	bot := botComFluxo(t, s, "sem-lead", true)
+	bot := botComPerguntas(t, s, "sem-lead", true)
 	aberta, err := s.responderAtendimento(context.Background(), bot, "5511900070009", "", "oi")
 	if err != nil {
 		t.Fatal(err)
@@ -352,7 +374,7 @@ func TestVigiaAtendimento(t *testing.T) {
 	}
 
 	// Bot ligado e autorizado, sem sessão no worker: tolera 10 min (deploy, pareamento).
-	bot := botComFluxo(t, s, "vigiado", true)
+	bot := botComPerguntas(t, s, "vigiado", true)
 	if a := achados(); len(a) != 0 {
 		t.Fatalf("alerta antes da tolerância: %+v", a)
 	}

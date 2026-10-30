@@ -141,7 +141,7 @@ function LinhaDoBot({ bot, podeLigar }: { bot: Bot; podeLigar: boolean }) {
           {bot.nome}
         </Link>
         <p className="mt-0.5 text-xs text-muted-foreground">
-          {bot.etapas ?? 0} etapa(s) · {bot.conversas_abertas ?? 0} conversa(s) aberta(s) ·{" "}
+          {bot.perguntas ?? 0} pergunta(s) · {bot.conversas_abertas ?? 0} conversa(s) aberta(s) ·{" "}
           {bot.ativo ? "responde quem escrever" : "desligado"}
         </p>
       </div>

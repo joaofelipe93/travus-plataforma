@@ -68,10 +68,13 @@ export default function PaginaConversa() {
                   detalhe: motivoLegivel(c.motivo) ?? undefined,
                 },
                 {
-                  rotulo: "Etapa",
-                  valor: c.etapa_nome ?? "—",
-                  detalhe:
-                    c.etapa_ordem && c.etapas_do_bot > 0 ? `${c.etapa_ordem} de ${c.etapas_do_bot}` : undefined,
+                  rotulo: "Respondidas",
+                  valor:
+                    c.perguntas_do_bot > 0
+                      ? `${c.respostas} de ${c.perguntas_do_bot}`
+                      : `${c.respostas} dado(s)`,
+                  tom: c.perguntas_do_bot > 0 && c.respostas >= c.perguntas_do_bot ? "ok" : "neutro",
+                  detalhe: c.perguntas_do_bot === 0 ? "este bot não tem perguntas" : undefined,
                 },
                 { rotulo: "Começou", valor: dataHora(c.iniciada_em) },
                 { rotulo: "Última mensagem", valor: dataHora(c.ultima_em) },
@@ -166,7 +169,7 @@ export default function PaginaConversa() {
               <TableRow>
                 <TableHead>Dado</TableHead>
                 <TableHead>Valor</TableHead>
-                <TableHead>Etapa</TableHead>
+                <TableHead>Pergunta</TableHead>
                 <TableHead>Quando</TableHead>
               </TableRow>
             </TableHeader>
@@ -175,7 +178,7 @@ export default function PaginaConversa() {
                 <TableRow key={d.campo}>
                   <TableCell className="font-medium">{d.campo}</TableCell>
                   <TableCell>{d.valor}</TableCell>
-                  <TableCell className="text-sm text-muted-foreground">{d.etapa_nome ?? "—"}</TableCell>
+                  <TableCell className="text-sm text-muted-foreground">{d.pergunta ?? "—"}</TableCell>
                   <TableCell className="text-xs whitespace-nowrap text-muted-foreground">
                     {dataHora(d.criado_em)}
                     {d.atualizado_em !== d.criado_em && ` · corrigido ${dataHora(d.atualizado_em)}`}

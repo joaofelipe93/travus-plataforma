@@ -20,7 +20,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { api } from "@/lib/api";
 import { slugSugerido } from "@/lib/atendimento";
 import { dataHora, useSessao } from "@/lib/sessao";
-import type { Bot, DetalheBot, ModeloBot } from "@/lib/tipos";
+import type { Bot, DetalheBot, ModeloBot, PontoDePartida } from "@/lib/tipos";
 
 // Os bots do serviço: um por atendimento (um número de WhatsApp cada). A lista responde "quais
 // existem e qual está realmente respondendo"; o fluxo de cada um fica na tela do bot.
@@ -59,8 +59,8 @@ export default function PaginaBots() {
           <Skeleton className="h-40 w-full" />
         ) : lista.length === 0 ? (
           <Vazio>
-            Nenhum bot ainda. Um bot é o nome, as instruções do que ele pode responder e as etapas
-            do que precisa descobrir de quem escreve.
+            Nenhum bot ainda. Um bot é o nome, as instruções do que ele pode responder e a lista de
+            perguntas que ele precisa fazer.
           </Vazio>
         ) : (
           <Table>
@@ -68,7 +68,7 @@ export default function PaginaBots() {
               <TableRow>
                 <TableHead>Bot</TableHead>
                 <TableHead>Modelo</TableHead>
-                <TableHead className="text-right">Fluxo</TableHead>
+                <TableHead className="text-right">Perguntas</TableHead>
                 <TableHead className="text-right">Conversas abertas</TableHead>
                 <TableHead>Estado</TableHead>
                 <TableHead>Criado</TableHead>
@@ -84,7 +84,7 @@ export default function PaginaBots() {
                     <p className="text-xs text-muted-foreground">{b.slug}</p>
                   </TableCell>
                   <TableCell className="text-sm text-muted-foreground">{b.modelo}</TableCell>
-                  <TableCell className="text-right tabular-nums">{b.etapas ?? 0} etapa(s)</TableCell>
+                  <TableCell className="text-right tabular-nums">{b.perguntas ?? 0} pergunta(s)</TableCell>
                   <TableCell className="text-right tabular-nums">{b.conversas_abertas ?? 0}</TableCell>
                   <TableCell>
                     {b.ativo ? <Badge>ligado</Badge> : <Badge variant="secondary">desligado</Badge>}
@@ -112,6 +112,16 @@ function SheetNovoBot({ aberto, aoFechar }: { aberto: boolean; aoFechar: () => v
   const [slugEditado, setSlugEditado] = useState(false);
   const [modelo, setModelo] = useState("");
   const [instrucoes, setInstrucoes] = useState("");
+  // Ponto de partida escolhido: copia instruções, saudação e perguntas para o bot novo. A Travus
+  // tem vários segmentos, então nenhum é padrão — "em branco" é o primeiro da lista.
+  const [partida, setPartida] = useState("em-branco");
+
+  const pontos = useQuery({
+    queryKey: ["atendimento-pontos-de-partida"],
+    queryFn: () => api<{ pontos_de_partida: PontoDePartida[] }>("/atendimento/pontos-de-partida"),
+    enabled: aberto,
+  });
+  const pontoEscolhido = pontos.data?.pontos_de_partida.find((p) => p.id === partida);
 
   const modelos = useQuery({
     queryKey: ["atendimento-modelos"],
@@ -121,15 +131,30 @@ function SheetNovoBot({ aberto, aoFechar }: { aberto: boolean; aoFechar: () => v
   const escolhido = modelo || modelos.data?.padrao || "";
 
   const criar = useMutation({
-    mutationFn: () =>
-      api<DetalheBot>("/atendimento/bots", {
+    mutationFn: async () => {
+      const res = await api<DetalheBot>("/atendimento/bots", {
         metodo: "POST",
-        json: { nome, slug: slug || slugSugerido(nome), modelo: escolhido, instrucoes },
-      }),
+        json: {
+          nome,
+          slug: slug || slugSugerido(nome),
+          modelo: escolhido,
+          instrucoes,
+          saudacao: pontoEscolhido?.saudacao ?? "",
+        },
+      });
+      // As perguntas do ponto de partida entram na sequência, pela rota delas.
+      if (pontoEscolhido && pontoEscolhido.perguntas.length > 0) {
+        await api(`/atendimento/bots/${res.bot.id}/perguntas`, {
+          metodo: "PUT",
+          json: { perguntas: pontoEscolhido.perguntas },
+        });
+      }
+      return res;
+    },
     onSuccess: (res) => {
       void queryClient.invalidateQueries({ queryKey: ["atendimento-bots"] });
       void queryClient.invalidateQueries({ queryKey: ["atendimento-resumo"] });
-      toast.success("Bot criado. Agora monte o fluxo.");
+      toast.success("Bot criado. Agora confira as perguntas.");
       limpar();
       aoFechar();
       router.push(`/atendimento/bots/${res.bot.id}`);
@@ -160,11 +185,43 @@ function SheetNovoBot({ aberto, aoFechar }: { aberto: boolean; aoFechar: () => v
           <SheetHeader>
             <SheetTitle>Novo bot</SheetTitle>
             <SheetDescription>
-              Ele nasce desligado: dá para montar o fluxo com calma antes de qualquer pessoa falar
-              com ele.
+              Ele nasce desligado: dá para escrever as perguntas com calma antes de qualquer pessoa
+              falar com ele.
             </SheetDescription>
           </SheetHeader>
           <SheetBody className="flex flex-col gap-5">
+            <div className="flex flex-col gap-2">
+              <Label htmlFor="bot-partida">Ponto de partida</Label>
+              <Select
+                value={partida}
+                onValueChange={(v) => {
+                  const id = v ?? "em-branco";
+                  setPartida(id);
+                  const p = pontos.data?.pontos_de_partida.find((x) => x.id === id);
+                  // Só preenche o que ainda está vazio ou veio de outro ponto de partida: quem
+                  // já escreveu algo não perde o texto por trocar a opção.
+                  setInstrucoes(p?.instrucoes ?? "");
+                }}
+              >
+                <SelectTrigger id="bot-partida">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {(pontos.data?.pontos_de_partida ?? []).map((p) => (
+                    <SelectItem key={p.id} value={p.id}>
+                      {p.nome}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              {pontoEscolhido && (
+                <p className="text-xs text-muted-foreground">
+                  {pontoEscolhido.descricao}
+                  {pontoEscolhido.perguntas.length > 0 &&
+                    ` Vem com ${pontoEscolhido.perguntas.length} pergunta(s), que você edita depois.`}
+                </p>
+              )}
+            </div>
             <div className="flex flex-col gap-2">
               <Label htmlFor="bot-nome">Nome</Label>
               <Input
@@ -174,7 +231,7 @@ function SheetNovoBot({ aberto, aoFechar }: { aberto: boolean; aoFechar: () => v
                   setNome(e.target.value);
                   if (!slugEditado) setSlug(slugSugerido(e.target.value));
                 }}
-                placeholder="Atendimento Aluguel"
+                placeholder="Atendimento Comercial"
                 required
               />
               <p className="text-xs text-muted-foreground">
@@ -190,7 +247,7 @@ function SheetNovoBot({ aberto, aoFechar }: { aberto: boolean; aoFechar: () => v
                   setSlug(e.target.value);
                   setSlugEditado(true);
                 }}
-                placeholder="aluguel"
+                placeholder="comercial"
                 required
               />
               <p className="text-xs text-muted-foreground">
@@ -222,9 +279,9 @@ function SheetNovoBot({ aberto, aoFechar }: { aberto: boolean; aoFechar: () => v
                 onChange={(e) => setInstrucoes(e.target.value)}
                 rows={8}
                 placeholder={
-                  "Você atende a imobiliária Travus no WhatsApp.\n" +
-                  "Fale só de aluguel: imóveis disponíveis, visita e documentação.\n" +
-                  "Não fale de preço de venda nem prometa desconto."
+                  "Você é o primeiro atendimento da Travus no WhatsApp.\n" +
+                  "Diga o que a equipe atende e o que você pode responder.\n" +
+                  "Não fale de preço nem prometa prazo: isso é da equipe."
                 }
                 required
               />
