@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.27.2](https://github.com/joaofelipe93/travus-plataforma/compare/v0.27.1...v0.27.2) (2026-11-04)
+
+
+### Correções
+
+* **atendimento:** o bot não recebia mensagem de conta com endereço LID ([#124](https://github.com/joaofelipe93/travus-plataforma/issues/124)) ([e7bdd43](https://github.com/joaofelipe93/travus-plataforma/commit/e7bdd437080b58a50a052ce56bc58e3a33503961))
+
 ## [0.27.1](https://github.com/joaofelipe93/travus-plataforma/compare/v0.27.0...v0.27.1) (2026-10-30)
 
 
