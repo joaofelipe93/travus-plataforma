@@ -6,6 +6,7 @@ import {
   DisconnectReason,
   Browsers,
   type WASocket,
+  type WAMessageKey,
   type proto,
 } from 'baileys'
 import { Boom } from '@hapi/boom'
@@ -66,6 +67,33 @@ export function telefoneDoJid(jid: string | null | undefined): string | undefine
   if (!jid || !jid.endsWith('@s.whatsapp.net')) return undefined
   const digitos = jid.split('@')[0]?.split(':')[0]?.replace(/\D/g, '')
   return digitos && digitos.length >= 8 ? digitos : undefined
+}
+
+/** Conversa privada endereçada por LID: `<identificador>@lid`, sem telefone nenhum no jid. */
+export function ehLid(jid: string | null | undefined): boolean {
+  return typeof jid === 'string' && jid.endsWith('@lid')
+}
+
+/**
+ * O telefone de quem escreveu, nos **dois** endereçamentos que o WhatsApp usa hoje.
+ *
+ * O clássico traz o telefone no próprio jid da conversa (`5511...@s.whatsapp.net`). O novo, LID
+ * (`213090591355025@lid`), não traz: o WhatsApp manda o número à parte, no `sender_pn` da stanza,
+ * que o Baileys expõe como `senderPn`. Contas migradas para LID já são a maioria — em 04/11/2026
+ * uma mensagem de verdade para o bot Clara foi descartada porque este filtro só conhecia o
+ * endereço clássico, e **nada apareceu no log** para explicar o sumiço.
+ *
+ * Grupo e status continuam de fora mesmo trazendo `participantPn`: a volta pelo telefone só vale
+ * quando a conversa é privada. Privada sem telefone conhecido também é descarte — a plataforma
+ * identifica a pessoa pelo telefone (é o que vai para a conversa, para o lead e para a resposta),
+ * e pôr um identificador no lugar dele sujaria o cadastro com um "telefone" que não liga para
+ * ninguém.
+ */
+export function telefoneDeQuemEscreveu(key: WAMessageKey): string | undefined {
+  const doJid = telefoneDoJid(key.remoteJid)
+  if (doJid) return doJid
+  if (!ehLid(key.remoteJid)) return undefined
+  return telefoneDoJid(key.senderPn) ?? telefoneDoJid(key.participantPn)
 }
 
 /** Telefone em log sai mascarado: é dado de cliente. */
@@ -233,8 +261,19 @@ export function criarSessao(options: {
       for (const msg of evento.messages) {
         // Mensagem que o próprio bot mandou volta no evento: responder a ela seria um laço.
         if (msg.key.fromMe) continue
-        const telefone = telefoneDoJid(msg.key.remoteJid)
-        if (!telefone) continue // grupo, status, canal: o bot não entra
+        const telefone = telefoneDeQuemEscreveu(msg.key)
+        if (!telefone) {
+          // Grupo, status e canal são descarte esperado: o bot não entra. Conversa privada sem
+          // telefone é outra coisa — é uma pessoa que ficou sem resposta —, e desaparecer calada
+          // foi o que tornou o defeito de 04/11/2026 difícil de achar: no log não havia nada.
+          if (ehLid(msg.key.remoteJid)) {
+            log.warn(
+              { de: mascarar(msg.key.remoteJid ?? '') },
+              'mensagem privada descartada: LID sem sender_pn, não dá para saber o telefone',
+            )
+          }
+          continue
+        }
         const texto = textoDaMensagem(msg)
         if (!texto) {
           // Áudio, figurinha, localização: a plataforma não transcreve nada (ainda). Ignorar em
