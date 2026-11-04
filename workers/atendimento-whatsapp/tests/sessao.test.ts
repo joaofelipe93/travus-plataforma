@@ -2,6 +2,7 @@ import './helpers/setup.js'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import {
+  criarGuardaDeEnviadas,
   ehLid,
   jidDe,
   mascarar,
@@ -100,4 +101,27 @@ test('telefone em log sai mascarado: é dado de cliente', () => {
 
 test('jid de envio é sempre privado', () => {
   assert.equal(jidDe('+55 (11) 98765-4321'), '5511987654321@s.whatsapp.net')
+})
+
+test('a guarda de enviadas atende o pedido de reenvio', () => {
+  // Sem isto a resposta do bot fica em "Aguardando mensagem" no aparelho de quem recebeu: o
+  // WhatsApp pede a mensagem de novo e o Baileys não tem o que mandar.
+  const guarda = criarGuardaDeEnviadas(3)
+  guarda.guardar('AAA', { conversation: 'oi' })
+  assert.deepEqual(guarda.buscar('AAA'), { conversation: 'oi' })
+  assert.equal(guarda.buscar('nunca-enviada'), undefined)
+  assert.equal(guarda.buscar(undefined), undefined)
+
+  // Id ou conteúdo vazio não ocupam lugar.
+  guarda.guardar(undefined, { conversation: 'x' })
+  guarda.guardar('BBB', undefined)
+  assert.equal(guarda.tamanho, 1)
+
+  // Cheia, descarta a mais antiga — é cache, não histórico (o histórico é da API).
+  guarda.guardar('BBB', { conversation: 'b' })
+  guarda.guardar('CCC', { conversation: 'c' })
+  guarda.guardar('DDD', { conversation: 'd' })
+  assert.equal(guarda.tamanho, 3)
+  assert.equal(guarda.buscar('AAA'), undefined, 'a mais antiga saiu')
+  assert.deepEqual(guarda.buscar('DDD'), { conversation: 'd' })
 })
