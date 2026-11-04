@@ -63,10 +63,15 @@ reinicia (o socket do WhatsApp) não tem regra de negócio dentro.
      bot passa a responder em grupo.
    - **Descarte de conversa privada vai para o log** (`log.warn`). O defeito acima foi difícil de
      achar porque o `continue` era calado: mensagem perdida não deixava rastro nenhum.
-6. **Telefone não entra em log cru**: use `mascarar()`.
-7. **Nenhum teste fala com o WhatsApp nem com a API.** O gerente recebe a fábrica de sessão por
+6. **`getMessage` não é opcional.** Quando o aparelho de quem recebe não consegue decifrar, ele
+   pede a mensagem de novo (*retry receipt*); o Baileys só atende se nós tivermos guardado o
+   conteúdo (`criarGuardaDeEnviadas`), porque o padrão dele é devolver `undefined`. Sem isso a
+   plataforma dá a resposta como **enviada** e o WhatsApp da pessoa mostra **"Aguardando
+   mensagem"** para sempre — aconteceu com a primeira resposta da Clara, em 04/11/2026.
+7. **Telefone não entra em log cru**: use `mascarar()`.
+8. **Nenhum teste fala com o WhatsApp nem com a API.** O gerente recebe a fábrica de sessão por
    injeção e o laço da fila recebe a API; os dublês registram o que teria acontecido.
-8. **O teto `MAX_SESSOES` existe para o serviço recusar a sessão a mais com mensagem clara**, em
+9. **O teto `MAX_SESSOES` existe para o serviço recusar a sessão a mais com mensagem clara**, em
    vez de morrer sem memória no meio de uma conversa. A VM tem 2 GB (`docs/producao.md`): acima
    de 3 ou 4 bots, redimensione antes de subir o teto. Quem ficou de fora aparece em
    `/whatsapp/status` (`sem_sessao`) e na tela.

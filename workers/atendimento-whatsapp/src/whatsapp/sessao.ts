@@ -96,6 +96,41 @@ export function telefoneDeQuemEscreveu(key: WAMessageKey): string | undefined {
   return telefoneDoJid(key.senderPn) ?? telefoneDoJid(key.participantPn)
 }
 
+/**
+ * Guarda as últimas mensagens que a sessão enviou, para poder **reenviá-las**.
+ *
+ * Quando o aparelho de quem recebe não consegue decifrar, ele não perde a mensagem: pede de novo
+ * (*retry receipt*). O Baileys só sabe atender esse pedido se nós tivermos guardado o conteúdo —
+ * é o `getMessage` do socket, cujo padrão é devolver `undefined`. Sem ele, o WhatsApp de quem
+ * recebeu fica em **"Aguardando mensagem"** para sempre: foi o que aconteceu com a primeira
+ * resposta da Clara, em 04/11/2026, que a plataforma deu como enviada e nunca apareceu.
+ *
+ * Em memória de propósito: o pedido de reenvio chega em segundos, e a alternativa seria o worker
+ * guardar estado de mensagem, que é justamente o que a API faz por ele. Sessão reiniciada perde a
+ * guarda, e aí o pedido de reenvio fica sem resposta — com aviso no log.
+ */
+export function criarGuardaDeEnviadas(maximo = 200) {
+  const porId = new Map<string, proto.IMessage>()
+  return {
+    guardar(id: string | null | undefined, conteudo: proto.IMessage | null | undefined): void {
+      if (!id || !conteudo) return
+      porId.set(id, conteudo)
+      // Map guarda a ordem de inserção: a primeira chave é a mais antiga.
+      while (porId.size > maximo) {
+        const maisAntiga = porId.keys().next().value
+        if (maisAntiga === undefined) break
+        porId.delete(maisAntiga)
+      }
+    },
+    buscar(id: string | null | undefined): proto.IMessage | undefined {
+      return id ? porId.get(id) : undefined
+    },
+    get tamanho(): number {
+      return porId.size
+    },
+  }
+}
+
 /** Telefone em log sai mascarado: é dado de cliente. */
 export function mascarar(telefone: string): string {
   const d = telefone.replace(/\D/g, '')
@@ -135,6 +170,8 @@ export function criarSessao(options: {
   )
   // Uma pasta por bot: é o que mantém as sessões independentes.
   const pasta = join(env.AUTH_DIR, bot)
+  // As mensagens que esta sessão mandou, para atender pedido de reenvio.
+  const enviadas = criarGuardaDeEnviadas()
 
   let sock: WASocket | undefined
   let estado: EstadoSessao = 'desconectada'
@@ -187,6 +224,18 @@ export function criarSessao(options: {
       browser: Browsers.ubuntu(`Travus ${nome}`.slice(0, 30)),
       markOnlineOnConnect: false,
       syncFullHistory: false,
+      // Reenvio pedido por quem não conseguiu decifrar. Sem isto, a resposta do bot fica em
+      // "Aguardando mensagem" no aparelho da pessoa (ver `criarGuardaDeEnviadas`).
+      getMessage: async (key) => {
+        const guardada = enviadas.buscar(key.id)
+        if (!guardada) {
+          log.warn(
+            { id: key.id, guardadas: enviadas.tamanho },
+            'pediram reenvio de uma mensagem que não está guardada: ela fica como "Aguardando mensagem"',
+          )
+        }
+        return guardada
+      },
     })
     sock = este
 
@@ -314,6 +363,7 @@ export function criarSessao(options: {
     if (!conectada()) throw new NaoConectadoError(bot)
     if (!(await temWhatsapp(telefone))) throw new SemWhatsappError(telefone)
     const r = await socketAberto().sendMessage(jidDe(telefone), { text: texto })
+    enviadas.guardar(r?.key?.id, r?.message)
     return r?.key?.id ?? undefined
   }
 
