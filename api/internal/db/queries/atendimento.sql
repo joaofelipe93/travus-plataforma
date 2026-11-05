@@ -190,10 +190,12 @@ WHERE conversa_id = @conversa_id AND status = 'pendente';
 
 -- name: SomarTokensDaConversa :one
 UPDATE atendimento.conversas SET
-    tokens_entrada = tokens_entrada + @tokens_entrada,
-    tokens_saida   = tokens_saida + @tokens_saida,
-    ultima_em      = now()
-WHERE id = @id RETURNING tokens_entrada, tokens_saida;
+    tokens_entrada        = tokens_entrada + @tokens_entrada,
+    tokens_saida          = tokens_saida + @tokens_saida,
+    tokens_cache_lidos    = tokens_cache_lidos + @tokens_cache_lidos,
+    tokens_cache_gravados = tokens_cache_gravados + @tokens_cache_gravados,
+    ultima_em             = now()
+WHERE id = @id RETURNING tokens_entrada, tokens_saida, tokens_cache_lidos, tokens_cache_gravados;
 
 -- Teto de mensagens por hora, por bot: conta o que saiu e o que está na fila. Protege contra
 -- laço de resposta (o outro lado também é automático) e contra bloqueio do número.
@@ -251,6 +253,7 @@ SELECT c.id, c.bot_id, b.nome AS bot_nome, b.slug AS bot_slug, c.telefone, c.con
        c.status, c.motivo,
        c.tokens_entrada, c.tokens_saida, c.iniciada_em, c.ultima_em, c.encerrada_em,
        c.assumida_em, c.reaberta_em, c.tokens_marco,
+       c.tokens_cache_lidos, c.tokens_cache_gravados,
        coalesce((SELECT u.nome FROM usuarios u WHERE u.id = c.assumida_por), '')::text AS assumida_por_nome,
        (SELECT count(*) FROM atendimento.perguntas x WHERE x.bot_id = c.bot_id)   AS perguntas_do_bot,
        (SELECT count(*) FROM atendimento.coletas k WHERE k.conversa_id = c.id)    AS respostas

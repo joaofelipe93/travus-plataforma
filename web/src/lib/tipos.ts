@@ -747,6 +747,9 @@ export type DetalheConversa = {
     respostas: number;
     tokens_entrada: number;
     tokens_saida: number;
+    // Cache do prompt: leitura custa cerca de um décimo da entrada normal.
+    tokens_cache_lidos: number;
+    tokens_cache_gravados: number;
     iniciada_em: string;
     ultima_em: string;
     encerrada_em: string | null;

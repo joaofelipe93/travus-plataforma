@@ -33,11 +33,18 @@ type turnoBot struct {
 // modeloRoteiroBot segue o roteiro na ordem e guarda o que recebeu, para o teste conferir o
 // prompt e os resultados que as ferramentas devolveram.
 type modeloRoteiroBot struct {
-	mu         sync.Mutex
-	turnos     []turnoBot
-	i          int
+	mu     sync.Mutex
+	turnos []turnoBot
+	i      int
+	// sistema são os blocos de sistema de cima (o que vai para o cache do prompt); daVez são as
+	// instruções de sistema que chegam no FIM das mensagens (o que muda a cada resposta).
 	sistema    []string
+	daVez      []string
 	resultados []string
+	// mensagens recebidas na última rodada, para o teste conferir o tamanho do histórico.
+	ultimasMensagens int
+	// quantas vezes o modelo foi chamado: é o que cada rodada de ferramenta custa.
+	chamadas int
 }
 
 func (m *modeloRoteiroBot) Nome() string { return "duble-bot" }
@@ -47,6 +54,18 @@ func (m *modeloRoteiroBot) Gerar(_ context.Context, p assistente.Pedido, aoTexto
 	defer m.mu.Unlock()
 	for _, b := range p.Sistema {
 		m.sistema = append(m.sistema, b.Text)
+	}
+	m.chamadas++
+	m.ultimasMensagens = len(p.Mensagens)
+	for _, msg := range p.Mensagens {
+		if msg.Role != anthropic.BetaMessageParamRoleSystem {
+			continue
+		}
+		for _, c := range msg.Content {
+			if t := c.OfText; t != nil {
+				m.daVez = append(m.daVez, t.Text)
+			}
+		}
 	}
 	if ultima := p.Mensagens[len(p.Mensagens)-1]; len(ultima.Content) > 0 {
 		for _, c := range ultima.Content {
@@ -77,11 +96,11 @@ func (m *modeloRoteiroBot) Gerar(_ context.Context, p assistente.Pedido, aoTexto
 		}
 		bruto = `{"id":"m","type":"message","role":"assistant","model":"duble","stop_reason":"tool_use",
 			"content":[` + antes + `{"type":"tool_use","id":"toolu_1","name":"` + t.ferramenta + `","input":` + entrada + `}],
-			"usage":{"input_tokens":5,"output_tokens":3}}`
+			"usage":{"input_tokens":5,"output_tokens":3,"cache_read_input_tokens":11,"cache_creation_input_tokens":7}}`
 	} else {
 		aoTexto(t.texto)
 		bruto = `{"id":"m","type":"message","role":"assistant","model":"duble","stop_reason":"end_turn",
-			"content":[{"type":"text","text":` + jsonTexto(t.texto) + `}],"usage":{"input_tokens":5,"output_tokens":3}}`
+			"content":[{"type":"text","text":` + jsonTexto(t.texto) + `}],"usage":{"input_tokens":5,"output_tokens":3,"cache_read_input_tokens":11,"cache_creation_input_tokens":7}}`
 	}
 	var msg anthropic.BetaMessage
 	if err := json.Unmarshal([]byte(bruto), &msg); err != nil {
@@ -172,11 +191,14 @@ func TestAtendimentoRespondeEColeta(t *testing.T) {
 	for _, esperado := range []string{
 		"Travus", "atendimento automático",
 		"1. Qual é o nome da empresa?",
-		"Agora trate da pergunta 1", // o prompt é montado antes de a ferramenta rodar
 	} {
 		if !strings.Contains(prompt, esperado) {
 			t.Errorf("o prompt devia conter %q", esperado)
 		}
+	}
+	// A pergunta da vez vai no fim das mensagens, não no bloco cacheado (issue #128, tokens).
+	if !strings.Contains(strings.Join(m.daVez, "\n"), "Agora trate da pergunta 1") {
+		t.Errorf("a instrução da vez devia dizer a pergunta atual: %q", m.daVez)
 	}
 	// A ferramenta devolve ao modelo qual é a próxima pergunta.
 	if !strings.Contains(strings.Join(m.resultados, " "), "proxima_pergunta") {

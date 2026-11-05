@@ -33,7 +33,11 @@ import (
 const (
 	// Histórico que vai para o modelo. Conversa de WhatsApp é curta; mais que isto é custo sem
 	// ganho, e o que importa de verdade já está em `coletas`.
-	historicoConversa = 40
+	// Quantas mensagens da conversa vão ao modelo. Eram 40, e cada resposta reenviava todas elas:
+	// numa conversa longa isso é a maior parte do gasto. O que a pessoa informou não se perde ao
+	// cortar o histórico, porque os dados colhidos vão no prompt da vez — o histórico serve para
+	// o tom e para o fio da última troca.
+	historicoConversa = 24
 	// Tempo de uma resposta. O worker espera por isto, então não pode ser o limite do assistente
 	// (4 min): quem está do outro lado desistiu muito antes.
 	tempoRespostaBot = 90 * time.Second
@@ -116,15 +120,27 @@ func (z *sessaoBot) ferramentas(ctx context.Context) []assistente.Ferramenta {
 	return []assistente.Ferramenta{
 		{
 			Nome: "registrar_resposta",
-			Descricao: "Guarda o que a pessoa informou. Chame assim que ela disser, uma vez por dado. " +
-				"Use os nomes de dado listados nas perguntas do atendimento.",
+			Descricao: "Guarda o que a pessoa informou. Chame assim que ela disser. Quando ela contar " +
+				"várias coisas de uma vez, mande todas em `respostas`, numa chamada só. Use os nomes " +
+				"de dado listados nas perguntas do atendimento.",
 			Parametros: map[string]any{
-				"campo": map[string]any{"type": "string", "description": "O nome do dado, como está entre colchetes na lista de perguntas."},
+				"campo": map[string]any{"type": "string", "description": "O nome do dado, como está entre colchetes na lista de perguntas. Use isto para um dado só."},
 				"valor": map[string]any{"type": "string", "description": "O que a pessoa informou, em texto, sem reformatar."},
+				"respostas": map[string]any{
+					"type":        "array",
+					"description": "Vários dados de uma vez, no lugar de campo/valor.",
+					"items": map[string]any{
+						"type": "object",
+						"properties": map[string]any{
+							"campo": map[string]any{"type": "string"},
+							"valor": map[string]any{"type": "string"},
+						},
+						"required": []string{"campo", "valor"},
+					},
+				},
 			},
-			Obrigatorio: []string{"campo", "valor"},
-			Rotulo:      "Registrando o que a pessoa informou",
-			Executar:    z.registrarResposta,
+			Rotulo:   "Registrando o que a pessoa informou",
+			Executar: z.registrarResposta,
 		},
 		{
 			Nome: "encerrar",
@@ -139,54 +155,79 @@ func (z *sessaoBot) ferramentas(ctx context.Context) []assistente.Ferramenta {
 			Obrigatorio: []string{"motivo"},
 			Rotulo:      "Encerrando o atendimento",
 			Executar:    z.encerrar,
+			// Depois de encerrar não se pergunta mais nada ao modelo: a despedida vem antes da
+			// ferramenta, e a rodada extra só gerava texto descartado.
+			Encerra: true,
 		},
 	}
 }
 
 func (z *sessaoBot) registrarResposta(ctx context.Context, entrada json.RawMessage) (string, error) {
 	var p struct {
-		Campo string `json:"campo"`
-		Valor string `json:"valor"`
+		Campo     string `json:"campo"`
+		Valor     string `json:"valor"`
+		Respostas []struct {
+			Campo string `json:"campo"`
+			Valor string `json:"valor"`
+		} `json:"respostas"`
 	}
 	if err := json.Unmarshal(entrada, &p); err != nil {
 		return "", fmt.Errorf("entrada inválida: %w", err)
 	}
-	campo := strings.TrimSpace(strings.ToLower(p.Campo))
-	valor := strings.TrimSpace(p.Valor)
-	if campo == "" || valor == "" {
-		return "", errors.New("campo e valor são obrigatórios")
+	// Uma chamada pode trazer um dado (campo/valor) ou vários (respostas). Aceitar as duas formas
+	// vale a pena: cada rodada de ferramenta reenvia o prompt e o histórico inteiros, então três
+	// dados em três chamadas custam três pedidos ao modelo.
+	pares := make([][2]string, 0, len(p.Respostas)+1)
+	if strings.TrimSpace(p.Campo) != "" || strings.TrimSpace(p.Valor) != "" {
+		pares = append(pares, [2]string{p.Campo, p.Valor})
 	}
-	// Campo que não é de pergunta nenhuma é recusado quando o bot TEM perguntas: senão o modelo
-	// inventaria chave e a tela mostraria dado que ninguém pediu. A mensagem diz o que vale, e o
-	// modelo corrige sozinho. Bot sem perguntas aceita qualquer campo — ali o dado solto é o
-	// único jeito de anotar algo.
-	pergunta := z.perguntaPorCampo(campo)
-	if pergunta == nil && len(z.perguntas) > 0 {
-		nomes := make([]string, 0, len(z.perguntas))
-		for _, q := range z.perguntas {
-			nomes = append(nomes, q.Campo)
+	for _, r := range p.Respostas {
+		pares = append(pares, [2]string{r.Campo, r.Valor})
+	}
+	if len(pares) == 0 {
+		return "", errors.New("informe campo e valor, ou uma lista em respostas")
+	}
+
+	gravados := make([]string, 0, len(pares))
+	for _, par := range pares {
+		campo := strings.TrimSpace(strings.ToLower(par[0]))
+		valor := strings.TrimSpace(par[1])
+		if campo == "" || valor == "" {
+			return "", errors.New("campo e valor são obrigatórios")
 		}
-		return "", fmt.Errorf("dado %q não existe neste atendimento (os dados são: %s)", campo, strings.Join(nomes, ", "))
+		// Campo que não é de pergunta nenhuma é recusado quando o bot TEM perguntas: senão o
+		// modelo inventaria chave e a tela mostraria dado que ninguém pediu. A mensagem diz o que
+		// vale, e o modelo corrige sozinho. Bot sem perguntas aceita qualquer campo — ali o dado
+		// solto é o único jeito de anotar algo.
+		pergunta := z.perguntaPorCampo(campo)
+		if pergunta == nil && len(z.perguntas) > 0 {
+			nomes := make([]string, 0, len(z.perguntas))
+			for _, q := range z.perguntas {
+				nomes = append(nomes, q.Campo)
+			}
+			return "", fmt.Errorf("dado %q não existe neste atendimento (os dados são: %s)", campo, strings.Join(nomes, ", "))
+		}
+		var perguntaID *int64
+		if pergunta != nil {
+			perguntaID = &pergunta.ID
+		}
+		if err := z.s.q.SalvarResposta(ctx, db.SalvarRespostaParams{
+			ConversaID: z.conversa.ID, PerguntaID: perguntaID, Campo: campo, Valor: valor,
+		}); err != nil {
+			return "", err
+		}
+		z.respondido[campo] = valor
+		gravados = append(gravados, campo)
 	}
-	var perguntaID *int64
-	if pergunta != nil {
-		perguntaID = &pergunta.ID
-	}
-	if err := z.s.q.SalvarResposta(ctx, db.SalvarRespostaParams{
-		ConversaID: z.conversa.ID, PerguntaID: perguntaID, Campo: campo, Valor: valor,
-	}); err != nil {
-		return "", err
-	}
-	z.respondido[campo] = valor
 
 	lista, _ := z.paraPrompt()
 	if proxima := atendimento.Proxima(lista); proxima != nil {
-		return fmt.Sprintf(`{"ok":true,"proxima_pergunta":%q}`, proxima.Texto), nil
+		return fmt.Sprintf(`{"ok":true,"registrados":%d,"proxima_pergunta":%q}`, len(gravados), proxima.Texto), nil
 	}
 	if faltam := atendimento.Pendentes(lista); len(faltam) > 0 {
-		return fmt.Sprintf(`{"ok":true,"ainda_faltam":%q}`, strings.Join(faltam, ", ")), nil
+		return fmt.Sprintf(`{"ok":true,"registrados":%d,"ainda_faltam":%q}`, len(gravados), strings.Join(faltam, ", ")), nil
 	}
-	return `{"ok":true,"todas_respondidas":true}`, nil
+	return fmt.Sprintf(`{"ok":true,"registrados":%d,"todas_respondidas":true}`, len(gravados)), nil
 }
 
 func (z *sessaoBot) encerrar(_ context.Context, entrada json.RawMessage) (string, error) {
@@ -280,10 +321,13 @@ func (s *Servidor) responderAtendimento(ctx context.Context, bot db.AtendimentoB
 
 	agente := &assistente.Agente{
 		Modelo: s.cfg.ModeloAtendimento(bot.Modelo),
-		Instrucoes: atendimento.Prompt(
-			atendimento.BotPrompt{Nome: bot.Nome, Instrucoes: bot.Instrucoes}, lista, extras),
-		Contexto:    atendimento.Contexto(s.agora(), valorOuVazio(conversa.ContatoNome)),
-		Ferramentas: z.ferramentas(ctx),
+		// Bloco cacheado: só muda quando alguém edita o bot.
+		Instrucoes: atendimento.PromptEstavel(atendimento.BotPrompt{Nome: bot.Nome, Instrucoes: bot.Instrucoes}, lista),
+		Contexto:   atendimento.Contexto(s.agora(), valorOuVazio(conversa.ContatoNome)),
+		// O que muda a cada mensagem vai no fim, como instrução de sistema, para não invalidar o
+		// cache a cada dado registrado (ver `atendimento.PromptEstavel`).
+		InstrucaoDaVez: atendimento.PromptDaVez(lista, extras),
+		Ferramentas:    z.ferramentas(ctx),
 	}
 
 	ctxModelo, cancelar := context.WithTimeout(ctx, tempoRespostaBot)
@@ -299,9 +343,12 @@ func (s *Servidor) responderAtendimento(ctx context.Context, bot db.AtendimentoB
 		}
 	})
 	// O gasto é somado mesmo quando dá erro no meio: o token já foi cobrado.
-	if uso.TokensEntrada > 0 || uso.TokensSaida > 0 {
+	if uso.TokensEntrada > 0 || uso.TokensSaida > 0 || uso.TokensCacheLidos > 0 {
 		if soma, errSoma := s.q.SomarTokensDaConversa(ctx, db.SomarTokensDaConversaParams{
 			ID: conversa.ID, TokensEntrada: int32(uso.TokensEntrada), TokensSaida: int32(uso.TokensSaida),
+			// O cache fica em colunas próprias: leitura custa ~1/10 da entrada, e somar tudo
+			// esconderia exatamente o que esta medição existe para mostrar.
+			TokensCacheLidos: uso.TokensCacheLidos, TokensCacheGravados: uso.TokensCacheGravado,
 		}); errSoma == nil {
 			res.TokensGasto = soma.TokensEntrada + soma.TokensSaida
 		}

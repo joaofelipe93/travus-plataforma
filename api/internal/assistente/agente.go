@@ -57,6 +57,11 @@ type Ferramenta struct {
 	// O que a tela mostra enquanto roda (ex.: "Consultando o banco de dados").
 	Rotulo   string
 	Executar func(ctx context.Context, entrada json.RawMessage) (string, error)
+	// Encerra marca a ferramenta que termina o assunto: depois dela o laço para, sem pedir outra
+	// rodada ao modelo. No atendimento é a `encerrar` — e a rodada economizada não era só custo,
+	// era o texto que o modelo escrevia depois da despedida e que a plataforma descartava
+	// (issue #128).
+	Encerra bool
 }
 
 // Evento para a tela.
@@ -133,6 +138,12 @@ type Agente struct {
 	// Contexto que muda a cada pergunta (data e hora, quem pergunta): depois do cache.
 	Contexto    string
 	Ferramentas []Ferramenta
+	// InstrucaoDaVez é o que muda a cada mensagem da MESMA conversa — no atendimento, o que já
+	// se sabe da pessoa e qual é a pergunta da vez. Ela vai no fim das mensagens, como mensagem
+	// de sistema, e não no bloco de cima: assim o prefixo cacheado (ferramentas + instruções +
+	// histórico) continua igual byte a byte, e o cache do prompt sobrevive de uma resposta para
+	// a outra. Posta no bloco de cima, invalidaria o cache a cada dado registrado.
+	InstrucaoDaVez string
 }
 
 // Responder roda o laço de tool use sobre o histórico (já validado) e manda os eventos para a
@@ -146,6 +157,12 @@ func (a *Agente) Responder(ctx context.Context, historico []Mensagem, emitir fun
 		},
 		Ferramentas: a.definicoes(),
 		Mensagens:   converterHistorico(historico),
+	}
+	// Segundo marcador de cache, no fim do histórico: as rodadas de ferramenta desta mesma
+	// resposta reenviam tudo isto de novo, e sem o marcador cada rodada paga o prefixo inteiro.
+	marcarUltimaParaCache(pedido.Mensagens)
+	if a.InstrucaoDaVez != "" {
+		pedido.Mensagens = append(pedido.Mensagens, mensagemDeSistema(a.InstrucaoDaVez))
 	}
 	porNome := make(map[string]Ferramenta, len(a.Ferramentas))
 	for _, f := range a.Ferramentas {
@@ -167,6 +184,7 @@ func (a *Agente) Responder(ctx context.Context, historico []Mensagem, emitir fun
 		emitir(Evento{Tipo: "texto", Texto: t})
 	}
 
+	encerrou := false
 	for rodada := 0; rodada < MaximoRodadas; rodada++ {
 		novaRodada = true
 		resp, err := a.Modelo.Gerar(ctx, pedido, aoTexto)
@@ -208,6 +226,14 @@ func (a *Agente) Responder(ctx context.Context, historico []Mensagem, emitir fun
 			emitir(Evento{Tipo: "ferramenta", Ferramenta: f.Nome, Rotulo: f.Rotulo})
 			texto, erro := executar(ctx, f, json.RawMessage(chamada.JSON.Input.Raw()))
 			resultados = append(resultados, anthropic.NewBetaToolResultBlock(chamada.ID, texto, erro))
+			if f.Encerra && !erro {
+				encerrou = true
+			}
+		}
+		if encerrou {
+			// Ferramenta que encerra o assunto: nada a perguntar ao modelo depois dela.
+			uso.Parada = "encerrada"
+			return uso, nil
 		}
 		if len(resultados) == 0 {
 			// tool_use sem bloco de ferramenta (não deveria acontecer): encerra em vez de girar.
@@ -276,6 +302,31 @@ func (a *Agente) definicoes() []anthropic.BetaToolUnionParam {
 		}})
 	}
 	return defs
+}
+
+// mensagemDeSistema é a instrução do operador no meio da conversa: fica depois do histórico,
+// então não quebra o prefixo cacheado. Precisa vir depois de uma mensagem do usuário e ser a
+// última (ou ser seguida por uma do assistente) — é o caso aqui, porque o histórico termina
+// sempre na mensagem da pessoa e as rodadas de ferramenta vêm depois.
+func mensagemDeSistema(texto string) anthropic.BetaMessageParam {
+	return anthropic.BetaMessageParam{
+		Role:    anthropic.BetaMessageParamRoleSystem,
+		Content: []anthropic.BetaContentBlockParamUnion{anthropic.NewBetaTextBlock(texto)},
+	}
+}
+
+// marcarUltimaParaCache põe o marcador de cache no último bloco do histórico.
+func marcarUltimaParaCache(msgs []anthropic.BetaMessageParam) {
+	if len(msgs) == 0 {
+		return
+	}
+	blocos := msgs[len(msgs)-1].Content
+	if len(blocos) == 0 {
+		return
+	}
+	if texto := blocos[len(blocos)-1].OfText; texto != nil {
+		texto.CacheControl = anthropic.NewBetaCacheControlEphemeralParam()
+	}
 }
 
 func converterHistorico(msgs []Mensagem) []anthropic.BetaMessageParam {

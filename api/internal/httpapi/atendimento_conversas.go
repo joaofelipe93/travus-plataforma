@@ -225,6 +225,7 @@ func (s *Servidor) buscarConversa(w http.ResponseWriter, r *http.Request, _ *Usu
 			"status": c.Status, "motivo": c.Motivo,
 			"perguntas_do_bot": c.PerguntasDoBot, "respostas": c.Respostas,
 			"tokens_entrada": c.TokensEntrada, "tokens_saida": c.TokensSaida,
+			"tokens_cache_lidos": c.TokensCacheLidos, "tokens_cache_gravados": c.TokensCacheGravados,
 			"iniciada_em": c.IniciadaEm, "ultima_em": c.UltimaEm, "encerrada_em": c.EncerradaEm,
 			"assumida_em": c.AssumidaEm, "assumida_por_nome": c.AssumidaPorNome,
 			"reaberta_em": c.ReabertaEm,

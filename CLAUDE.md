@@ -28,6 +28,20 @@ hora, conforme o que a pessoa disse.
   **trecho atual** (`tokens_marco`), senão conversa longa deixaria a pessoa sem atendimento para
   sempre. Lead já decidido não é sobrescrito: a volta rende um lead novo (migração 00025, índice
   parcial "um lead por decidir por conversa").
+- **O prompt vai em duas partes, e é isso que faz o cache funcionar** (issue #128, item dos
+  tokens): `atendimento.PromptEstavel` (quem o bot é, as regras da casa e a lista de perguntas) só
+  muda quando alguém edita o bot e é o **bloco cacheado**; `atendimento.PromptDaVez` (o que já se
+  sabe, o que falta, a pergunta da vez) vai **no fim das mensagens**, como instrução de sistema.
+  Antes era um texto só no bloco cacheado: cada resposta registrada mudava o prompt e **o cache
+  morria toda vez** — uma conversa de 17 respostas gastou 46.875 tokens de entrada em produção. O
+  mínimo para cachear no Haiku 5.5 é 512 tokens, e um teste guarda o tamanho do bloco estável.
+  Outras três economias do mesmo item: `registrar_resposta` aceita **vários dados numa chamada**
+  (cada rodada de ferramenta reenvia o prompt inteiro), a ferramenta `encerrar` **para o laço**
+  (`Ferramenta.Encerra`, que também elimina o texto descartado depois da despedida) e o histórico
+  enviado caiu de 40 para 24 mensagens — o que a pessoa contou não se perde, porque os dados
+  colhidos vão na instrução da vez. **O cache é medido** (`conversas.tokens_cache_lidos`,
+  migração 00026) e aparece na tela da conversa: cache que morre é silencioso, e sem medir a
+  economia seria promessa.
 - **Pessoa atendendo cala o bot** (issue #128): `conversas.assumida_em`. Dois caminhos, os dois
   pedidos pelo usuário: o botão **"Assumir conversa"** na tela e, automático, **um consultor
   respondendo pelo WhatsApp do bot** — o worker passou a entregar o que sai do próprio número e a
@@ -272,6 +286,10 @@ Qualquer perfil cuida do **próprio** perfil (dados de contato e credenciais pes
 ## Assistente
 
 - **Só consulta.** Nenhuma ferramenta cria execução, aprova lance, reenvia PDF, manda WhatsApp ou muda cadastro; se pedirem, ele explica onde a pessoa faz. Ferramenta nova do assistente **nunca** age: se um dia precisar, é decisão do usuário, com confirmação na tela.
+- O agente aceita uma **instrução da vez** (`Agente.InstrucaoDaVez`), que vai como mensagem de
+  sistema no fim das mensagens em vez de no bloco de cima, e um segundo marcador de cache no fim
+  do histórico; `Ferramenta.Encerra` para o laço sem pedir outra rodada. As três coisas existem
+  para o cache do prompt sobreviver (ver o Atendimento, "o prompt vai em duas partes").
 - Modelo `claude-haiku-4-5` (decisão do usuário, 24/09/2026: o Haiku 3.5 pedido foi aposentado; sem pensamento, porque o Haiku 4.5 recusa adaptativo e effort). Com `ASSISTENTE_MODELO` num Opus/Sonnet atual, liga pensamento adaptativo com esforço médio e, no Opus 5/Fable, o fallback do servidor em recusa. Laço de tool use com streaming em `internal/assistente/agente.go` (no máximo 10 rodadas, resultado de ferramenta cortado em 24 mil caracteres). Instruções fixas em `instrucoes.go` (vão para o cache do prompt; **serviço, tabela ou regra nova: atualize o esquema descrito lá**); data, hora e perfil vão num bloco à parte.
 - Ferramentas (`httpapi/assistente_ferramentas.go`): `estado_plataforma` (versão, alertas ativos do vigia, worker, Drive, configuração do Canopus com o próximo dry-run automático e a situação do lance real automático, WhatsApp sem QR nem número), `resumo_canopus` (cadastro, execuções, cotas, lances e Drive por período, consultas do sqlc em `queries/assistente.sql`), `listar_reservas` (mesma interpretação da tela Reservas) e `consultar_banco`.
 - `consultar_banco`: SELECT livre num **pool próprio com o login do papel `assistente`** (migração 00011: `default_transaction_read_only`, `statement_timeout` 5 s, `NOINHERIT`, 4 conexões), transação `READ ONLY`, 200 linhas. O papel **não enxerga** `sessoes`, `senha_hash`, `clientes.cpf_cnpj`, `dados_cifrados`/`dica`, `arquivos.conteudo`, `importacoes.linhas`, `auditoria.ip` nem `goose_db_version`. Do schema `atendimento` ele vê `bots`, `etapas` e `conversas` (configuração e contagem) e **não** vê `mensagens` nem `coletas`: são o conteúdo da conversa de um cliente e os dados que ele contou, e o que o assistente lê vai para a API da Anthropic. Tabela nova não entra sozinha: dê o `GRANT` numa migração se o assistente precisar dela (e descreva em `instrucoes.go`). Não troque o pool por `SET ROLE` na conexão da API: ela é superusuária e um `set_config('role', …)` voltaria a ela.

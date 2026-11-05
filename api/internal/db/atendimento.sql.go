@@ -16,7 +16,7 @@ VALUES ($1, $2, $3)
 ON CONFLICT (bot_id, telefone) WHERE status = 'aberta' DO UPDATE SET
     contato_nome = coalesce(EXCLUDED.contato_nome, atendimento.conversas.contato_nome),
     ultima_em    = now()
-RETURNING id, bot_id, telefone, contato_nome, status, motivo, tokens_entrada, tokens_saida, iniciada_em, ultima_em, encerrada_em, assumida_em, assumida_por, reaberta_em, tokens_marco, wa_lid
+RETURNING id, bot_id, telefone, contato_nome, status, motivo, tokens_entrada, tokens_saida, iniciada_em, ultima_em, encerrada_em, assumida_em, assumida_por, reaberta_em, tokens_marco, wa_lid, tokens_cache_lidos, tokens_cache_gravados
 `
 
 type AbrirOuContinuarConversaParams struct {
@@ -45,6 +45,8 @@ func (q *Queries) AbrirOuContinuarConversa(ctx context.Context, arg AbrirOuConti
 		&i.ReabertaEm,
 		&i.TokensMarco,
 		&i.WaLid,
+		&i.TokensCacheLidos,
+		&i.TokensCacheGravados,
 	)
 	return i, err
 }
@@ -103,7 +105,7 @@ UPDATE atendimento.conversas SET
     assumida_em  = coalesce(assumida_em, now()),
     assumida_por = coalesce($1, assumida_por),
     ultima_em    = now()
-WHERE id = $2 RETURNING id, bot_id, telefone, contato_nome, status, motivo, tokens_entrada, tokens_saida, iniciada_em, ultima_em, encerrada_em, assumida_em, assumida_por, reaberta_em, tokens_marco, wa_lid
+WHERE id = $2 RETURNING id, bot_id, telefone, contato_nome, status, motivo, tokens_entrada, tokens_saida, iniciada_em, ultima_em, encerrada_em, assumida_em, assumida_por, reaberta_em, tokens_marco, wa_lid, tokens_cache_lidos, tokens_cache_gravados
 `
 
 type AssumirConversaParams struct {
@@ -134,6 +136,8 @@ func (q *Queries) AssumirConversa(ctx context.Context, arg AssumirConversaParams
 		&i.ReabertaEm,
 		&i.TokensMarco,
 		&i.WaLid,
+		&i.TokensCacheLidos,
+		&i.TokensCacheGravados,
 	)
 	return i, err
 }
@@ -305,6 +309,7 @@ SELECT c.id, c.bot_id, b.nome AS bot_nome, b.slug AS bot_slug, c.telefone, c.con
        c.status, c.motivo,
        c.tokens_entrada, c.tokens_saida, c.iniciada_em, c.ultima_em, c.encerrada_em,
        c.assumida_em, c.reaberta_em, c.tokens_marco,
+       c.tokens_cache_lidos, c.tokens_cache_gravados,
        coalesce((SELECT u.nome FROM usuarios u WHERE u.id = c.assumida_por), '')::text AS assumida_por_nome,
        (SELECT count(*) FROM atendimento.perguntas x WHERE x.bot_id = c.bot_id)   AS perguntas_do_bot,
        (SELECT count(*) FROM atendimento.coletas k WHERE k.conversa_id = c.id)    AS respostas
@@ -314,25 +319,27 @@ WHERE c.id = $1
 `
 
 type BuscarConversaRow struct {
-	ID              int64
-	BotID           int64
-	BotNome         string
-	BotSlug         string
-	Telefone        string
-	ContatoNome     *string
-	Status          string
-	Motivo          *string
-	TokensEntrada   int32
-	TokensSaida     int32
-	IniciadaEm      time.Time
-	UltimaEm        time.Time
-	EncerradaEm     *time.Time
-	AssumidaEm      *time.Time
-	ReabertaEm      *time.Time
-	TokensMarco     int32
-	AssumidaPorNome string
-	PerguntasDoBot  int64
-	Respostas       int64
+	ID                  int64
+	BotID               int64
+	BotNome             string
+	BotSlug             string
+	Telefone            string
+	ContatoNome         *string
+	Status              string
+	Motivo              *string
+	TokensEntrada       int32
+	TokensSaida         int32
+	IniciadaEm          time.Time
+	UltimaEm            time.Time
+	EncerradaEm         *time.Time
+	AssumidaEm          *time.Time
+	ReabertaEm          *time.Time
+	TokensMarco         int32
+	TokensCacheLidos    int64
+	TokensCacheGravados int64
+	AssumidaPorNome     string
+	PerguntasDoBot      int64
+	Respostas           int64
 }
 
 func (q *Queries) BuscarConversa(ctx context.Context, id int64) (BuscarConversaRow, error) {
@@ -355,6 +362,8 @@ func (q *Queries) BuscarConversa(ctx context.Context, id int64) (BuscarConversaR
 		&i.AssumidaEm,
 		&i.ReabertaEm,
 		&i.TokensMarco,
+		&i.TokensCacheLidos,
+		&i.TokensCacheGravados,
 		&i.AssumidaPorNome,
 		&i.PerguntasDoBot,
 		&i.Respostas,
@@ -571,7 +580,7 @@ func (q *Queries) ContarRespostasDaHora(ctx context.Context, botID int64) (int32
 }
 
 const conversaPeloLid = `-- name: ConversaPeloLid :one
-SELECT id, bot_id, telefone, contato_nome, status, motivo, tokens_entrada, tokens_saida, iniciada_em, ultima_em, encerrada_em, assumida_em, assumida_por, reaberta_em, tokens_marco, wa_lid FROM atendimento.conversas
+SELECT id, bot_id, telefone, contato_nome, status, motivo, tokens_entrada, tokens_saida, iniciada_em, ultima_em, encerrada_em, assumida_em, assumida_por, reaberta_em, tokens_marco, wa_lid, tokens_cache_lidos, tokens_cache_gravados FROM atendimento.conversas
 WHERE bot_id = $1 AND wa_lid = $2
 ORDER BY ultima_em DESC, id DESC LIMIT 1
 `
@@ -601,6 +610,8 @@ func (q *Queries) ConversaPeloLid(ctx context.Context, arg ConversaPeloLidParams
 		&i.ReabertaEm,
 		&i.TokensMarco,
 		&i.WaLid,
+		&i.TokensCacheLidos,
+		&i.TokensCacheGravados,
 	)
 	return i, err
 }
@@ -865,7 +876,7 @@ func (q *Queries) DesistirDaMensagemDeAtendimento(ctx context.Context, arg Desis
 const devolverConversaAoBot = `-- name: DevolverConversaAoBot :one
 UPDATE atendimento.conversas SET
     assumida_em = NULL, assumida_por = NULL, ultima_em = now()
-WHERE id = $1 RETURNING id, bot_id, telefone, contato_nome, status, motivo, tokens_entrada, tokens_saida, iniciada_em, ultima_em, encerrada_em, assumida_em, assumida_por, reaberta_em, tokens_marco, wa_lid
+WHERE id = $1 RETURNING id, bot_id, telefone, contato_nome, status, motivo, tokens_entrada, tokens_saida, iniciada_em, ultima_em, encerrada_em, assumida_em, assumida_por, reaberta_em, tokens_marco, wa_lid, tokens_cache_lidos, tokens_cache_gravados
 `
 
 func (q *Queries) DevolverConversaAoBot(ctx context.Context, id int64) (AtendimentoConversa, error) {
@@ -888,6 +899,8 @@ func (q *Queries) DevolverConversaAoBot(ctx context.Context, id int64) (Atendime
 		&i.ReabertaEm,
 		&i.TokensMarco,
 		&i.WaLid,
+		&i.TokensCacheLidos,
+		&i.TokensCacheGravados,
 	)
 	return i, err
 }
@@ -895,7 +908,7 @@ func (q *Queries) DevolverConversaAoBot(ctx context.Context, id int64) (Atendime
 const encerrarConversa = `-- name: EncerrarConversa :one
 UPDATE atendimento.conversas SET
     status = $1, motivo = $2, ultima_em = now(), encerrada_em = now()
-WHERE id = $3 RETURNING id, bot_id, telefone, contato_nome, status, motivo, tokens_entrada, tokens_saida, iniciada_em, ultima_em, encerrada_em, assumida_em, assumida_por, reaberta_em, tokens_marco, wa_lid
+WHERE id = $3 RETURNING id, bot_id, telefone, contato_nome, status, motivo, tokens_entrada, tokens_saida, iniciada_em, ultima_em, encerrada_em, assumida_em, assumida_por, reaberta_em, tokens_marco, wa_lid, tokens_cache_lidos, tokens_cache_gravados
 `
 
 type EncerrarConversaParams struct {
@@ -924,6 +937,8 @@ func (q *Queries) EncerrarConversa(ctx context.Context, arg EncerrarConversaPara
 		&i.ReabertaEm,
 		&i.TokensMarco,
 		&i.WaLid,
+		&i.TokensCacheLidos,
+		&i.TokensCacheGravados,
 	)
 	return i, err
 }
@@ -1518,7 +1533,7 @@ WHERE id = (SELECT c.id FROM atendimento.conversas c
             WHERE c.bot_id = $2 AND c.telefone = $3
             ORDER BY c.ultima_em DESC, c.id DESC
             LIMIT 1)
-RETURNING id, bot_id, telefone, contato_nome, status, motivo, tokens_entrada, tokens_saida, iniciada_em, ultima_em, encerrada_em, assumida_em, assumida_por, reaberta_em, tokens_marco, wa_lid
+RETURNING id, bot_id, telefone, contato_nome, status, motivo, tokens_entrada, tokens_saida, iniciada_em, ultima_em, encerrada_em, assumida_em, assumida_por, reaberta_em, tokens_marco, wa_lid, tokens_cache_lidos, tokens_cache_gravados
 `
 
 type ReabrirConversaDoTelefoneParams struct {
@@ -1560,6 +1575,8 @@ func (q *Queries) ReabrirConversaDoTelefone(ctx context.Context, arg ReabrirConv
 		&i.ReabertaEm,
 		&i.TokensMarco,
 		&i.WaLid,
+		&i.TokensCacheLidos,
+		&i.TokensCacheGravados,
 	)
 	return i, err
 }
@@ -1831,27 +1848,44 @@ func (q *Queries) SalvarResposta(ctx context.Context, arg SalvarRespostaParams) 
 
 const somarTokensDaConversa = `-- name: SomarTokensDaConversa :one
 UPDATE atendimento.conversas SET
-    tokens_entrada = tokens_entrada + $1,
-    tokens_saida   = tokens_saida + $2,
-    ultima_em      = now()
-WHERE id = $3 RETURNING tokens_entrada, tokens_saida
+    tokens_entrada        = tokens_entrada + $1,
+    tokens_saida          = tokens_saida + $2,
+    tokens_cache_lidos    = tokens_cache_lidos + $3,
+    tokens_cache_gravados = tokens_cache_gravados + $4,
+    ultima_em             = now()
+WHERE id = $5 RETURNING tokens_entrada, tokens_saida, tokens_cache_lidos, tokens_cache_gravados
 `
 
 type SomarTokensDaConversaParams struct {
-	TokensEntrada int32
-	TokensSaida   int32
-	ID            int64
+	TokensEntrada       int32
+	TokensSaida         int32
+	TokensCacheLidos    int64
+	TokensCacheGravados int64
+	ID                  int64
 }
 
 type SomarTokensDaConversaRow struct {
-	TokensEntrada int32
-	TokensSaida   int32
+	TokensEntrada       int32
+	TokensSaida         int32
+	TokensCacheLidos    int64
+	TokensCacheGravados int64
 }
 
 func (q *Queries) SomarTokensDaConversa(ctx context.Context, arg SomarTokensDaConversaParams) (SomarTokensDaConversaRow, error) {
-	row := q.db.QueryRow(ctx, somarTokensDaConversa, arg.TokensEntrada, arg.TokensSaida, arg.ID)
+	row := q.db.QueryRow(ctx, somarTokensDaConversa,
+		arg.TokensEntrada,
+		arg.TokensSaida,
+		arg.TokensCacheLidos,
+		arg.TokensCacheGravados,
+		arg.ID,
+	)
 	var i SomarTokensDaConversaRow
-	err := row.Scan(&i.TokensEntrada, &i.TokensSaida)
+	err := row.Scan(
+		&i.TokensEntrada,
+		&i.TokensSaida,
+		&i.TokensCacheLidos,
+		&i.TokensCacheGravados,
+	)
 	return i, err
 }
 

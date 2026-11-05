@@ -97,6 +97,18 @@ export default function PaginaConversa() {
                   valor: tokensLegivel(c.tokens_entrada + c.tokens_saida),
                   detalhe: `${c.tokens_entrada} entrada · ${c.tokens_saida} saída`,
                 },
+                {
+                  // Leitura de cache custa cerca de um décimo da entrada normal: quanto mais
+                  // aqui, mais barata foi a conversa. Zero numa conversa de várias mensagens
+                  // quer dizer que o cache não está pegando.
+                  rotulo: "Lido do cache",
+                  valor: tokensLegivel(c.tokens_cache_lidos),
+                  tom: c.tokens_cache_lidos > 0 ? "ok" : "neutro",
+                  detalhe:
+                    c.tokens_cache_lidos > 0
+                      ? `custa ~1/10 da entrada · ${c.tokens_cache_gravados} gravados`
+                      : "nada aproveitado do cache nesta conversa",
+                },
               ]}
             />
           </Bloco>

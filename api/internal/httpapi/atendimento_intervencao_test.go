@@ -76,10 +76,11 @@ func TestAtendimentoQuemVoltaContinuaNaMesmaConversa(t *testing.T) {
 	if len(coletas) != 1 || coletas[0].Valor != "Acme Ltda" {
 		t.Fatalf("os dados da primeira passagem deviam continuar: %+v", coletas)
 	}
-	// E o bot foi avisado de que não precisa perguntar de novo.
-	prompt := strings.Join(m.sistema, "\n")
-	if !strings.Contains(prompt, "JÁ RESPONDIDA") || !strings.Contains(prompt, "Acme Ltda") {
-		t.Errorf("o prompt da volta devia dizer o que já se sabe: %q", prompt)
+	// E o bot foi avisado de que não precisa perguntar de novo (na instrução da vez, que é onde
+	// mora o que muda — ver a divisão do prompt na issue #128).
+	daVez := strings.Join(m.daVez, "\n")
+	if !strings.Contains(daVez, "JÁ RESPONDIDA") || !strings.Contains(daVez, "Acme Ltda") {
+		t.Errorf("a instrução da volta devia dizer o que já se sabe: %q", daVez)
 	}
 }
 
@@ -292,5 +293,134 @@ func TestAtendimentoNaoMandaTextoDepoisDeEncerrar(t *testing.T) {
 	}
 	if !strings.Contains(enviada, "passar seu pedido") {
 		t.Errorf("a despedida de antes do encerrar devia sair: %q", enviada)
+	}
+}
+
+// Issue #128, item "tokens gastos, otimizar". O que estes testes guardam não é um número de
+// tokens (isso depende do modelo), e sim a forma do pedido que torna o cache possível: o que muda
+// a cada mensagem não pode estar no bloco cacheado.
+
+func TestAtendimentoMandaOQueMudaNoFimDasMensagens(t *testing.T) {
+	m := &modeloRoteiroBot{turnos: []turnoBot{
+		{ferramenta: "registrar_resposta", entrada: `{"campo":"nome_da_empresa","valor":"Acme Ltda"}`},
+		{texto: "Obrigado! Qual o melhor telefone?"},
+	}}
+	s := servidorComBot(t, m)
+	bot := botComPerguntas(t, s, "cache-forma", true)
+
+	if _, err := s.responderAtendimento(context.Background(), bot, "5511900000001", "", "somos a Acme", ""); err != nil {
+		t.Fatal(err)
+	}
+
+	cima := strings.Join(m.sistema, "\n")
+	fim := strings.Join(m.daVez, "\n")
+	// O bloco de cima tem quem o bot é e as perguntas…
+	for _, esperado := range []string{"Travus", "1. Qual é o nome da empresa?", "Nunca peça senha"} {
+		if !strings.Contains(cima, esperado) {
+			t.Errorf("o bloco cacheado devia conter %q", esperado)
+		}
+	}
+	// …e não tem nada que mude durante a conversa.
+	for _, proibido := range []string{"JÁ RESPONDIDA", "Agora trate da pergunta"} {
+		if strings.Contains(cima, proibido) {
+			t.Errorf("%q no bloco cacheado invalida o cache a cada resposta:\n%s", proibido, cima)
+		}
+	}
+	// A pergunta da vez chega como instrução de sistema no fim das mensagens.
+	if !strings.Contains(fim, "Agora trate da pergunta") {
+		t.Errorf("a instrução da vez devia ir no fim das mensagens:\n%s", fim)
+	}
+}
+
+func TestAtendimentoGuardaOQueVeioDoCache(t *testing.T) {
+	m := &modeloRoteiroBot{turnos: []turnoBot{{texto: "Oi! Qual é o nome da empresa?"}}}
+	s := servidorComBot(t, m)
+	bot := botComPerguntas(t, s, "cache-conta", true)
+	ctx := context.Background()
+
+	res, err := s.responderAtendimento(ctx, bot, "5511900000002", "", "oi", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	c, err := s.q.BuscarConversa(ctx, res.ConversaID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Sem isto gravado, "o cache está funcionando?" não tem resposta — e cache que morre é
+	// silencioso: aparece só como conta maior no fim do mês.
+	if c.TokensCacheLidos == 0 || c.TokensCacheGravados == 0 {
+		t.Errorf("o cache devia estar contabilizado na conversa: lidos=%d gravados=%d",
+			c.TokensCacheLidos, c.TokensCacheGravados)
+	}
+	// E o teto de tokens continua olhando só o que foi cobrado como entrada normal.
+	if res.TokensGasto != c.TokensEntrada+c.TokensSaida {
+		t.Errorf("o gasto do teto não devia incluir cache: %d vs %d", res.TokensGasto, c.TokensEntrada+c.TokensSaida)
+	}
+}
+
+// Vários dados numa chamada só: cada rodada de ferramenta reenvia o prompt e o histórico
+// inteiros, então registrar três coisas em três chamadas custa três pedidos ao modelo.
+func TestAtendimentoRegistraVariosDadosNumaChamada(t *testing.T) {
+	m := &modeloRoteiroBot{turnos: []turnoBot{
+		{ferramenta: "registrar_resposta", entrada: `{"respostas":[
+			{"campo":"nome_da_empresa","valor":"Acme Ltda"},
+			{"campo":"melhor_telefone","valor":"11988887777"}]}`},
+		{texto: "Perfeito, já tenho tudo.", ferramenta: "encerrar", entrada: `{"motivo":"concluido"}`},
+	}}
+	s := servidorComBot(t, m)
+	bot := botComPerguntas(t, s, "lote", true)
+	ctx := context.Background()
+
+	res, err := s.responderAtendimento(ctx, bot, "5511900000003", "", "somos a Acme, telefone 11988887777", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	coletas, err := s.q.ColetasDaConversa(ctx, res.ConversaID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(coletas) != 2 {
+		t.Fatalf("as duas respostas deviam ter sido gravadas numa chamada: %+v", coletas)
+	}
+	// Duas chamadas ao modelo: a que registra os dois dados e a que se despede encerrando. Com
+	// uma chamada por dado seriam três, e sem o `Encerra` da ferramenta haveria uma quarta só
+	// para o modelo escrever um texto que a plataforma descarta.
+	if m.chamadas != 2 {
+		t.Errorf("devia ter gastado 2 chamadas ao modelo, gastou %d", m.chamadas)
+	}
+	if !res.Encerrada {
+		t.Error("com tudo respondido, devia encerrar")
+	}
+}
+
+// Dado inventado continua sendo recusado, inclusive dentro de uma lista — senão a tela mostraria
+// campo que ninguém configurou.
+func TestAtendimentoRecusaDadoDesconhecidoNaLista(t *testing.T) {
+	m := &modeloRoteiroBot{turnos: []turnoBot{
+		{ferramenta: "registrar_resposta", entrada: `{"respostas":[
+			{"campo":"nome_da_empresa","valor":"Acme"},
+			{"campo":"cor_favorita","valor":"azul"}]}`},
+		{texto: "Desculpe, vamos de novo: qual o melhor telefone?"},
+	}}
+	s := servidorComBot(t, m)
+	bot := botComPerguntas(t, s, "lote-recusa", true)
+	ctx := context.Background()
+
+	res, err := s.responderAtendimento(ctx, bot, "5511900000004", "", "somos a Acme e gosto de azul", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	erro := strings.Join(m.resultados, " ")
+	if !strings.Contains(erro, "cor_favorita") {
+		t.Errorf("o modelo devia ter sido avisado do dado inválido: %q", m.resultados)
+	}
+	coletas, err := s.q.ColetasDaConversa(ctx, res.ConversaID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range coletas {
+		if c.Campo == "cor_favorita" {
+			t.Error("o dado inventado não podia ser gravado")
+		}
 	}
 }
