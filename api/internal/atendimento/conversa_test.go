@@ -228,3 +228,21 @@ func TestPromptEstavelTemTamanhoCacheavel(t *testing.T) {
 		t.Errorf("o bloco cacheado tem %d caracteres: perto do mínimo para o cache pegar", len(p))
 	}
 }
+
+// O nome do bot pode ser de pessoa (o bot da Smart se chama Rodrigo). O prompt tem de dizer que
+// ESSE é o nome dele, e não que existe alguém com esse nome por trás: antes dizia "você é o
+// atendimento de Rodrigo", e em produção o modelo respondeu "não faço parte de uma organização
+// como funcionário, então não tenho cargo" quando perguntaram quem era.
+func TestPromptDizQueONomeEODoProprioBot(t *testing.T) {
+	p := PromptEstavel(BotPrompt{Nome: "Rodrigo", Instrucoes: "Primeiro atendimento da Smart."}, nil)
+	if !strings.Contains(p, "se apresenta como Rodrigo") {
+		t.Errorf("o prompt devia dizer que o bot se apresenta com esse nome:\n%s", p)
+	}
+	if strings.Contains(p, "atendimento de Rodrigo") {
+		t.Error("essa forma faz o modelo tratar o nome como se fosse outra pessoa")
+	}
+	// E continua dizendo que não é gente.
+	if !strings.Contains(p, "atendimento automático") {
+		t.Error("o prompt precisa dizer que é atendimento automático")
+	}
+}

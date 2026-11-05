@@ -77,7 +77,14 @@ func (p PerguntaPrompt) Respondida() bool { return strings.TrimSpace(p.Resposta)
 // entrada em produção em 05/11/2026.
 func PromptEstavel(b BotPrompt, perguntas []PerguntaPrompt) string {
 	var sb strings.Builder
-	fmt.Fprintf(&sb, "Você é o atendimento de %s no WhatsApp.\n\n%s\n\n%s\n", b.Nome, strings.TrimSpace(b.Instrucoes), regrasFixas)
+	// "Você atende como X", e não "você é o atendimento de X": com nome de pessoa (o bot da Smart
+	// se chama Rodrigo desde 06/11/2026), a segunda forma faz o modelo tratar o nome como se
+	// fosse outra pessoa. Em produção ele respondeu "não faço parte de uma organização como
+	// funcionário, então não tenho cargo" quando perguntaram quem era.
+	fmt.Fprintf(&sb, "Você atende no WhatsApp e se apresenta como %s. Esse é o nome com que este "+
+		"atendimento assina — não existe outra pessoa com esse nome para quem você possa passar a "+
+		"conversa, e você é um atendimento automático (ver as regras abaixo).\n\n%s\n\n%s\n",
+		b.Nome, strings.TrimSpace(b.Instrucoes), regrasFixas)
 
 	if len(perguntas) == 0 {
 		sb.WriteString("\nEste atendimento não tem perguntas configuradas: converse, responda o que souber e " +
