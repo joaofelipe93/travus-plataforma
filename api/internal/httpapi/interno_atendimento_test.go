@@ -75,7 +75,7 @@ func TestAtendimentoFilaEntregaEregistra(t *testing.T) {
 	m := &modeloRoteiroBot{turnos: []turnoBot{{texto: "Oi! Em qual bairro?"}}}
 	s := servidorComBot(t, m)
 	bot := botComPerguntas(t, s, "fila", true)
-	res, err := s.responderAtendimento(context.Background(), bot, "5511900060001", "Ana", "oi")
+	res, err := s.responderAtendimento(context.Background(), bot, "5511900060001", "Ana", "oi", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -117,7 +117,7 @@ func TestAtendimentoFilaNaoEntregaDeBotDesligado(t *testing.T) {
 	m := &modeloRoteiroBot{turnos: []turnoBot{{texto: "Oi!"}}}
 	s := servidorComBot(t, m)
 	bot := botComPerguntas(t, s, "desligado-depois", true)
-	if _, err := s.responderAtendimento(context.Background(), bot, "5511900060002", "", "oi"); err != nil {
+	if _, err := s.responderAtendimento(context.Background(), bot, "5511900060002", "", "oi", ""); err != nil {
 		t.Fatal(err)
 	}
 
@@ -137,7 +137,7 @@ func TestAtendimentoFilaSoDeQuemTemSessao(t *testing.T) {
 	m := &modeloRoteiroBot{turnos: []turnoBot{{texto: "Oi!"}}}
 	s := servidorComBot(t, m)
 	bot := botComPerguntas(t, s, "com-sessao", true)
-	if _, err := s.responderAtendimento(context.Background(), bot, "5511900060003", "", "oi"); err != nil {
+	if _, err := s.responderAtendimento(context.Background(), bot, "5511900060003", "", "oi", ""); err != nil {
 		t.Fatal(err)
 	}
 
@@ -155,7 +155,7 @@ func TestAtendimentoFilaFalhaVoltaOuDesiste(t *testing.T) {
 	m := &modeloRoteiroBot{turnos: []turnoBot{{texto: "Oi!"}}}
 	s := servidorComBot(t, m)
 	bot := botComPerguntas(t, s, "falhas", true)
-	res, err := s.responderAtendimento(context.Background(), bot, "5511900060004", "", "oi")
+	res, err := s.responderAtendimento(context.Background(), bot, "5511900060004", "", "oi", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -205,7 +205,7 @@ func TestAtendimentoFilaDesisteNoTeto(t *testing.T) {
 	m := &modeloRoteiroBot{turnos: []turnoBot{{texto: "Oi!"}}}
 	s := servidorComBot(t, m)
 	bot := botComPerguntas(t, s, "teto-tentativas", true)
-	res, err := s.responderAtendimento(context.Background(), bot, "5511900060005", "", "oi")
+	res, err := s.responderAtendimento(context.Background(), bot, "5511900060005", "", "oi", "")
 	if err != nil {
 		t.Fatal(err)
 	}

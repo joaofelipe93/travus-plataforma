@@ -42,6 +42,8 @@ const (
 // motivos de uma resposta que não saiu; a tela mostra este texto.
 const (
 	motivoTetoHora = "teto de respostas por hora deste bot"
+	// Uma pessoa está atendendo esta conversa: o bot cala a boca até alguém devolvê-la a ele.
+	motivoAssumida = "uma pessoa assumiu esta conversa"
 )
 
 // resultadoAtendimento é o que aconteceu com uma mensagem recebida.
@@ -207,7 +209,7 @@ func (z *sessaoBot) encerrar(_ context.Context, entrada json.RawMessage) (string
 // responderAtendimento é o caminho de uma mensagem recebida: abre ou continua a conversa, chama o
 // modelo e enfileira a resposta (ou a grava cancelada, com o motivo). O worker chama isto pela
 // rota interna e não decide nada.
-func (s *Servidor) responderAtendimento(ctx context.Context, bot db.AtendimentoBot, telefone, contato, texto string) (resultadoAtendimento, error) {
+func (s *Servidor) responderAtendimento(ctx context.Context, bot db.AtendimentoBot, telefone, contato, texto, lid string) (resultadoAtendimento, error) {
 	if s.cfg.ModeloAtendimento == nil {
 		return resultadoAtendimento{}, errors.New("atendimento indisponível: falta ANTHROPIC_API_KEY no servidor")
 	}
@@ -220,9 +222,7 @@ func (s *Servidor) responderAtendimento(ctx context.Context, bot db.AtendimentoB
 	if err != nil {
 		return resultadoAtendimento{}, err
 	}
-	conversa, err := s.q.AbrirOuContinuarConversa(ctx, db.AbrirOuContinuarConversaParams{
-		BotID: bot.ID, Telefone: telefone, ContatoNome: textoOuNil(contato),
-	})
+	conversa, err := s.conversaDoTelefone(ctx, bot, telefone, contato)
 	if err != nil {
 		return resultadoAtendimento{}, err
 	}
@@ -231,11 +231,26 @@ func (s *Servidor) responderAtendimento(ctx context.Context, bot db.AtendimentoB
 	}); err != nil {
 		return resultadoAtendimento{}, err
 	}
+	// O LID da conversa só aparece quando a pessoa escreve; guardá-lo é o que depois permite
+	// reconhecer a conversa numa mensagem que SAI pelo número do bot (issue #128).
+	if lid != "" {
+		if err := s.q.GuardarLidDaConversa(ctx, db.GuardarLidDaConversaParams{ID: conversa.ID, WaLid: &lid}); err != nil {
+			slog.Error("atendimento: falha ao guardar o lid da conversa", "conversa_id", conversa.ID, "erro", err)
+		}
+	}
 
 	res := resultadoAtendimento{ConversaID: conversa.ID, TokensGasto: conversa.TokensEntrada + conversa.TokensSaida}
 
+	// Uma pessoa assumiu: a mensagem fica registrada (quem atende precisa lê-la), mas o modelo
+	// não é chamado. Responder por cima de um consultor é pior que não responder.
+	if conversa.AssumidaEm != nil {
+		res.Status, res.Motivo = "sem_resposta", motivoAssumida
+		return res, nil
+	}
+
 	// Teto de tokens: a conversa que passou do limite é encerrada em vez de virar conta sem fim.
-	if res.TokensGasto >= bot.MaxTokensConversa {
+	// Conta o trecho atual — conversa reaberta não herda o gasto das passagens anteriores.
+	if res.TokensGasto-conversa.TokensMarco >= bot.MaxTokensConversa {
 		if _, err := s.q.EncerrarConversa(ctx, db.EncerrarConversaParams{
 			ID: conversa.ID, Status: "encerrada", Motivo: textoOuNil("teto de tokens da conversa"),
 		}); err != nil {
@@ -275,7 +290,11 @@ func (s *Servidor) responderAtendimento(ctx context.Context, bot db.AtendimentoB
 	defer cancelar()
 	var resposta strings.Builder
 	uso, err := agente.Responder(ctxModelo, historico, func(e assistente.Evento) {
-		if e.Tipo == "texto" {
+		// Texto escrito DEPOIS de `encerrar` não vai para o WhatsApp: a despedida é a que vem
+		// antes da ferramenta. Sem isto, as duas viram parágrafos da mesma mensagem e a pessoa lê
+		// a mesma despedida duas vezes ("vou passar para a equipe" + "o atendimento foi
+		// encerrado") — foi o que a issue #128 chamou de quebra da mensagem.
+		if e.Tipo == "texto" && !z.encerrou {
 			resposta.WriteString(e.Texto)
 		}
 	})
@@ -334,6 +353,91 @@ func (s *Servidor) responderAtendimento(ctx context.Context, bot db.AtendimentoB
 		// Conversa encerrada que colheu algo vira lead para alguém revisar (etapa E). Falha aqui
 		// não derruba o atendimento: a pessoa já foi respondida.
 		s.criarLeadSePreciso(ctx, bot, conversa.ID, z.motivo)
+	}
+	return res, nil
+}
+
+// conversaDoTelefone devolve a conversa daquela pessoa com aquele bot: **a mesma de antes**,
+// reaberta com histórico e dados colhidos, ou uma nova se ela nunca escreveu (issue #128).
+//
+// Antes, conversa encerrada não voltava: quem escrevia de novo caía numa conversa em branco e o
+// bot reperguntava tudo — aconteceu em produção com alguém que havia pedido atendimento humano
+// quatro minutos antes.
+func (s *Servidor) conversaDoTelefone(ctx context.Context, bot db.AtendimentoBot, telefone, contato string) (db.AtendimentoConversa, error) {
+	conversa, err := s.q.ReabrirConversaDoTelefone(ctx, db.ReabrirConversaDoTelefoneParams{
+		BotID: bot.ID, Telefone: telefone, ContatoNome: textoOuNil(contato),
+	})
+	if err == nil {
+		return conversa, nil
+	}
+	if !errors.Is(err, pgx.ErrNoRows) {
+		return db.AtendimentoConversa{}, err
+	}
+	// Primeira vez desta pessoa com este bot. O ON CONFLICT continua valendo para o caso de duas
+	// mensagens chegarem juntas.
+	return s.q.AbrirOuContinuarConversa(ctx, db.AbrirOuContinuarConversaParams{
+		BotID: bot.ID, Telefone: telefone, ContatoNome: textoOuNil(contato),
+	})
+}
+
+// conversaParaMensagemQueSaiu acha a conversa de uma mensagem que saiu pelo número do bot. Pelo
+// telefone quando o endereço é o clássico; pelo LID quando é o novo, em que o telefone do outro
+// lado não vem no evento. Não cria conversa: aqui só se reconhece o que já existe.
+func (s *Servidor) conversaParaMensagemQueSaiu(ctx context.Context, bot db.AtendimentoBot, telefone, lid string) (db.AtendimentoConversa, bool, error) {
+	if telefone != "" {
+		c, err := s.q.ReabrirConversaDoTelefone(ctx, db.ReabrirConversaDoTelefoneParams{
+			BotID: bot.ID, Telefone: telefone,
+		})
+		if err == nil {
+			return c, true, nil
+		}
+		if !errors.Is(err, pgx.ErrNoRows) {
+			return db.AtendimentoConversa{}, false, err
+		}
+	}
+	if lid != "" {
+		c, err := s.q.ConversaPeloLid(ctx, db.ConversaPeloLidParams{BotID: bot.ID, WaLid: &lid})
+		if err == nil {
+			return c, true, nil
+		}
+		if !errors.Is(err, pgx.ErrNoRows) {
+			return db.AtendimentoConversa{}, false, err
+		}
+	}
+	return db.AtendimentoConversa{}, false, nil
+}
+
+// registrarMensagemDePessoa guarda o que um consultor escreveu pelo WhatsApp do bot e passa a
+// conversa para ele: o bot não responde mais nela, e o que estava na fila é cancelado.
+func (s *Servidor) registrarMensagemDePessoa(ctx context.Context, bot db.AtendimentoBot, telefone, contato, texto, waID, lid string) (resultadoAtendimento, error) {
+	conversa, achou, err := s.conversaParaMensagemQueSaiu(ctx, bot, telefone, lid)
+	if err != nil {
+		return resultadoAtendimento{}, err
+	}
+	if !achou {
+		// Conversa que a plataforma não conhece: um consultor escreveu para alguém que nunca
+		// falou com o bot. Não há atendimento para assumir, e inventar uma conversa aqui encheria
+		// a tela de contato que o bot nunca atendeu.
+		return resultadoAtendimento{Status: "sem_resposta", Motivo: "conversa desconhecida"}, nil
+	}
+	res := resultadoAtendimento{ConversaID: conversa.ID, Status: "sem_resposta", Motivo: motivoAssumida}
+	if _, err := s.q.RegistrarMensagemDePessoa(ctx, db.RegistrarMensagemDePessoaParams{
+		ConversaID: conversa.ID, Texto: texto, WaID: textoOuNil(waID),
+	}); err != nil {
+		return res, err
+	}
+	if conversa.AssumidaEm == nil {
+		if _, err := s.q.AssumirConversa(ctx, db.AssumirConversaParams{ID: conversa.ID}); err != nil {
+			return res, err
+		}
+		canceladas, err := s.q.CancelarRespostasPendentesDaConversa(ctx, db.CancelarRespostasPendentesDaConversaParams{
+			ConversaID: conversa.ID, Motivo: textoOuNil(motivoAssumida),
+		})
+		if err != nil {
+			return res, err
+		}
+		slog.Info("atendimento: conversa assumida por uma pessoa pelo WhatsApp",
+			"bot", bot.Slug, "conversa_id", conversa.ID, "respostas_canceladas", canceladas)
 	}
 	return res, nil
 }

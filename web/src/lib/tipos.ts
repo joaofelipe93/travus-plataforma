@@ -702,6 +702,10 @@ export type ConversaResumo = {
   iniciada_em: string;
   ultima_em: string;
   encerrada_em: string | null;
+  // Conversa assumida por uma pessoa: o bot não responde nela (issue #128).
+  assumida_em: string | null;
+  assumida_por_nome: string;
+  reaberta_em: string | null;
 };
 
 export type MensagemBot = {
@@ -714,6 +718,8 @@ export type MensagemBot = {
   ultimo_erro: string | null;
   criada_em: string;
   enviada_em: string | null;
+  // Saiu pelo número do bot, mas foi uma pessoa que escreveu.
+  de_pessoa: boolean;
 };
 
 export type DadoColetado = {
@@ -744,6 +750,9 @@ export type DetalheConversa = {
     iniciada_em: string;
     ultima_em: string;
     encerrada_em: string | null;
+    assumida_em: string | null;
+    assumida_por_nome: string;
+    reaberta_em: string | null;
   };
   mensagens: MensagemBot[];
   dados: DadoColetado[];

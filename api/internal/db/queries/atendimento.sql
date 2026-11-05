@@ -74,6 +74,41 @@ RETURNING *;
 
 -- Abre a conversa ou continua a que está aberta (o índice parcial garante uma por telefone em
 -- cada bot). O nome do contato é atualizado quando vem, e não se apaga quando não vem.
+-- A pessoa que volta a escrever continua na MESMA conversa (issue #128, decisão do usuário em
+-- 05/11/2026): reabre a última conversa dela com este bot, mesmo encerrada, com o histórico e os
+-- dados já colhidos — o bot não repergunta nada. Devolve nada quando ela nunca escreveu, e aí
+-- quem abre é `AbrirOuContinuarConversa`.
+--
+-- `tokens_marco` guarda o gasto no instante da reabertura: o teto de tokens vale para o trecho
+-- atual, não para a vida inteira da conversa. `assumida_em` NÃO se limpa aqui — se uma pessoa
+-- assumiu o atendimento, ele continua dela até alguém devolver ao bot.
+-- name: ReabrirConversaDoTelefone :one
+UPDATE atendimento.conversas SET
+    status       = 'aberta',
+    motivo       = CASE WHEN status = 'aberta' THEN motivo ELSE NULL END,
+    encerrada_em = CASE WHEN status = 'aberta' THEN encerrada_em ELSE NULL END,
+    reaberta_em  = CASE WHEN status = 'aberta' THEN reaberta_em ELSE now() END,
+    tokens_marco = CASE WHEN status = 'aberta' THEN tokens_marco
+                        ELSE tokens_entrada + tokens_saida END,
+    contato_nome = coalesce(sqlc.narg(contato_nome), contato_nome),
+    ultima_em    = now()
+WHERE id = (SELECT c.id FROM atendimento.conversas c
+            WHERE c.bot_id = @bot_id AND c.telefone = @telefone
+            ORDER BY c.ultima_em DESC, c.id DESC
+            LIMIT 1)
+RETURNING *;
+
+-- O LID da conversa, aprendido quando a pessoa escreve: é o que permite reconhecer a conversa
+-- quando a mensagem sai pelo número do bot (ver a migração 00024).
+-- name: GuardarLidDaConversa :exec
+UPDATE atendimento.conversas SET wa_lid = @wa_lid
+WHERE id = @id AND (wa_lid IS NULL OR wa_lid <> @wa_lid);
+
+-- name: ConversaPeloLid :one
+SELECT * FROM atendimento.conversas
+WHERE bot_id = @bot_id AND wa_lid = @wa_lid
+ORDER BY ultima_em DESC, id DESC LIMIT 1;
+
 -- name: AbrirOuContinuarConversa :one
 INSERT INTO atendimento.conversas (bot_id, telefone, contato_nome)
 VALUES (@bot_id, @telefone, sqlc.narg(contato_nome))
@@ -93,6 +128,22 @@ RETURNING *;
 INSERT INTO atendimento.mensagens (conversa_id, direcao, texto, status, motivo)
 VALUES (@conversa_id, 'enviada', @texto, @status, sqlc.narg(motivo))
 RETURNING *;
+
+-- Mensagem que saiu pelo número do bot escrita por uma PESSOA (um consultor pelo celular). Entra
+-- como 'enviada' porque foi isso que a pessoa do outro lado recebeu, com `de_pessoa` para a tela
+-- não dar ao bot o crédito do que ele não escreveu.
+-- name: RegistrarMensagemDePessoa :one
+INSERT INTO atendimento.mensagens (conversa_id, direcao, texto, status, de_pessoa, wa_id, enviada_em)
+VALUES (@conversa_id, 'enviada', @texto, 'enviada', true, sqlc.narg(wa_id), now())
+RETURNING *;
+
+-- Esta mensagem do WhatsApp foi mandada pela plataforma? Toda resposta do bot volta no evento do
+-- WhatsApp como se fosse de fora (`fromMe`), e é por este id que se sabe que o eco é nosso — e
+-- não um consultor escrevendo pelo celular.
+-- name: MensagemNossaPeloWaID :one
+SELECT m.id FROM atendimento.mensagens m
+WHERE m.wa_id = @wa_id AND m.de_pessoa = false
+LIMIT 1;
 
 -- name: HistoricoDaConversa :many
 SELECT direcao, texto FROM atendimento.mensagens
@@ -115,6 +166,28 @@ UPDATE atendimento.conversas SET
 WHERE id = @id RETURNING *;
 
 -- O teto de tokens é por conversa: somado a cada resposta, é o que a próxima rodada compara.
+-- Uma pessoa assume a conversa: o bot não responde mais nela. `assumida_por` nulo significa que
+-- a plataforma descobriu sozinha, por ter visto uma mensagem escrita pelo celular do bot.
+-- name: AssumirConversa :one
+UPDATE atendimento.conversas SET
+    assumida_em  = coalesce(assumida_em, now()),
+    assumida_por = coalesce(sqlc.narg(assumida_por), assumida_por),
+    ultima_em    = now()
+WHERE id = @id RETURNING *;
+
+-- name: DevolverConversaAoBot :one
+UPDATE atendimento.conversas SET
+    assumida_em = NULL, assumida_por = NULL, ultima_em = now()
+WHERE id = @id RETURNING *;
+
+-- Resposta que o bot já tinha composto e ainda não saiu, quando uma pessoa assume: ela não deve
+-- sair por cima de quem está atendendo. Fica registrada como cancelada, com o motivo — a tela
+-- mostra o que o bot teria dito.
+-- name: CancelarRespostasPendentesDaConversa :execrows
+UPDATE atendimento.mensagens
+SET status = 'cancelada', motivo = @motivo
+WHERE conversa_id = @conversa_id AND status = 'pendente';
+
 -- name: SomarTokensDaConversa :one
 UPDATE atendimento.conversas SET
     tokens_entrada = tokens_entrada + @tokens_entrada,
@@ -158,7 +231,8 @@ SELECT
 -- name: ListarConversas :many
 SELECT c.id, c.bot_id, b.nome AS bot_nome, b.slug AS bot_slug, c.telefone, c.contato_nome,
        c.status, c.motivo, c.tokens_entrada, c.tokens_saida,
-       c.iniciada_em, c.ultima_em, c.encerrada_em,
+       c.iniciada_em, c.ultima_em, c.encerrada_em, c.assumida_em, c.reaberta_em,
+       coalesce((SELECT u.nome FROM usuarios u WHERE u.id = c.assumida_por), '')::text AS assumida_por_nome,
        (SELECT count(*) FROM atendimento.mensagens m WHERE m.conversa_id = c.id) AS mensagens,
        (SELECT count(*) FROM atendimento.coletas k WHERE k.conversa_id = c.id)   AS dados,
        coalesce((SELECT m.texto FROM atendimento.mensagens m WHERE m.conversa_id = c.id
@@ -176,6 +250,8 @@ LIMIT @limite;
 SELECT c.id, c.bot_id, b.nome AS bot_nome, b.slug AS bot_slug, c.telefone, c.contato_nome,
        c.status, c.motivo,
        c.tokens_entrada, c.tokens_saida, c.iniciada_em, c.ultima_em, c.encerrada_em,
+       c.assumida_em, c.reaberta_em, c.tokens_marco,
+       coalesce((SELECT u.nome FROM usuarios u WHERE u.id = c.assumida_por), '')::text AS assumida_por_nome,
        (SELECT count(*) FROM atendimento.perguntas x WHERE x.bot_id = c.bot_id)   AS perguntas_do_bot,
        (SELECT count(*) FROM atendimento.coletas k WHERE k.conversa_id = c.id)    AS respostas
 FROM atendimento.conversas c
@@ -186,7 +262,8 @@ WHERE c.id = @id;
 -- é o que o bot teria dito em ensaio. (Diferente de HistoricoDaConversa, que monta o que vai ao
 -- modelo e por isso omite o que não saiu.)
 -- name: MensagensDaConversa :many
-SELECT id, direcao, texto, status, motivo, tentativas, ultimo_erro, criada_em, enviada_em
+SELECT id, direcao, texto, status, motivo, tentativas, ultimo_erro, criada_em, enviada_em,
+       de_pessoa
 FROM atendimento.mensagens
 WHERE conversa_id = @conversa_id
 ORDER BY id;
@@ -219,6 +296,10 @@ WITH alvo AS (
       AND m.proxima_tentativa_em <= now()
       AND b.ativo
       AND b.slug = ANY(@slugs::text[])
+      -- Conversa que uma pessoa assumiu não entrega resposta de bot (issue #128). Assumir já
+      -- cancela o que estava na fila; isto fecha a corrida de a resposta ter sido composta no
+      -- mesmo instante em que o consultor escreveu.
+      AND c.assumida_em IS NULL
     ORDER BY m.proxima_tentativa_em, m.id
     FOR UPDATE OF m SKIP LOCKED
     LIMIT @limite
@@ -234,9 +315,11 @@ RETURNING m.id, m.texto, m.tentativas,
             WHERE c.id = m.conversa_id)                                                 AS bot_slug,
           (SELECT c.id FROM atendimento.conversas c WHERE c.id = m.conversa_id)          AS conversa_id;
 
+-- O `wa_id` é o id da mensagem no WhatsApp, que o worker devolve no envio. É o que depois
+-- distingue o eco da nossa própria mensagem de um consultor escrevendo pelo celular.
 -- name: MarcarMensagemDeAtendimentoEnviada :one
 UPDATE atendimento.mensagens
-SET status = 'enviada', enviada_em = now(), ultimo_erro = NULL
+SET status = 'enviada', enviada_em = now(), ultimo_erro = NULL, wa_id = sqlc.narg(wa_id)
 WHERE id = @id AND status = 'pendente'
 RETURNING id, conversa_id;
 
@@ -272,7 +355,9 @@ GROUP BY b.id, b.slug, m.status;
 INSERT INTO atendimento.leads (conversa_id, bot_id, nome, telefone, email, observacoes, dados)
 VALUES (@conversa_id, @bot_id, sqlc.narg(nome), sqlc.narg(telefone), sqlc.narg(email),
         sqlc.narg(observacoes), @dados)
-ON CONFLICT (conversa_id) DO NOTHING
+-- O índice é parcial (migração 00025): o conflito só existe quando a conversa já tem um lead
+-- POR DECIDIR. Lead já aproveitado ou descartado não bloqueia o da volta da pessoa.
+ON CONFLICT (conversa_id) WHERE status = 'novo' DO NOTHING
 RETURNING *;
 
 -- name: ListarLeads :many
@@ -306,8 +391,11 @@ LEFT JOIN clientes cl ON cl.id = l.cliente_id
 LEFT JOIN usuarios u ON u.id = l.revisado_por
 WHERE l.id = @id;
 
+-- A conversa pode ter mais de um lead desde a 00025 (a pessoa voltou depois de o primeiro ter
+-- sido decidido): a tela quer o mais recente, que é o que alguém ainda pode revisar.
 -- name: BuscarLeadDaConversa :one
-SELECT id, status, cliente_id FROM atendimento.leads WHERE conversa_id = @conversa_id;
+SELECT id, status, cliente_id FROM atendimento.leads
+WHERE conversa_id = @conversa_id ORDER BY id DESC LIMIT 1;
 
 -- Correção da revisão: só os campos que alguém digita. Status e decisão têm rotas próprias.
 -- name: AtualizarLead :one

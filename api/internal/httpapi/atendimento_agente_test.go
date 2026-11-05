@@ -68,8 +68,15 @@ func (m *modeloRoteiroBot) Gerar(_ context.Context, p assistente.Pedido, aoTexto
 		if entrada == "" {
 			entrada = "{}"
 		}
+		// Texto junto com a ferramenta no mesmo turno: é assim que o modelo se despede e chama
+		// `encerrar` de uma vez.
+		antes := ""
+		if t.texto != "" {
+			aoTexto(t.texto)
+			antes = `{"type":"text","text":` + jsonTexto(t.texto) + `},`
+		}
 		bruto = `{"id":"m","type":"message","role":"assistant","model":"duble","stop_reason":"tool_use",
-			"content":[{"type":"tool_use","id":"toolu_1","name":"` + t.ferramenta + `","input":` + entrada + `}],
+			"content":[` + antes + `{"type":"tool_use","id":"toolu_1","name":"` + t.ferramenta + `","input":` + entrada + `}],
 			"usage":{"input_tokens":5,"output_tokens":3}}`
 	} else {
 		aoTexto(t.texto)
@@ -141,7 +148,7 @@ func TestAtendimentoRespondeEColeta(t *testing.T) {
 	s := servidorComBot(t, m)
 	bot := botComPerguntas(t, s, "imoveis", true)
 
-	res, err := s.responderAtendimento(context.Background(), bot, "5511900000000", "Fulano", "quero alugar um ap de 2 quartos")
+	res, err := s.responderAtendimento(context.Background(), bot, "5511900000000", "Fulano", "quero alugar um ap de 2 quartos", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -187,7 +194,7 @@ func TestAtendimentoListaAndaComAResposta(t *testing.T) {
 	s := servidorComBot(t, m)
 	bot := botComPerguntas(t, s, "andando", true)
 
-	res, err := s.responderAtendimento(context.Background(), bot, "5511922222222", "", "somos a Acme")
+	res, err := s.responderAtendimento(context.Background(), bot, "5511922222222", "", "somos a Acme", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -214,7 +221,7 @@ func TestAtendimentoRecusaDadoDesconhecido(t *testing.T) {
 	s := servidorComBot(t, m)
 	bot := botComPerguntas(t, s, "inventado", true)
 
-	res, err := s.responderAtendimento(context.Background(), bot, "5511922222223", "", "oi")
+	res, err := s.responderAtendimento(context.Background(), bot, "5511922222223", "", "oi", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -240,14 +247,16 @@ func TestAtendimentoEncerraQuandoRespondeTudo(t *testing.T) {
 	m := &modeloRoteiroBot{turnos: []turnoBot{
 		{ferramenta: "registrar_resposta", entrada: `{"campo":"nome_da_empresa","valor":"Acme Ltda"}`},
 		{ferramenta: "registrar_resposta", entrada: `{"campo":"melhor_telefone","valor":"11988887777"}`},
-		{ferramenta: "encerrar", entrada: `{"motivo":"concluido"}`},
-		{texto: "Obrigado! A equipe vai falar com você."},
+		// A despedida vem no mesmo turno do encerrar: texto escrito DEPOIS da ferramenta não sai
+		// (issue #128), e a regra está no prompt.
+		{texto: "Obrigado! A equipe vai falar com você.",
+			ferramenta: "encerrar", entrada: `{"motivo":"concluido"}`},
 	}}
 	s := servidorComBot(t, m)
 	bot := botComPerguntas(t, s, "completo", true)
 
 	res, err := s.responderAtendimento(context.Background(), bot, "5511933333333",
-		"", "somos a Acme Ltda, meu telefone é 11988887777")
+		"", "somos a Acme Ltda, meu telefone é 11988887777", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -268,13 +277,13 @@ func TestAtendimentoEncerraQuandoRespondeTudo(t *testing.T) {
 
 func TestAtendimentoEncerraPedidoDeHumano(t *testing.T) {
 	m := &modeloRoteiroBot{turnos: []turnoBot{
-		{ferramenta: "encerrar", entrada: `{"motivo":"pediu_humano"}`},
-		{texto: "Vou passar para a equipe, já te respondem por aqui."},
+		{texto: "Vou passar para a equipe, já te respondem por aqui.",
+			ferramenta: "encerrar", entrada: `{"motivo":"pediu_humano"}`},
 	}}
 	s := servidorComBot(t, m)
 	bot := botComPerguntas(t, s, "humano", true)
 
-	res, err := s.responderAtendimento(context.Background(), bot, "5511944444444", "", "quero falar com uma pessoa")
+	res, err := s.responderAtendimento(context.Background(), bot, "5511944444444", "", "quero falar com uma pessoa", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -300,7 +309,7 @@ func TestAtendimentoMotivoDesconhecidoNaoEncerra(t *testing.T) {
 	s := servidorComBot(t, m)
 	bot := botComPerguntas(t, s, "motivo", true)
 
-	res, err := s.responderAtendimento(context.Background(), bot, "5511955555555", "", "tchau")
+	res, err := s.responderAtendimento(context.Background(), bot, "5511955555555", "", "tchau", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -325,13 +334,13 @@ func TestAtendimentoTetoDeTokensEncerra(t *testing.T) {
 	}
 	bot, _ = s.q.BuscarBot(context.Background(), bot.ID)
 
-	res, err := s.responderAtendimento(context.Background(), bot, "5511966666666", "", "oi")
+	res, err := s.responderAtendimento(context.Background(), bot, "5511966666666", "", "oi", "")
 	if err != nil {
 		t.Fatal(err)
 	}
 	s.exec(t, "UPDATE atendimento.conversas SET tokens_entrada = 2000 WHERE id = $1", res.ConversaID)
 
-	res, err = s.responderAtendimento(context.Background(), bot, "5511966666666", "", "e aí?")
+	res, err = s.responderAtendimento(context.Background(), bot, "5511966666666", "", "e aí?", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -347,14 +356,14 @@ func TestAtendimentoTetoDaHoraCancela(t *testing.T) {
 	s.exec(t, "UPDATE atendimento.bots SET max_mensagens_hora = 1 WHERE id = $1", bot.ID)
 	bot, _ = s.q.BuscarBot(context.Background(), bot.ID)
 
-	primeira, err := s.responderAtendimento(context.Background(), bot, "5511977777777", "", "oi")
+	primeira, err := s.responderAtendimento(context.Background(), bot, "5511977777777", "", "oi", "")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if primeira.Status != "pendente" {
 		t.Fatalf("a primeira devia sair: %+v", primeira)
 	}
-	segunda, err := s.responderAtendimento(context.Background(), bot, "5511988888888", "", "oi")
+	segunda, err := s.responderAtendimento(context.Background(), bot, "5511988888888", "", "oi", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -368,11 +377,11 @@ func TestAtendimentoMesmoTelefoneContinuaAConversa(t *testing.T) {
 	s := servidorComBot(t, m)
 	bot := botComPerguntas(t, s, "mesma-conversa", true)
 
-	a, err := s.responderAtendimento(context.Background(), bot, "5511999999999", "Fulano", "oi")
+	a, err := s.responderAtendimento(context.Background(), bot, "5511999999999", "Fulano", "oi", "")
 	if err != nil {
 		t.Fatal(err)
 	}
-	b, err := s.responderAtendimento(context.Background(), bot, "5511999999999", "", "ainda estou aqui")
+	b, err := s.responderAtendimento(context.Background(), bot, "5511999999999", "", "ainda estou aqui", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -397,7 +406,7 @@ func TestAtendimentoBotDesligadoNaoAbreConversa(t *testing.T) {
 	s.exec(t, "UPDATE atendimento.bots SET ativo = false WHERE id = $1", bot.ID)
 	bot, _ = s.q.BuscarBot(context.Background(), bot.ID)
 
-	res, err := s.responderAtendimento(context.Background(), bot, "5511900000001", "", "oi")
+	res, err := s.responderAtendimento(context.Background(), bot, "5511900000001", "", "oi", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -415,7 +424,7 @@ func TestAtendimentoSemChaveNoServidor(t *testing.T) {
 	s.cfg.ModeloAtendimento = nil // sem ANTHROPIC_API_KEY
 	bot := botComPerguntas(t, s, "sem-chave", true)
 
-	if _, err := s.responderAtendimento(context.Background(), bot, "5511900000002", "", "oi"); err == nil {
+	if _, err := s.responderAtendimento(context.Background(), bot, "5511900000002", "", "oi", ""); err == nil {
 		t.Fatal("sem chave, responder devia falhar com erro claro")
 	} else if !strings.Contains(err.Error(), "ANTHROPIC_API_KEY") {
 		t.Errorf("o erro devia dizer o que falta: %v", err)

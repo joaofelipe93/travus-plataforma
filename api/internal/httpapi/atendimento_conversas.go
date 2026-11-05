@@ -122,6 +122,10 @@ func (s *Servidor) listarConversas(w http.ResponseWriter, r *http.Request, _ *Us
 		IniciadaEm    time.Time  `json:"iniciada_em"`
 		UltimaEm      time.Time  `json:"ultima_em"`
 		EncerradaEm   *time.Time `json:"encerrada_em"`
+		// Conversa assumida por uma pessoa: o bot não responde nela (issue #128).
+		AssumidaEm      *time.Time `json:"assumida_em"`
+		AssumidaPorNome string     `json:"assumida_por_nome"`
+		ReabertaEm      *time.Time `json:"reaberta_em"`
 	}
 	conversas := make([]conversaJSON, 0, len(linhas))
 	for _, l := range linhas {
@@ -132,6 +136,7 @@ func (s *Servidor) listarConversas(w http.ResponseWriter, r *http.Request, _ *Us
 			UltimoTexto: l.UltimoTexto, UltimaDirecao: l.UltimaDirecao,
 			Tokens:     l.TokensEntrada + l.TokensSaida,
 			IniciadaEm: l.IniciadaEm, UltimaEm: l.UltimaEm, EncerradaEm: l.EncerradaEm,
+			AssumidaEm: l.AssumidaEm, AssumidaPorNome: l.AssumidaPorNome, ReabertaEm: l.ReabertaEm,
 		})
 	}
 	responderJSON(w, http.StatusOK, map[string]any{"conversas": conversas})
@@ -176,12 +181,15 @@ func (s *Servidor) buscarConversa(w http.ResponseWriter, r *http.Request, _ *Usu
 		UltimoErro *string    `json:"ultimo_erro"`
 		CriadaEm   time.Time  `json:"criada_em"`
 		EnviadaEm  *time.Time `json:"enviada_em"`
+		// Saiu pelo número do bot, mas foi uma PESSOA que escreveu (issue #128).
+		DePessoa bool `json:"de_pessoa"`
 	}
 	msgs := make([]mensagemJSON, 0, len(mensagens))
 	for _, m := range mensagens {
 		msgs = append(msgs, mensagemJSON{
 			ID: m.ID, Direcao: m.Direcao, Texto: m.Texto, Status: m.Status, Motivo: m.Motivo,
 			Tentativas: m.Tentativas, UltimoErro: m.UltimoErro, CriadaEm: m.CriadaEm, EnviadaEm: m.EnviadaEm,
+			DePessoa: m.DePessoa,
 		})
 	}
 	type dadoJSON struct {
@@ -218,8 +226,73 @@ func (s *Servidor) buscarConversa(w http.ResponseWriter, r *http.Request, _ *Usu
 			"perguntas_do_bot": c.PerguntasDoBot, "respostas": c.Respostas,
 			"tokens_entrada": c.TokensEntrada, "tokens_saida": c.TokensSaida,
 			"iniciada_em": c.IniciadaEm, "ultima_em": c.UltimaEm, "encerrada_em": c.EncerradaEm,
+			"assumida_em": c.AssumidaEm, "assumida_por_nome": c.AssumidaPorNome,
+			"reaberta_em": c.ReabertaEm,
 		},
 		"mensagens": msgs,
 		"dados":     coletados,
 	})
+}
+
+// POST /atendimento/conversas/{id}/assumir — uma pessoa toma a conversa para si, e o bot para de
+// responder nela (issue #128). O outro caminho é automático: a plataforma assume sozinha quando vê
+// uma mensagem escrita pelo celular do bot (`mensagemDoNumeroDoBot`).
+//
+// **Admin e operador**, a mesma régua de quem lê a conversa: quem pode ler o que a pessoa escreveu
+// é quem vai atendê-la.
+func (s *Servidor) assumirConversa(w http.ResponseWriter, r *http.Request, u *UsuarioSessao) {
+	id, ok := idDoCaminho(r)
+	if !ok {
+		responderErro(w, http.StatusBadRequest, "id inválido")
+		return
+	}
+	ctx := r.Context()
+	c, err := s.q.AssumirConversa(ctx, db.AssumirConversaParams{ID: id, AssumidaPor: &u.ID})
+	if errors.Is(err, pgx.ErrNoRows) {
+		responderErro(w, http.StatusNotFound, "conversa não encontrada")
+		return
+	}
+	if err != nil {
+		erroInterno(w, r, err)
+		return
+	}
+	// Resposta que o bot já havia composto não sai por cima de quem assumiu.
+	canceladas, err := s.q.CancelarRespostasPendentesDaConversa(ctx, db.CancelarRespostasPendentesDaConversaParams{
+		ConversaID: id, Motivo: textoOuNil(motivoAssumida),
+	})
+	if err != nil {
+		erroInterno(w, r, err)
+		return
+	}
+	s.auditar(ctx, r, &u.ID, "atendimento_conversa_assumida", "conversa", idTexto(id), map[string]any{
+		"bot_id": c.BotID, "respostas_canceladas": canceladas,
+	})
+	responderJSON(w, http.StatusOK, map[string]any{
+		"assumida_em": c.AssumidaEm, "respostas_canceladas": canceladas,
+	})
+}
+
+// POST /atendimento/conversas/{id}/devolver — devolve a conversa ao bot. Ele volta a responder a
+// próxima mensagem que chegar; não responde nada retroativo, porque a pessoa já foi atendida por
+// gente e o bot repetir o assunto seria pior que o silêncio.
+func (s *Servidor) devolverConversaAoBot(w http.ResponseWriter, r *http.Request, u *UsuarioSessao) {
+	id, ok := idDoCaminho(r)
+	if !ok {
+		responderErro(w, http.StatusBadRequest, "id inválido")
+		return
+	}
+	ctx := r.Context()
+	c, err := s.q.DevolverConversaAoBot(ctx, id)
+	if errors.Is(err, pgx.ErrNoRows) {
+		responderErro(w, http.StatusNotFound, "conversa não encontrada")
+		return
+	}
+	if err != nil {
+		erroInterno(w, r, err)
+		return
+	}
+	s.auditar(ctx, r, &u.ID, "atendimento_conversa_devolvida", "conversa", idTexto(id), map[string]any{
+		"bot_id": c.BotID,
+	})
+	responderJSON(w, http.StatusOK, map[string]any{"assumida_em": nil})
 }

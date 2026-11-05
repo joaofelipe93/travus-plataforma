@@ -114,6 +114,11 @@ type AtendimentoConversa struct {
 	IniciadaEm    time.Time
 	UltimaEm      time.Time
 	EncerradaEm   *time.Time
+	AssumidaEm    *time.Time
+	AssumidaPor   *int64
+	ReabertaEm    *time.Time
+	TokensMarco   int32
+	WaLid         *string
 }
 
 type AtendimentoLead struct {
@@ -145,6 +150,8 @@ type AtendimentoMensagen struct {
 	UltimoErro         *string
 	CriadaEm           time.Time
 	EnviadaEm          *time.Time
+	DePessoa           bool
+	WaID               *string
 }
 
 type AtendimentoPergunta struct {

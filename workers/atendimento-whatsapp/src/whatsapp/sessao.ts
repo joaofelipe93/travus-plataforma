@@ -28,9 +28,20 @@ export type EstadoSessao = 'desconectada' | 'conectando' | 'qr' | 'aberta'
 
 export type MensagemRecebida = {
   bot: string
+  /** Telefone de quem está do outro lado. Vazio quando só se sabe o LID da conversa. */
   telefone: string
+  /** Identificador LID da conversa, quando o WhatsApp endereça por ele. */
+  lid?: string
   contato?: string
   texto: string
+  /**
+   * A mensagem SAIU pelo número do bot (`fromMe`). Pode ser o eco da resposta que a plataforma
+   * mandou ou um consultor escrevendo pelo celular — **quem decide é a API**, pelo `waID`: ela
+   * sabe o que enviou, o worker não (issue #128).
+   */
+  doNumeroDoBot?: boolean
+  /** Id da mensagem no WhatsApp. */
+  waID?: string
 }
 
 export type Sessao = ReturnType<typeof criarSessao>
@@ -129,6 +140,22 @@ export function criarGuardaDeEnviadas(maximo = 200) {
       return porId.size
     },
   }
+}
+
+/**
+ * De quem é a conversa desta mensagem: telefone, LID, ou os dois.
+ *
+ * Para mensagem que CHEGA, quem interessa é quem escreveu — e o telefone pode estar no jid ou
+ * à parte (`senderPn`, nas contas em LID). Para mensagem que SAI pelo número do bot, quem
+ * interessa é o outro lado da conversa, e aí o `senderPn` é o **nosso próprio número**: usá-lo
+ * faria o bot abrir conversa consigo mesmo. Por isso, saindo, só o jid do chat vale.
+ */
+export function enderecoDaConversa(key: WAMessageKey): { telefone: string; lid?: string } {
+  const lid = ehLid(key.remoteJid) ? (key.remoteJid ?? '').split('@')[0]?.replace(/\D/g, '') : undefined
+  const telefone = key.fromMe
+    ? telefoneDoJid(key.remoteJid)
+    : telefoneDeQuemEscreveu(key)
+  return { telefone: telefone ?? '', lid: lid || undefined }
 }
 
 /** Telefone em log sai mascarado: é dado de cliente. */
@@ -308,10 +335,13 @@ export function criarSessao(options: {
       if (este !== sock) return
       if (evento.type !== 'notify') return
       for (const msg of evento.messages) {
-        // Mensagem que o próprio bot mandou volta no evento: responder a ela seria um laço.
-        if (msg.key.fromMe) continue
-        const telefone = telefoneDeQuemEscreveu(msg.key)
-        if (!telefone) {
+        // Mensagem que saiu pelo número do bot também é entregue, marcada: pode ser um consultor
+        // escrevendo pelo celular, e aí a conversa passa a ser dele (issue #128). O eco da nossa
+        // própria resposta é reconhecido pela API, pelo id — não aqui, porque o worker não sabe o
+        // que a plataforma enviou. Responder a ela seria um laço, e é a API que não o faz.
+        const doNumeroDoBot = msg.key.fromMe === true
+        const { telefone, lid } = enderecoDaConversa(msg.key)
+        if (!telefone && !(doNumeroDoBot && lid)) {
           // Grupo, status e canal são descarte esperado: o bot não entra. Conversa privada sem
           // telefone é outra coisa — é uma pessoa que ficou sem resposta —, e desaparecer calada
           // foi o que tornou o defeito de 04/11/2026 difícil de achar: no log não havia nada.
@@ -328,13 +358,13 @@ export function criarSessao(options: {
           // Áudio, figurinha, localização: a plataforma não transcreve nada (ainda). Ignorar em
           // silêncio deixaria a pessoa falando sozinha, mas responder "não entendi" é decisão
           // da API, não do transporte — então registramos e seguimos.
-          log.info({ de: mascarar(telefone) }, 'mensagem sem texto ignorada')
+          log.info({ de: mascarar(telefone || (lid ?? '')) }, 'mensagem sem texto ignorada')
           continue
         }
-        const contato = msg.pushName ?? undefined
-        void Promise.resolve(aoReceber({ bot, telefone, contato, texto })).catch((err) =>
-          log.error({ err, de: mascarar(telefone) }, 'falha ao tratar mensagem recebida'),
-        )
+        const contato = doNumeroDoBot ? undefined : (msg.pushName ?? undefined)
+        void Promise.resolve(
+          aoReceber({ bot, telefone, lid, contato, texto, doNumeroDoBot, waID: msg.key.id ?? undefined }),
+        ).catch((err) => log.error({ err, de: mascarar(telefone) }, 'falha ao tratar mensagem recebida'))
       }
     })
   }

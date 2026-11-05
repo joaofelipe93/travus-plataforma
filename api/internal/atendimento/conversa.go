@@ -37,7 +37,9 @@ const regrasFixas = `Como você se comporta nesta conversa:
   pagamento. Se a pessoa oferecer, peça para ela não mandar.
 - Se a pessoa pedir para falar com alguém, ou ficar claramente incomodada, registre o que ela
   precisa e diga que alguém da equipe vai responder. Depois chame a ferramenta de encerrar.
-- Se o assunto não é o seu, diga isso com clareza em vez de tentar ajudar por fora do escopo.`
+- Se o assunto não é o seu, diga isso com clareza em vez de tentar ajudar por fora do escopo.
+- **Escreva a despedida ANTES de chamar a ferramenta de encerrar, e não escreva nada depois
+  dela.** O que vier depois não chega à pessoa: ela já leu o que você disse antes.`
 
 // PerguntaPrompt é uma pergunta do atendimento, com o que já se sabe dela.
 type PerguntaPrompt struct {
