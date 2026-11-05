@@ -51,13 +51,27 @@ reinicia (o socket do WhatsApp) não tem regra de negócio dentro.
 4. **Número sem WhatsApp é falha definitiva** (`SemWhatsappError`): não gasta tentativa e aparece
    na tela. A conferência (`onWhatsApp`) existe porque, sem ela, a mensagem "sai" sem erro e
    ninguém recebe nada.
-5. **O bot só responde conversa privada.** `telefoneDoJid` descarta grupo, status, canal e lista
-   de transmissão, e `fromMe` é ignorado. Bot respondendo em grupo alheio — ou a si mesmo — é
-   laço infinito em público.
-6. **Telefone não entra em log cru**: use `mascarar()`.
-7. **Nenhum teste fala com o WhatsApp nem com a API.** O gerente recebe a fábrica de sessão por
+5. **O bot só responde conversa privada.** `telefoneDeQuemEscreveu` descarta grupo, status, canal
+   e lista de transmissão, e `fromMe` é ignorado. Bot respondendo em grupo alheio — ou a si mesmo —
+   é laço infinito em público.
+   - **Os dois endereçamentos do WhatsApp.** O clássico traz o telefone no jid
+     (`5511...@s.whatsapp.net`); o novo, **LID** (`213090591355025@lid`), **não traz** — o número
+     vem à parte, em `senderPn` (o `sender_pn` da stanza). Contas migradas para LID já são a
+     maioria: em 04/11/2026 o bot Clara, em produção, ficou **4 dias sem receber uma única
+     mensagem** porque o filtro só conhecia o endereço clássico. Grupo e status também trazem
+     `participantPn`, então a volta pelo telefone **só vale quando a conversa é privada**, ou o
+     bot passa a responder em grupo.
+   - **Descarte de conversa privada vai para o log** (`log.warn`). O defeito acima foi difícil de
+     achar porque o `continue` era calado: mensagem perdida não deixava rastro nenhum.
+6. **`getMessage` não é opcional.** Quando o aparelho de quem recebe não consegue decifrar, ele
+   pede a mensagem de novo (*retry receipt*); o Baileys só atende se nós tivermos guardado o
+   conteúdo (`criarGuardaDeEnviadas`), porque o padrão dele é devolver `undefined`. Sem isso a
+   plataforma dá a resposta como **enviada** e o WhatsApp da pessoa mostra **"Aguardando
+   mensagem"** para sempre — aconteceu com a primeira resposta da Clara, em 04/11/2026.
+7. **Telefone não entra em log cru**: use `mascarar()`.
+8. **Nenhum teste fala com o WhatsApp nem com a API.** O gerente recebe a fábrica de sessão por
    injeção e o laço da fila recebe a API; os dublês registram o que teria acontecido.
-8. **O teto `MAX_SESSOES` existe para o serviço recusar a sessão a mais com mensagem clara**, em
+9. **O teto `MAX_SESSOES` existe para o serviço recusar a sessão a mais com mensagem clara**, em
    vez de morrer sem memória no meio de uma conversa. A VM tem 2 GB (`docs/producao.md`): acima
    de 3 ou 4 bots, redimensione antes de subir o teto. Quem ficou de fora aparece em
    `/whatsapp/status` (`sem_sessao`) e na tela.
