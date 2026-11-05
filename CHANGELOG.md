@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.27.3](https://github.com/joaofelipe93/travus-plataforma/compare/v0.27.2...v0.27.3) (2026-11-04)
+
+
+### Correções
+
+* **atendimento:** resposta do bot ficava em "Aguardando mensagem" no WhatsApp ([#126](https://github.com/joaofelipe93/travus-plataforma/issues/126)) ([799bc26](https://github.com/joaofelipe93/travus-plataforma/commit/799bc26090ca7aa3396402c16b4b458f1db2919a))
+
+## [0.27.2](https://github.com/joaofelipe93/travus-plataforma/compare/v0.27.1...v0.27.2) (2026-11-04)
+
+
+### Correções
+
+* **atendimento:** o bot não recebia mensagem de conta com endereço LID ([#124](https://github.com/joaofelipe93/travus-plataforma/issues/124)) ([e7bdd43](https://github.com/joaofelipe93/travus-plataforma/commit/e7bdd437080b58a50a052ce56bc58e3a33503961))
+
 ## [0.27.1](https://github.com/joaofelipe93/travus-plataforma/compare/v0.27.0...v0.27.1) (2026-10-30)
 
 

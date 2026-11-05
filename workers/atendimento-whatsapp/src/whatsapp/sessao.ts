@@ -6,6 +6,7 @@ import {
   DisconnectReason,
   Browsers,
   type WASocket,
+  type WAMessageKey,
   type proto,
 } from 'baileys'
 import { Boom } from '@hapi/boom'
@@ -68,6 +69,68 @@ export function telefoneDoJid(jid: string | null | undefined): string | undefine
   return digitos && digitos.length >= 8 ? digitos : undefined
 }
 
+/** Conversa privada endereçada por LID: `<identificador>@lid`, sem telefone nenhum no jid. */
+export function ehLid(jid: string | null | undefined): boolean {
+  return typeof jid === 'string' && jid.endsWith('@lid')
+}
+
+/**
+ * O telefone de quem escreveu, nos **dois** endereçamentos que o WhatsApp usa hoje.
+ *
+ * O clássico traz o telefone no próprio jid da conversa (`5511...@s.whatsapp.net`). O novo, LID
+ * (`213090591355025@lid`), não traz: o WhatsApp manda o número à parte, no `sender_pn` da stanza,
+ * que o Baileys expõe como `senderPn`. Contas migradas para LID já são a maioria — em 04/11/2026
+ * uma mensagem de verdade para o bot Clara foi descartada porque este filtro só conhecia o
+ * endereço clássico, e **nada apareceu no log** para explicar o sumiço.
+ *
+ * Grupo e status continuam de fora mesmo trazendo `participantPn`: a volta pelo telefone só vale
+ * quando a conversa é privada. Privada sem telefone conhecido também é descarte — a plataforma
+ * identifica a pessoa pelo telefone (é o que vai para a conversa, para o lead e para a resposta),
+ * e pôr um identificador no lugar dele sujaria o cadastro com um "telefone" que não liga para
+ * ninguém.
+ */
+export function telefoneDeQuemEscreveu(key: WAMessageKey): string | undefined {
+  const doJid = telefoneDoJid(key.remoteJid)
+  if (doJid) return doJid
+  if (!ehLid(key.remoteJid)) return undefined
+  return telefoneDoJid(key.senderPn) ?? telefoneDoJid(key.participantPn)
+}
+
+/**
+ * Guarda as últimas mensagens que a sessão enviou, para poder **reenviá-las**.
+ *
+ * Quando o aparelho de quem recebe não consegue decifrar, ele não perde a mensagem: pede de novo
+ * (*retry receipt*). O Baileys só sabe atender esse pedido se nós tivermos guardado o conteúdo —
+ * é o `getMessage` do socket, cujo padrão é devolver `undefined`. Sem ele, o WhatsApp de quem
+ * recebeu fica em **"Aguardando mensagem"** para sempre: foi o que aconteceu com a primeira
+ * resposta da Clara, em 04/11/2026, que a plataforma deu como enviada e nunca apareceu.
+ *
+ * Em memória de propósito: o pedido de reenvio chega em segundos, e a alternativa seria o worker
+ * guardar estado de mensagem, que é justamente o que a API faz por ele. Sessão reiniciada perde a
+ * guarda, e aí o pedido de reenvio fica sem resposta — com aviso no log.
+ */
+export function criarGuardaDeEnviadas(maximo = 200) {
+  const porId = new Map<string, proto.IMessage>()
+  return {
+    guardar(id: string | null | undefined, conteudo: proto.IMessage | null | undefined): void {
+      if (!id || !conteudo) return
+      porId.set(id, conteudo)
+      // Map guarda a ordem de inserção: a primeira chave é a mais antiga.
+      while (porId.size > maximo) {
+        const maisAntiga = porId.keys().next().value
+        if (maisAntiga === undefined) break
+        porId.delete(maisAntiga)
+      }
+    },
+    buscar(id: string | null | undefined): proto.IMessage | undefined {
+      return id ? porId.get(id) : undefined
+    },
+    get tamanho(): number {
+      return porId.size
+    },
+  }
+}
+
 /** Telefone em log sai mascarado: é dado de cliente. */
 export function mascarar(telefone: string): string {
   const d = telefone.replace(/\D/g, '')
@@ -107,6 +170,8 @@ export function criarSessao(options: {
   )
   // Uma pasta por bot: é o que mantém as sessões independentes.
   const pasta = join(env.AUTH_DIR, bot)
+  // As mensagens que esta sessão mandou, para atender pedido de reenvio.
+  const enviadas = criarGuardaDeEnviadas()
 
   let sock: WASocket | undefined
   let estado: EstadoSessao = 'desconectada'
@@ -159,6 +224,18 @@ export function criarSessao(options: {
       browser: Browsers.ubuntu(`Travus ${nome}`.slice(0, 30)),
       markOnlineOnConnect: false,
       syncFullHistory: false,
+      // Reenvio pedido por quem não conseguiu decifrar. Sem isto, a resposta do bot fica em
+      // "Aguardando mensagem" no aparelho da pessoa (ver `criarGuardaDeEnviadas`).
+      getMessage: async (key) => {
+        const guardada = enviadas.buscar(key.id)
+        if (!guardada) {
+          log.warn(
+            { id: key.id, guardadas: enviadas.tamanho },
+            'pediram reenvio de uma mensagem que não está guardada: ela fica como "Aguardando mensagem"',
+          )
+        }
+        return guardada
+      },
     })
     sock = este
 
@@ -233,8 +310,19 @@ export function criarSessao(options: {
       for (const msg of evento.messages) {
         // Mensagem que o próprio bot mandou volta no evento: responder a ela seria um laço.
         if (msg.key.fromMe) continue
-        const telefone = telefoneDoJid(msg.key.remoteJid)
-        if (!telefone) continue // grupo, status, canal: o bot não entra
+        const telefone = telefoneDeQuemEscreveu(msg.key)
+        if (!telefone) {
+          // Grupo, status e canal são descarte esperado: o bot não entra. Conversa privada sem
+          // telefone é outra coisa — é uma pessoa que ficou sem resposta —, e desaparecer calada
+          // foi o que tornou o defeito de 04/11/2026 difícil de achar: no log não havia nada.
+          if (ehLid(msg.key.remoteJid)) {
+            log.warn(
+              { de: mascarar(msg.key.remoteJid ?? '') },
+              'mensagem privada descartada: LID sem sender_pn, não dá para saber o telefone',
+            )
+          }
+          continue
+        }
         const texto = textoDaMensagem(msg)
         if (!texto) {
           // Áudio, figurinha, localização: a plataforma não transcreve nada (ainda). Ignorar em
@@ -275,6 +363,7 @@ export function criarSessao(options: {
     if (!conectada()) throw new NaoConectadoError(bot)
     if (!(await temWhatsapp(telefone))) throw new SemWhatsappError(telefone)
     const r = await socketAberto().sendMessage(jidDe(telefone), { text: texto })
+    enviadas.guardar(r?.key?.id, r?.message)
     return r?.key?.id ?? undefined
   }
 
