@@ -1,6 +1,6 @@
 # A tag da imagem tem que ser a mesma versão do pacote "playwright" do package-lock.json;
 # senão os navegadores embutidos na imagem não batem com a biblioteca.
-FROM mcr.microsoft.com/playwright:v1.63.0-noble
+FROM mcr.microsoft.com/playwright:v1.64.1-noble
 
 WORKDIR /app
 ENV NODE_ENV=production
