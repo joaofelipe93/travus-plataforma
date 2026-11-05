@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.28.0](https://github.com/joaofelipe93/travus-plataforma/compare/v0.27.3...v0.28.0) (2026-11-05)
+
+
+### Novidades
+
+* **atendimento:** intervenção humana, conversa que continua, e o cache do prompt de volta ([#130](https://github.com/joaofelipe93/travus-plataforma/issues/130)) ([d18a50a](https://github.com/joaofelipe93/travus-plataforma/commit/d18a50a6a222e91d6c347b429e725e968dbc2df6))
+
 ## [0.27.3](https://github.com/joaofelipe93/travus-plataforma/compare/v0.27.2...v0.27.3) (2026-11-04)
 
 
