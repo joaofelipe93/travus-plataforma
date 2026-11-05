@@ -83,12 +83,16 @@ export async function receber(
   telefone: string,
   contato: string | undefined,
   texto: string,
+  extras?: { lid?: string; doNumeroDoBot?: boolean; waID?: string },
 ): Promise<ResultadoDaMensagem> {
   return chamar<ResultadoDaMensagem>('POST', '/internal/atendimento/mensagens', {
     bot,
     telefone,
     contato: contato ?? '',
     texto,
+    lid: extras?.lid ?? '',
+    do_numero_do_bot: extras?.doNumeroDoBot ?? false,
+    wa_id: extras?.waID ?? '',
   })
 }
 
@@ -102,8 +106,15 @@ export async function proximasMensagens(botsConectados: string[], limite: number
   return r.mensagens ?? []
 }
 
-export async function marcarEnviada(id: number): Promise<void> {
-  await chamar<unknown>('POST', `/internal/atendimento/mensagens/${id}/enviada`, {})
+/**
+ * Registra o envio. O `waID` é o id da mensagem no WhatsApp: é por ele que a API reconhece,
+ * depois, que uma mensagem vinda como `fromMe` é o eco da própria resposta e não um consultor
+ * escrevendo pelo celular (issue #128).
+ */
+export async function marcarEnviada(id: number, waID?: string): Promise<void> {
+  await chamar<unknown>('POST', `/internal/atendimento/mensagens/${id}/enviada`, {
+    wa_id: waID ?? '',
+  })
 }
 
 /**

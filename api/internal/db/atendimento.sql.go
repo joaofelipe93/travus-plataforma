@@ -11,13 +11,12 @@ import (
 )
 
 const abrirOuContinuarConversa = `-- name: AbrirOuContinuarConversa :one
-
 INSERT INTO atendimento.conversas (bot_id, telefone, contato_nome)
 VALUES ($1, $2, $3)
 ON CONFLICT (bot_id, telefone) WHERE status = 'aberta' DO UPDATE SET
     contato_nome = coalesce(EXCLUDED.contato_nome, atendimento.conversas.contato_nome),
     ultima_em    = now()
-RETURNING id, bot_id, telefone, contato_nome, status, motivo, tokens_entrada, tokens_saida, iniciada_em, ultima_em, encerrada_em
+RETURNING id, bot_id, telefone, contato_nome, status, motivo, tokens_entrada, tokens_saida, iniciada_em, ultima_em, encerrada_em, assumida_em, assumida_por, reaberta_em, tokens_marco, wa_lid, tokens_cache_lidos, tokens_cache_gravados
 `
 
 type AbrirOuContinuarConversaParams struct {
@@ -26,11 +25,6 @@ type AbrirOuContinuarConversaParams struct {
 	ContatoNome *string
 }
 
-// ===== Etapa B: a conversa =====
-// O worker só transporta: quem abre conversa, chama o modelo, grava coleta e enfileira resposta
-// é a API. Nenhuma destas consultas sabe que existe WhatsApp.
-// Abre a conversa ou continua a que está aberta (o índice parcial garante uma por telefone em
-// cada bot). O nome do contato é atualizado quando vem, e não se apaga quando não vem.
 func (q *Queries) AbrirOuContinuarConversa(ctx context.Context, arg AbrirOuContinuarConversaParams) (AtendimentoConversa, error) {
 	row := q.db.QueryRow(ctx, abrirOuContinuarConversa, arg.BotID, arg.Telefone, arg.ContatoNome)
 	var i AtendimentoConversa
@@ -46,6 +40,13 @@ func (q *Queries) AbrirOuContinuarConversa(ctx context.Context, arg AbrirOuConti
 		&i.IniciadaEm,
 		&i.UltimaEm,
 		&i.EncerradaEm,
+		&i.AssumidaEm,
+		&i.AssumidaPor,
+		&i.ReabertaEm,
+		&i.TokensMarco,
+		&i.WaLid,
+		&i.TokensCacheLidos,
+		&i.TokensCacheGravados,
 	)
 	return i, err
 }
@@ -95,6 +96,48 @@ func (q *Queries) AproveitarLead(ctx context.Context, arg AproveitarLeadParams) 
 		&i.RevisadoPor,
 		&i.RevisadoEm,
 		&i.CriadoEm,
+	)
+	return i, err
+}
+
+const assumirConversa = `-- name: AssumirConversa :one
+UPDATE atendimento.conversas SET
+    assumida_em  = coalesce(assumida_em, now()),
+    assumida_por = coalesce($1, assumida_por),
+    ultima_em    = now()
+WHERE id = $2 RETURNING id, bot_id, telefone, contato_nome, status, motivo, tokens_entrada, tokens_saida, iniciada_em, ultima_em, encerrada_em, assumida_em, assumida_por, reaberta_em, tokens_marco, wa_lid, tokens_cache_lidos, tokens_cache_gravados
+`
+
+type AssumirConversaParams struct {
+	AssumidaPor *int64
+	ID          int64
+}
+
+// O teto de tokens é por conversa: somado a cada resposta, é o que a próxima rodada compara.
+// Uma pessoa assume a conversa: o bot não responde mais nela. `assumida_por` nulo significa que
+// a plataforma descobriu sozinha, por ter visto uma mensagem escrita pelo celular do bot.
+func (q *Queries) AssumirConversa(ctx context.Context, arg AssumirConversaParams) (AtendimentoConversa, error) {
+	row := q.db.QueryRow(ctx, assumirConversa, arg.AssumidaPor, arg.ID)
+	var i AtendimentoConversa
+	err := row.Scan(
+		&i.ID,
+		&i.BotID,
+		&i.Telefone,
+		&i.ContatoNome,
+		&i.Status,
+		&i.Motivo,
+		&i.TokensEntrada,
+		&i.TokensSaida,
+		&i.IniciadaEm,
+		&i.UltimaEm,
+		&i.EncerradaEm,
+		&i.AssumidaEm,
+		&i.AssumidaPor,
+		&i.ReabertaEm,
+		&i.TokensMarco,
+		&i.WaLid,
+		&i.TokensCacheLidos,
+		&i.TokensCacheGravados,
 	)
 	return i, err
 }
@@ -265,6 +308,9 @@ const buscarConversa = `-- name: BuscarConversa :one
 SELECT c.id, c.bot_id, b.nome AS bot_nome, b.slug AS bot_slug, c.telefone, c.contato_nome,
        c.status, c.motivo,
        c.tokens_entrada, c.tokens_saida, c.iniciada_em, c.ultima_em, c.encerrada_em,
+       c.assumida_em, c.reaberta_em, c.tokens_marco,
+       c.tokens_cache_lidos, c.tokens_cache_gravados,
+       coalesce((SELECT u.nome FROM usuarios u WHERE u.id = c.assumida_por), '')::text AS assumida_por_nome,
        (SELECT count(*) FROM atendimento.perguntas x WHERE x.bot_id = c.bot_id)   AS perguntas_do_bot,
        (SELECT count(*) FROM atendimento.coletas k WHERE k.conversa_id = c.id)    AS respostas
 FROM atendimento.conversas c
@@ -273,21 +319,27 @@ WHERE c.id = $1
 `
 
 type BuscarConversaRow struct {
-	ID             int64
-	BotID          int64
-	BotNome        string
-	BotSlug        string
-	Telefone       string
-	ContatoNome    *string
-	Status         string
-	Motivo         *string
-	TokensEntrada  int32
-	TokensSaida    int32
-	IniciadaEm     time.Time
-	UltimaEm       time.Time
-	EncerradaEm    *time.Time
-	PerguntasDoBot int64
-	Respostas      int64
+	ID                  int64
+	BotID               int64
+	BotNome             string
+	BotSlug             string
+	Telefone            string
+	ContatoNome         *string
+	Status              string
+	Motivo              *string
+	TokensEntrada       int32
+	TokensSaida         int32
+	IniciadaEm          time.Time
+	UltimaEm            time.Time
+	EncerradaEm         *time.Time
+	AssumidaEm          *time.Time
+	ReabertaEm          *time.Time
+	TokensMarco         int32
+	TokensCacheLidos    int64
+	TokensCacheGravados int64
+	AssumidaPorNome     string
+	PerguntasDoBot      int64
+	Respostas           int64
 }
 
 func (q *Queries) BuscarConversa(ctx context.Context, id int64) (BuscarConversaRow, error) {
@@ -307,6 +359,12 @@ func (q *Queries) BuscarConversa(ctx context.Context, id int64) (BuscarConversaR
 		&i.IniciadaEm,
 		&i.UltimaEm,
 		&i.EncerradaEm,
+		&i.AssumidaEm,
+		&i.ReabertaEm,
+		&i.TokensMarco,
+		&i.TokensCacheLidos,
+		&i.TokensCacheGravados,
+		&i.AssumidaPorNome,
 		&i.PerguntasDoBot,
 		&i.Respostas,
 	)
@@ -388,7 +446,8 @@ func (q *Queries) BuscarLead(ctx context.Context, id int64) (BuscarLeadRow, erro
 }
 
 const buscarLeadDaConversa = `-- name: BuscarLeadDaConversa :one
-SELECT id, status, cliente_id FROM atendimento.leads WHERE conversa_id = $1
+SELECT id, status, cliente_id FROM atendimento.leads
+WHERE conversa_id = $1 ORDER BY id DESC LIMIT 1
 `
 
 type BuscarLeadDaConversaRow struct {
@@ -397,11 +456,35 @@ type BuscarLeadDaConversaRow struct {
 	ClienteID *int64
 }
 
+// A conversa pode ter mais de um lead desde a 00025 (a pessoa voltou depois de o primeiro ter
+// sido decidido): a tela quer o mais recente, que é o que alguém ainda pode revisar.
 func (q *Queries) BuscarLeadDaConversa(ctx context.Context, conversaID int64) (BuscarLeadDaConversaRow, error) {
 	row := q.db.QueryRow(ctx, buscarLeadDaConversa, conversaID)
 	var i BuscarLeadDaConversaRow
 	err := row.Scan(&i.ID, &i.Status, &i.ClienteID)
 	return i, err
+}
+
+const cancelarRespostasPendentesDaConversa = `-- name: CancelarRespostasPendentesDaConversa :execrows
+UPDATE atendimento.mensagens
+SET status = 'cancelada', motivo = $1
+WHERE conversa_id = $2 AND status = 'pendente'
+`
+
+type CancelarRespostasPendentesDaConversaParams struct {
+	Motivo     *string
+	ConversaID int64
+}
+
+// Resposta que o bot já tinha composto e ainda não saiu, quando uma pessoa assume: ela não deve
+// sair por cima de quem está atendendo. Fica registrada como cancelada, com o motivo — a tela
+// mostra o que o bot teria dito.
+func (q *Queries) CancelarRespostasPendentesDaConversa(ctx context.Context, arg CancelarRespostasPendentesDaConversaParams) (int64, error) {
+	result, err := q.db.Exec(ctx, cancelarRespostasPendentesDaConversa, arg.Motivo, arg.ConversaID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const coletasDaConversa = `-- name: ColetasDaConversa :many
@@ -496,6 +579,43 @@ func (q *Queries) ContarRespostasDaHora(ctx context.Context, botID int64) (int32
 	return column_1, err
 }
 
+const conversaPeloLid = `-- name: ConversaPeloLid :one
+SELECT id, bot_id, telefone, contato_nome, status, motivo, tokens_entrada, tokens_saida, iniciada_em, ultima_em, encerrada_em, assumida_em, assumida_por, reaberta_em, tokens_marco, wa_lid, tokens_cache_lidos, tokens_cache_gravados FROM atendimento.conversas
+WHERE bot_id = $1 AND wa_lid = $2
+ORDER BY ultima_em DESC, id DESC LIMIT 1
+`
+
+type ConversaPeloLidParams struct {
+	BotID int64
+	WaLid *string
+}
+
+func (q *Queries) ConversaPeloLid(ctx context.Context, arg ConversaPeloLidParams) (AtendimentoConversa, error) {
+	row := q.db.QueryRow(ctx, conversaPeloLid, arg.BotID, arg.WaLid)
+	var i AtendimentoConversa
+	err := row.Scan(
+		&i.ID,
+		&i.BotID,
+		&i.Telefone,
+		&i.ContatoNome,
+		&i.Status,
+		&i.Motivo,
+		&i.TokensEntrada,
+		&i.TokensSaida,
+		&i.IniciadaEm,
+		&i.UltimaEm,
+		&i.EncerradaEm,
+		&i.AssumidaEm,
+		&i.AssumidaPor,
+		&i.ReabertaEm,
+		&i.TokensMarco,
+		&i.WaLid,
+		&i.TokensCacheLidos,
+		&i.TokensCacheGravados,
+	)
+	return i, err
+}
+
 const criarBot = `-- name: CriarBot :one
 
 INSERT INTO atendimento.bots (nome, slug, modelo, instrucoes, saudacao, max_mensagens_hora,
@@ -557,7 +677,7 @@ const criarLeadDaConversa = `-- name: CriarLeadDaConversa :one
 INSERT INTO atendimento.leads (conversa_id, bot_id, nome, telefone, email, observacoes, dados)
 VALUES ($1, $2, $3, $4, $5,
         $6, $7)
-ON CONFLICT (conversa_id) DO NOTHING
+ON CONFLICT (conversa_id) WHERE status = 'novo' DO NOTHING
 RETURNING id, conversa_id, bot_id, status, nome, telefone, email, observacoes, dados, cliente_id, motivo_descarte, revisado_por, revisado_em, criado_em
 `
 
@@ -575,6 +695,8 @@ type CriarLeadDaConversaParams struct {
 // vira cliente no cadastro (ou é descartado com motivo).
 // Cria o lead da conversa, se ela ainda não tem um. O `ON CONFLICT DO NOTHING` é a garantia de
 // "um lead por conversa" sem precisar conferir antes.
+// O índice é parcial (migração 00025): o conflito só existe quando a conversa já tem um lead
+// POR DECIDIR. Lead já aproveitado ou descartado não bloqueia o da volta da pessoa.
 func (q *Queries) CriarLeadDaConversa(ctx context.Context, arg CriarLeadDaConversaParams) (AtendimentoLead, error) {
 	row := q.db.QueryRow(ctx, criarLeadDaConversa,
 		arg.ConversaID,
@@ -751,10 +873,42 @@ func (q *Queries) DesistirDaMensagemDeAtendimento(ctx context.Context, arg Desis
 	return i, err
 }
 
+const devolverConversaAoBot = `-- name: DevolverConversaAoBot :one
+UPDATE atendimento.conversas SET
+    assumida_em = NULL, assumida_por = NULL, ultima_em = now()
+WHERE id = $1 RETURNING id, bot_id, telefone, contato_nome, status, motivo, tokens_entrada, tokens_saida, iniciada_em, ultima_em, encerrada_em, assumida_em, assumida_por, reaberta_em, tokens_marco, wa_lid, tokens_cache_lidos, tokens_cache_gravados
+`
+
+func (q *Queries) DevolverConversaAoBot(ctx context.Context, id int64) (AtendimentoConversa, error) {
+	row := q.db.QueryRow(ctx, devolverConversaAoBot, id)
+	var i AtendimentoConversa
+	err := row.Scan(
+		&i.ID,
+		&i.BotID,
+		&i.Telefone,
+		&i.ContatoNome,
+		&i.Status,
+		&i.Motivo,
+		&i.TokensEntrada,
+		&i.TokensSaida,
+		&i.IniciadaEm,
+		&i.UltimaEm,
+		&i.EncerradaEm,
+		&i.AssumidaEm,
+		&i.AssumidaPor,
+		&i.ReabertaEm,
+		&i.TokensMarco,
+		&i.WaLid,
+		&i.TokensCacheLidos,
+		&i.TokensCacheGravados,
+	)
+	return i, err
+}
+
 const encerrarConversa = `-- name: EncerrarConversa :one
 UPDATE atendimento.conversas SET
     status = $1, motivo = $2, ultima_em = now(), encerrada_em = now()
-WHERE id = $3 RETURNING id, bot_id, telefone, contato_nome, status, motivo, tokens_entrada, tokens_saida, iniciada_em, ultima_em, encerrada_em
+WHERE id = $3 RETURNING id, bot_id, telefone, contato_nome, status, motivo, tokens_entrada, tokens_saida, iniciada_em, ultima_em, encerrada_em, assumida_em, assumida_por, reaberta_em, tokens_marco, wa_lid, tokens_cache_lidos, tokens_cache_gravados
 `
 
 type EncerrarConversaParams struct {
@@ -778,6 +932,13 @@ func (q *Queries) EncerrarConversa(ctx context.Context, arg EncerrarConversaPara
 		&i.IniciadaEm,
 		&i.UltimaEm,
 		&i.EncerradaEm,
+		&i.AssumidaEm,
+		&i.AssumidaPor,
+		&i.ReabertaEm,
+		&i.TokensMarco,
+		&i.WaLid,
+		&i.TokensCacheLidos,
+		&i.TokensCacheGravados,
 	)
 	return i, err
 }
@@ -785,7 +946,7 @@ func (q *Queries) EncerrarConversa(ctx context.Context, arg EncerrarConversaPara
 const enfileirarResposta = `-- name: EnfileirarResposta :one
 INSERT INTO atendimento.mensagens (conversa_id, direcao, texto, status, motivo)
 VALUES ($1, 'enviada', $2, $3, $4)
-RETURNING id, conversa_id, direcao, texto, status, motivo, tentativas, proxima_tentativa_em, ultimo_erro, criada_em, enviada_em
+RETURNING id, conversa_id, direcao, texto, status, motivo, tentativas, proxima_tentativa_em, ultimo_erro, criada_em, enviada_em, de_pessoa, wa_id
 `
 
 type EnfileirarRespostaParams struct {
@@ -817,6 +978,8 @@ func (q *Queries) EnfileirarResposta(ctx context.Context, arg EnfileirarResposta
 		&i.UltimoErro,
 		&i.CriadaEm,
 		&i.EnviadaEm,
+		&i.DePessoa,
+		&i.WaID,
 	)
 	return i, err
 }
@@ -875,6 +1038,23 @@ func (q *Queries) FilaDeAtendimentoPorBot(ctx context.Context) ([]FilaDeAtendime
 		return nil, err
 	}
 	return items, nil
+}
+
+const guardarLidDaConversa = `-- name: GuardarLidDaConversa :exec
+UPDATE atendimento.conversas SET wa_lid = $1
+WHERE id = $2 AND (wa_lid IS NULL OR wa_lid <> $1)
+`
+
+type GuardarLidDaConversaParams struct {
+	WaLid *string
+	ID    int64
+}
+
+// O LID da conversa, aprendido quando a pessoa escreve: é o que permite reconhecer a conversa
+// quando a mensagem sai pelo número do bot (ver a migração 00024).
+func (q *Queries) GuardarLidDaConversa(ctx context.Context, arg GuardarLidDaConversaParams) error {
+	_, err := q.db.Exec(ctx, guardarLidDaConversa, arg.WaLid, arg.ID)
+	return err
 }
 
 const historicoDaConversa = `-- name: HistoricoDaConversa :many
@@ -1025,7 +1205,8 @@ func (q *Queries) ListarBots(ctx context.Context) ([]ListarBotsRow, error) {
 const listarConversas = `-- name: ListarConversas :many
 SELECT c.id, c.bot_id, b.nome AS bot_nome, b.slug AS bot_slug, c.telefone, c.contato_nome,
        c.status, c.motivo, c.tokens_entrada, c.tokens_saida,
-       c.iniciada_em, c.ultima_em, c.encerrada_em,
+       c.iniciada_em, c.ultima_em, c.encerrada_em, c.assumida_em, c.reaberta_em,
+       coalesce((SELECT u.nome FROM usuarios u WHERE u.id = c.assumida_por), '')::text AS assumida_por_nome,
        (SELECT count(*) FROM atendimento.mensagens m WHERE m.conversa_id = c.id) AS mensagens,
        (SELECT count(*) FROM atendimento.coletas k WHERE k.conversa_id = c.id)   AS dados,
        coalesce((SELECT m.texto FROM atendimento.mensagens m WHERE m.conversa_id = c.id
@@ -1047,23 +1228,26 @@ type ListarConversasParams struct {
 }
 
 type ListarConversasRow struct {
-	ID            int64
-	BotID         int64
-	BotNome       string
-	BotSlug       string
-	Telefone      string
-	ContatoNome   *string
-	Status        string
-	Motivo        *string
-	TokensEntrada int32
-	TokensSaida   int32
-	IniciadaEm    time.Time
-	UltimaEm      time.Time
-	EncerradaEm   *time.Time
-	Mensagens     int64
-	Dados         int64
-	UltimoTexto   string
-	UltimaDirecao string
+	ID              int64
+	BotID           int64
+	BotNome         string
+	BotSlug         string
+	Telefone        string
+	ContatoNome     *string
+	Status          string
+	Motivo          *string
+	TokensEntrada   int32
+	TokensSaida     int32
+	IniciadaEm      time.Time
+	UltimaEm        time.Time
+	EncerradaEm     *time.Time
+	AssumidaEm      *time.Time
+	ReabertaEm      *time.Time
+	AssumidaPorNome string
+	Mensagens       int64
+	Dados           int64
+	UltimoTexto     string
+	UltimaDirecao   string
 }
 
 func (q *Queries) ListarConversas(ctx context.Context, arg ListarConversasParams) ([]ListarConversasRow, error) {
@@ -1089,6 +1273,9 @@ func (q *Queries) ListarConversas(ctx context.Context, arg ListarConversasParams
 			&i.IniciadaEm,
 			&i.UltimaEm,
 			&i.EncerradaEm,
+			&i.AssumidaEm,
+			&i.ReabertaEm,
+			&i.AssumidaPorNome,
 			&i.Mensagens,
 			&i.Dados,
 			&i.UltimoTexto,
@@ -1236,25 +1423,49 @@ func (q *Queries) ListarPerguntasDoBot(ctx context.Context, botID int64) ([]Aten
 
 const marcarMensagemDeAtendimentoEnviada = `-- name: MarcarMensagemDeAtendimentoEnviada :one
 UPDATE atendimento.mensagens
-SET status = 'enviada', enviada_em = now(), ultimo_erro = NULL
-WHERE id = $1 AND status = 'pendente'
+SET status = 'enviada', enviada_em = now(), ultimo_erro = NULL, wa_id = $1
+WHERE id = $2 AND status = 'pendente'
 RETURNING id, conversa_id
 `
+
+type MarcarMensagemDeAtendimentoEnviadaParams struct {
+	WaID *string
+	ID   int64
+}
 
 type MarcarMensagemDeAtendimentoEnviadaRow struct {
 	ID         int64
 	ConversaID int64
 }
 
-func (q *Queries) MarcarMensagemDeAtendimentoEnviada(ctx context.Context, id int64) (MarcarMensagemDeAtendimentoEnviadaRow, error) {
-	row := q.db.QueryRow(ctx, marcarMensagemDeAtendimentoEnviada, id)
+// O `wa_id` é o id da mensagem no WhatsApp, que o worker devolve no envio. É o que depois
+// distingue o eco da nossa própria mensagem de um consultor escrevendo pelo celular.
+func (q *Queries) MarcarMensagemDeAtendimentoEnviada(ctx context.Context, arg MarcarMensagemDeAtendimentoEnviadaParams) (MarcarMensagemDeAtendimentoEnviadaRow, error) {
+	row := q.db.QueryRow(ctx, marcarMensagemDeAtendimentoEnviada, arg.WaID, arg.ID)
 	var i MarcarMensagemDeAtendimentoEnviadaRow
 	err := row.Scan(&i.ID, &i.ConversaID)
 	return i, err
 }
 
+const mensagemNossaPeloWaID = `-- name: MensagemNossaPeloWaID :one
+SELECT m.id FROM atendimento.mensagens m
+WHERE m.wa_id = $1 AND m.de_pessoa = false
+LIMIT 1
+`
+
+// Esta mensagem do WhatsApp foi mandada pela plataforma? Toda resposta do bot volta no evento do
+// WhatsApp como se fosse de fora (`fromMe`), e é por este id que se sabe que o eco é nosso — e
+// não um consultor escrevendo pelo celular.
+func (q *Queries) MensagemNossaPeloWaID(ctx context.Context, waID *string) (int64, error) {
+	row := q.db.QueryRow(ctx, mensagemNossaPeloWaID, waID)
+	var id int64
+	err := row.Scan(&id)
+	return id, err
+}
+
 const mensagensDaConversa = `-- name: MensagensDaConversa :many
-SELECT id, direcao, texto, status, motivo, tentativas, ultimo_erro, criada_em, enviada_em
+SELECT id, direcao, texto, status, motivo, tentativas, ultimo_erro, criada_em, enviada_em,
+       de_pessoa
 FROM atendimento.mensagens
 WHERE conversa_id = $1
 ORDER BY id
@@ -1270,6 +1481,7 @@ type MensagensDaConversaRow struct {
 	UltimoErro *string
 	CriadaEm   time.Time
 	EnviadaEm  *time.Time
+	DePessoa   bool
 }
 
 // Tudo o que a conversa teve, na ordem em que aconteceu — inclusive a mensagem `cancelada`, que
@@ -1294,6 +1506,7 @@ func (q *Queries) MensagensDaConversa(ctx context.Context, conversaID int64) ([]
 			&i.UltimoErro,
 			&i.CriadaEm,
 			&i.EnviadaEm,
+			&i.DePessoa,
 		); err != nil {
 			return nil, err
 		}
@@ -1303,6 +1516,69 @@ func (q *Queries) MensagensDaConversa(ctx context.Context, conversaID int64) ([]
 		return nil, err
 	}
 	return items, nil
+}
+
+const reabrirConversaDoTelefone = `-- name: ReabrirConversaDoTelefone :one
+
+UPDATE atendimento.conversas SET
+    status       = 'aberta',
+    motivo       = CASE WHEN status = 'aberta' THEN motivo ELSE NULL END,
+    encerrada_em = CASE WHEN status = 'aberta' THEN encerrada_em ELSE NULL END,
+    reaberta_em  = CASE WHEN status = 'aberta' THEN reaberta_em ELSE now() END,
+    tokens_marco = CASE WHEN status = 'aberta' THEN tokens_marco
+                        ELSE tokens_entrada + tokens_saida END,
+    contato_nome = coalesce($1, contato_nome),
+    ultima_em    = now()
+WHERE id = (SELECT c.id FROM atendimento.conversas c
+            WHERE c.bot_id = $2 AND c.telefone = $3
+            ORDER BY c.ultima_em DESC, c.id DESC
+            LIMIT 1)
+RETURNING id, bot_id, telefone, contato_nome, status, motivo, tokens_entrada, tokens_saida, iniciada_em, ultima_em, encerrada_em, assumida_em, assumida_por, reaberta_em, tokens_marco, wa_lid, tokens_cache_lidos, tokens_cache_gravados
+`
+
+type ReabrirConversaDoTelefoneParams struct {
+	ContatoNome *string
+	BotID       int64
+	Telefone    string
+}
+
+// ===== Etapa B: a conversa =====
+// O worker só transporta: quem abre conversa, chama o modelo, grava coleta e enfileira resposta
+// é a API. Nenhuma destas consultas sabe que existe WhatsApp.
+// Abre a conversa ou continua a que está aberta (o índice parcial garante uma por telefone em
+// cada bot). O nome do contato é atualizado quando vem, e não se apaga quando não vem.
+// A pessoa que volta a escrever continua na MESMA conversa (issue #128, decisão do usuário em
+// 05/11/2026): reabre a última conversa dela com este bot, mesmo encerrada, com o histórico e os
+// dados já colhidos — o bot não repergunta nada. Devolve nada quando ela nunca escreveu, e aí
+// quem abre é `AbrirOuContinuarConversa`.
+//
+// `tokens_marco` guarda o gasto no instante da reabertura: o teto de tokens vale para o trecho
+// atual, não para a vida inteira da conversa. `assumida_em` NÃO se limpa aqui — se uma pessoa
+// assumiu o atendimento, ele continua dela até alguém devolver ao bot.
+func (q *Queries) ReabrirConversaDoTelefone(ctx context.Context, arg ReabrirConversaDoTelefoneParams) (AtendimentoConversa, error) {
+	row := q.db.QueryRow(ctx, reabrirConversaDoTelefone, arg.ContatoNome, arg.BotID, arg.Telefone)
+	var i AtendimentoConversa
+	err := row.Scan(
+		&i.ID,
+		&i.BotID,
+		&i.Telefone,
+		&i.ContatoNome,
+		&i.Status,
+		&i.Motivo,
+		&i.TokensEntrada,
+		&i.TokensSaida,
+		&i.IniciadaEm,
+		&i.UltimaEm,
+		&i.EncerradaEm,
+		&i.AssumidaEm,
+		&i.AssumidaPor,
+		&i.ReabertaEm,
+		&i.TokensMarco,
+		&i.WaLid,
+		&i.TokensCacheLidos,
+		&i.TokensCacheGravados,
+	)
+	return i, err
 }
 
 const reenfileirarMensagemDeAtendimento = `-- name: ReenfileirarMensagemDeAtendimento :one
@@ -1333,10 +1609,46 @@ func (q *Queries) ReenfileirarMensagemDeAtendimento(ctx context.Context, arg Ree
 	return i, err
 }
 
+const registrarMensagemDePessoa = `-- name: RegistrarMensagemDePessoa :one
+INSERT INTO atendimento.mensagens (conversa_id, direcao, texto, status, de_pessoa, wa_id, enviada_em)
+VALUES ($1, 'enviada', $2, 'enviada', true, $3, now())
+RETURNING id, conversa_id, direcao, texto, status, motivo, tentativas, proxima_tentativa_em, ultimo_erro, criada_em, enviada_em, de_pessoa, wa_id
+`
+
+type RegistrarMensagemDePessoaParams struct {
+	ConversaID int64
+	Texto      string
+	WaID       *string
+}
+
+// Mensagem que saiu pelo número do bot escrita por uma PESSOA (um consultor pelo celular). Entra
+// como 'enviada' porque foi isso que a pessoa do outro lado recebeu, com `de_pessoa` para a tela
+// não dar ao bot o crédito do que ele não escreveu.
+func (q *Queries) RegistrarMensagemDePessoa(ctx context.Context, arg RegistrarMensagemDePessoaParams) (AtendimentoMensagen, error) {
+	row := q.db.QueryRow(ctx, registrarMensagemDePessoa, arg.ConversaID, arg.Texto, arg.WaID)
+	var i AtendimentoMensagen
+	err := row.Scan(
+		&i.ID,
+		&i.ConversaID,
+		&i.Direcao,
+		&i.Texto,
+		&i.Status,
+		&i.Motivo,
+		&i.Tentativas,
+		&i.ProximaTentativaEm,
+		&i.UltimoErro,
+		&i.CriadaEm,
+		&i.EnviadaEm,
+		&i.DePessoa,
+		&i.WaID,
+	)
+	return i, err
+}
+
 const registrarMensagemRecebida = `-- name: RegistrarMensagemRecebida :one
 INSERT INTO atendimento.mensagens (conversa_id, direcao, texto, status)
 VALUES ($1, 'recebida', $2, 'recebida')
-RETURNING id, conversa_id, direcao, texto, status, motivo, tentativas, proxima_tentativa_em, ultimo_erro, criada_em, enviada_em
+RETURNING id, conversa_id, direcao, texto, status, motivo, tentativas, proxima_tentativa_em, ultimo_erro, criada_em, enviada_em, de_pessoa, wa_id
 `
 
 type RegistrarMensagemRecebidaParams struct {
@@ -1359,6 +1671,8 @@ func (q *Queries) RegistrarMensagemRecebida(ctx context.Context, arg RegistrarMe
 		&i.UltimoErro,
 		&i.CriadaEm,
 		&i.EnviadaEm,
+		&i.DePessoa,
+		&i.WaID,
 	)
 	return i, err
 }
@@ -1374,6 +1688,10 @@ WITH alvo AS (
       AND m.proxima_tentativa_em <= now()
       AND b.ativo
       AND b.slug = ANY($1::text[])
+      -- Conversa que uma pessoa assumiu não entrega resposta de bot (issue #128). Assumir já
+      -- cancela o que estava na fila; isto fecha a corrida de a resposta ter sido composta no
+      -- mesmo instante em que o consultor escreveu.
+      AND c.assumida_em IS NULL
     ORDER BY m.proxima_tentativa_em, m.id
     FOR UPDATE OF m SKIP LOCKED
     LIMIT $2
@@ -1530,28 +1848,44 @@ func (q *Queries) SalvarResposta(ctx context.Context, arg SalvarRespostaParams) 
 
 const somarTokensDaConversa = `-- name: SomarTokensDaConversa :one
 UPDATE atendimento.conversas SET
-    tokens_entrada = tokens_entrada + $1,
-    tokens_saida   = tokens_saida + $2,
-    ultima_em      = now()
-WHERE id = $3 RETURNING tokens_entrada, tokens_saida
+    tokens_entrada        = tokens_entrada + $1,
+    tokens_saida          = tokens_saida + $2,
+    tokens_cache_lidos    = tokens_cache_lidos + $3,
+    tokens_cache_gravados = tokens_cache_gravados + $4,
+    ultima_em             = now()
+WHERE id = $5 RETURNING tokens_entrada, tokens_saida, tokens_cache_lidos, tokens_cache_gravados
 `
 
 type SomarTokensDaConversaParams struct {
-	TokensEntrada int32
-	TokensSaida   int32
-	ID            int64
+	TokensEntrada       int32
+	TokensSaida         int32
+	TokensCacheLidos    int64
+	TokensCacheGravados int64
+	ID                  int64
 }
 
 type SomarTokensDaConversaRow struct {
-	TokensEntrada int32
-	TokensSaida   int32
+	TokensEntrada       int32
+	TokensSaida         int32
+	TokensCacheLidos    int64
+	TokensCacheGravados int64
 }
 
-// O teto de tokens é por conversa: somado a cada resposta, é o que a próxima rodada compara.
 func (q *Queries) SomarTokensDaConversa(ctx context.Context, arg SomarTokensDaConversaParams) (SomarTokensDaConversaRow, error) {
-	row := q.db.QueryRow(ctx, somarTokensDaConversa, arg.TokensEntrada, arg.TokensSaida, arg.ID)
+	row := q.db.QueryRow(ctx, somarTokensDaConversa,
+		arg.TokensEntrada,
+		arg.TokensSaida,
+		arg.TokensCacheLidos,
+		arg.TokensCacheGravados,
+		arg.ID,
+	)
 	var i SomarTokensDaConversaRow
-	err := row.Scan(&i.TokensEntrada, &i.TokensSaida)
+	err := row.Scan(
+		&i.TokensEntrada,
+		&i.TokensSaida,
+		&i.TokensCacheLidos,
+		&i.TokensCacheGravados,
+	)
 	return i, err
 }
 

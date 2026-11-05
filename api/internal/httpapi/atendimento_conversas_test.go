@@ -52,7 +52,7 @@ func decodificarEm(t *testing.T, rec *httptest.ResponseRecorder, destino any) {
 // das telas ler o que o serviço realmente grava, e não um fixture inventado.
 func conversaDeTeste(t *testing.T, s *Servidor, bot db.AtendimentoBot, telefone, contato, texto string) resultadoAtendimento {
 	t.Helper()
-	res, err := s.responderAtendimento(context.Background(), bot, telefone, contato, texto)
+	res, err := s.responderAtendimento(context.Background(), bot, telefone, contato, texto, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -274,10 +274,10 @@ func TestAtendimentoConversaMostraOQueNaoSaiu(t *testing.T) {
 	s.exec(t, "UPDATE atendimento.bots SET max_mensagens_hora = 1 WHERE id = $1", bot.ID)
 	bot, _ = s.q.BuscarBot(context.Background(), bot.ID)
 
-	if _, err := s.responderAtendimento(context.Background(), bot, "5511900050001", "", "oi"); err != nil {
+	if _, err := s.responderAtendimento(context.Background(), bot, "5511900050001", "", "oi", ""); err != nil {
 		t.Fatal(err)
 	}
-	segunda, err := s.responderAtendimento(context.Background(), bot, "5511900050002", "", "oi")
+	segunda, err := s.responderAtendimento(context.Background(), bot, "5511900050002", "", "oi", "")
 	if err != nil {
 		t.Fatal(err)
 	}

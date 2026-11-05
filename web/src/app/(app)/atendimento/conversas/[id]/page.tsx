@@ -1,6 +1,6 @@
 "use client";
 
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { formatarNumeroWhatsapp } from "@/components/conexao-whatsapp";
@@ -8,7 +8,7 @@ import { Colunas, Secao } from "@/components/pagina";
 import { Bloco, Estados, Vazio } from "@/components/painel";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
-import { buttonVariants } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { api } from "@/lib/api";
@@ -31,6 +31,19 @@ import type { DetalheConversa, MensagemBot } from "@/lib/tipos";
 export default function PaginaConversa() {
   const params = useParams<{ id: string }>();
   const id = Number(params.id);
+  const cliente = useQueryClient();
+
+  // Assumir e devolver (issue #128). Enquanto a conversa está assumida, o bot não responde nela:
+  // é o que impede o bot de falar por cima de um consultor.
+  const mudarQuemAtende = useMutation({
+    mutationFn: (acao: "assumir" | "devolver") =>
+      api(`/atendimento/conversas/${id}/${acao}`, { metodo: "POST" }),
+    onSuccess: () => {
+      void cliente.invalidateQueries({ queryKey: ["atendimento-conversa", id] });
+      void cliente.invalidateQueries({ queryKey: ["atendimento-conversas"] });
+      void cliente.invalidateQueries({ queryKey: ["atendimento-resumo"] });
+    },
+  });
 
   const consulta = useQuery({
     queryKey: ["atendimento-conversa", id],
@@ -84,9 +97,65 @@ export default function PaginaConversa() {
                   valor: tokensLegivel(c.tokens_entrada + c.tokens_saida),
                   detalhe: `${c.tokens_entrada} entrada · ${c.tokens_saida} saída`,
                 },
+                {
+                  // Leitura de cache custa cerca de um décimo da entrada normal: quanto mais
+                  // aqui, mais barata foi a conversa. Zero numa conversa de várias mensagens
+                  // quer dizer que o cache não está pegando.
+                  rotulo: "Lido do cache",
+                  valor: tokensLegivel(c.tokens_cache_lidos),
+                  tom: c.tokens_cache_lidos > 0 ? "ok" : "neutro",
+                  detalhe:
+                    c.tokens_cache_lidos > 0
+                      ? `custa ~1/10 da entrada · ${c.tokens_cache_gravados} gravados`
+                      : "nada aproveitado do cache nesta conversa",
+                },
               ]}
             />
           </Bloco>
+          <Bloco
+            titulo="Quem atende"
+            tom={c.assumida_em ? "aviso" : "neutro"}
+            descricao={
+              c.assumida_em
+                ? "Uma pessoa assumiu: o bot não responde mais nesta conversa."
+                : "O bot responde esta conversa. Assuma para ele parar e você atender pelo WhatsApp."
+            }
+            acoes={
+              <Button
+                variant={c.assumida_em ? "default" : "outline"}
+                size="sm"
+                disabled={mudarQuemAtende.isPending}
+                onClick={() => mudarQuemAtende.mutate(c.assumida_em ? "devolver" : "assumir")}
+              >
+                {mudarQuemAtende.isPending
+                  ? "Salvando…"
+                  : c.assumida_em
+                    ? "Devolver ao bot"
+                    : "Assumir conversa"}
+              </Button>
+            }
+          >
+            <Estados
+              itens={[
+                {
+                  rotulo: "Atendendo",
+                  valor: c.assumida_em ? (c.assumida_por_nome || "uma pessoa") : "o bot",
+                  tom: c.assumida_em ? "aviso" : "ok",
+                  detalhe: c.assumida_em
+                    ? `desde ${dataHora(c.assumida_em)}${c.assumida_por_nome ? "" : " — respondeu pelo WhatsApp"}`
+                    : undefined,
+                },
+                ...(c.reaberta_em
+                  ? [{ rotulo: "Reaberta", valor: dataHora(c.reaberta_em), detalhe: "a pessoa voltou a escrever" }]
+                  : []),
+              ]}
+            />
+          </Bloco>
+          {mudarQuemAtende.isError && (
+            <Alert variant="destructive">
+              <AlertDescription>{mudarQuemAtende.error.message}</AlertDescription>
+            </Alert>
+          )}
           {lead && (
             <Bloco
               titulo="O lead desta conversa"
@@ -134,6 +203,16 @@ export default function PaginaConversa() {
           </Link>
         }
       >
+        {c.assumida_em && (
+          <Alert>
+            <AlertDescription>
+              Esta conversa está sendo atendida por{" "}
+              <strong>{c.assumida_por_nome || "uma pessoa"}</strong>, e o bot não responde nela. As
+              mensagens que chegarem continuam sendo registradas aqui. Para o bot voltar a
+              responder, use <strong>Devolver ao bot</strong>.
+            </AlertDescription>
+          </Alert>
+        )}
         {naoSaiu > 0 && (
           <Alert>
             <AlertDescription>
@@ -195,6 +274,8 @@ export default function PaginaConversa() {
 
 function Mensagem({ mensagem: m }: { mensagem: MensagemBot }) {
   const doBot = m.direcao === "enviada";
+  // Saiu pelo número do bot, mas quem escreveu foi gente: o crédito não é do bot (issue #128).
+  const deConsultor = doBot && m.de_pessoa;
   const problema = m.status === "cancelada" || m.status === "falhou";
   return (
     <li className={doBot ? "flex justify-end" : "flex justify-start"}>
@@ -202,13 +283,16 @@ function Mensagem({ mensagem: m }: { mensagem: MensagemBot }) {
         className={[
           "flex max-w-[44rem] min-w-0 flex-col gap-1.5 rounded-xl border p-4",
           doBot ? "bg-card/80" : "bg-card/30",
-          problema ? "border-aviso/50" : "border-border",
+          problema ? "border-aviso/50" : deConsultor ? "border-ouro/50" : "border-border",
         ].join(" ")}
       >
         <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-          <span className="font-medium text-foreground">{doBot ? "Bot" : "Pessoa"}</span>
+          <span className="font-medium text-foreground">
+            {deConsultor ? "Nossa equipe" : doBot ? "Bot" : "Pessoa"}
+          </span>
           <span>{dataHora(m.criada_em)}</span>
-          {doBot && (
+          {deConsultor && <Badge variant="outline">escrita no WhatsApp</Badge>}
+          {doBot && !deConsultor && (
             <Badge variant={corDoStatusMensagem(m.status)}>{rotuloStatusMensagemBot[m.status]}</Badge>
           )}
           {m.tentativas > 1 && <span>{m.tentativas} tentativas</span>}

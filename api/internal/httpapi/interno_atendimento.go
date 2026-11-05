@@ -46,6 +46,14 @@ func (s *Servidor) receberMensagemDeBot(w http.ResponseWriter, r *http.Request) 
 		Telefone string `json:"telefone"` // só dígitos; o worker manda o número do jid
 		Contato  string `json:"contato"`  // nome que aparece no WhatsApp, quando vem
 		Texto    string `json:"texto"`
+		// Mensagem que SAIU pelo número do bot (o `fromMe` do WhatsApp): ou é o eco da resposta
+		// que a plataforma mandou, ou é um consultor escrevendo pelo celular (issue #128). Quem
+		// decide qual é a API, pelo `wa_id` — o worker não sabe o que a plataforma enviou.
+		DoNumeroDoBot bool   `json:"do_numero_do_bot"`
+		WaID          string `json:"wa_id"`
+		// O identificador LID da conversa, quando o WhatsApp endereça por ele em vez de por
+		// telefone: é assim que se reconhece a conversa de uma mensagem que saiu pelo bot.
+		Lid string `json:"lid"`
 	}
 	if err := lerJSON(w, r, &p, limiteMensagemBot); err != nil {
 		responderErro(w, http.StatusBadRequest, err.Error())
@@ -53,9 +61,16 @@ func (s *Servidor) receberMensagemDeBot(w http.ResponseWriter, r *http.Request) 
 	}
 	slug := strings.TrimSpace(strings.ToLower(p.Bot))
 	telefone := reSoDigitos.ReplaceAllString(p.Telefone, "")
+	lid := reSoDigitos.ReplaceAllString(p.Lid, "")
 	texto := strings.TrimSpace(p.Texto)
-	if slug == "" || telefone == "" || texto == "" {
-		responderErro(w, http.StatusBadRequest, "informe bot, telefone e texto")
+	if slug == "" || texto == "" {
+		responderErro(w, http.StatusBadRequest, "informe bot e texto")
+		return
+	}
+	// Mensagem recebida sem telefone não vira conversa: a plataforma identifica a pessoa pelo
+	// número. A que saiu pelo bot pode vir só com o LID — a conversa é achada por ele.
+	if telefone == "" && !(p.DoNumeroDoBot && lid != "") {
+		responderErro(w, http.StatusBadRequest, "informe o telefone")
 		return
 	}
 	// Mensagem muito grande é cortada em vez de recusada: o que chegou já chegou, e devolver
@@ -75,7 +90,12 @@ func (s *Servidor) receberMensagemDeBot(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	res, err := s.responderAtendimento(ctx, bot, telefone, p.Contato, texto)
+	if p.DoNumeroDoBot {
+		s.mensagemDoNumeroDoBot(w, r, worker, bot, telefone, p.Contato, texto, strings.TrimSpace(p.WaID), lid)
+		return
+	}
+
+	res, err := s.responderAtendimento(ctx, bot, telefone, p.Contato, texto, lid)
 	if err != nil {
 		// A mensagem recebida já está gravada; o erro é na resposta. O worker não repete (ele
 		// repetiria a conversa inteira) — quem olha isso é o log e, depois, o vigia.
@@ -87,6 +107,47 @@ func (s *Servidor) receberMensagemDeBot(w http.ResponseWriter, r *http.Request) 
 	slog.Info("atendimento: mensagem tratada", "worker", worker, "bot", slug,
 		"conversa_id", res.ConversaID, "status", res.Status, "motivo", res.Motivo,
 		"encerrada", res.Encerrada, "tokens", res.TokensGasto)
+	responderJSON(w, http.StatusOK, res)
+}
+
+// mensagemDoNumeroDoBot trata o que saiu pelo WhatsApp do bot. Duas coisas chegam por aqui:
+//
+//   - o **eco da nossa própria resposta**: o WhatsApp devolve no evento tudo o que o número
+//     mandou, inclusive o que a plataforma acabou de enviar. Reconhecido pelo `wa_id` que o
+//     worker devolveu no envio, e ignorado — senão todo bot se daria por assumido na primeira
+//     resposta que mandasse;
+//   - um **consultor escrevendo pelo celular**: aí a conversa passa a ser dele (issue #128).
+//
+// Sem `wa_id` não há como distinguir, e o seguro é ignorar: um bot que emudece sozinho é pior que
+// um bot que não detectou a intervenção (para esse caso existe o botão na tela).
+func (s *Servidor) mensagemDoNumeroDoBot(w http.ResponseWriter, r *http.Request, worker string,
+	bot db.AtendimentoBot, telefone, contato, texto, waID, lid string) {
+	ctx := r.Context()
+	if waID == "" {
+		slog.Warn("atendimento: mensagem do número do bot sem wa_id: ignorada",
+			"worker", worker, "bot", bot.Slug)
+		responderJSON(w, http.StatusOK, resultadoAtendimento{Status: "sem_resposta", Motivo: "sem wa_id"})
+		return
+	}
+	switch _, err := s.q.MensagemNossaPeloWaID(ctx, &waID); {
+	case err == nil:
+		// É o eco da resposta que a plataforma mandou.
+		responderJSON(w, http.StatusOK, resultadoAtendimento{Status: "sem_resposta", Motivo: "eco da própria resposta"})
+		return
+	case !errors.Is(err, pgx.ErrNoRows):
+		erroInterno(w, r, err)
+		return
+	}
+
+	res, err := s.registrarMensagemDePessoa(ctx, bot, telefone, contato, texto, waID, lid)
+	if err != nil {
+		slog.Error("atendimento: falha ao registrar mensagem de pessoa", "worker", worker,
+			"bot", bot.Slug, "conversa_id", res.ConversaID, "erro", err)
+		responderErro(w, http.StatusBadGateway, "não foi possível registrar a mensagem agora")
+		return
+	}
+	slog.Info("atendimento: mensagem escrita por uma pessoa pelo número do bot",
+		"worker", worker, "bot", bot.Slug, "conversa_id", res.ConversaID, "motivo", res.Motivo)
 	responderJSON(w, http.StatusOK, res)
 }
 
@@ -214,7 +275,16 @@ func (s *Servidor) mensagemDeBotEnviada(w http.ResponseWriter, r *http.Request) 
 		responderErro(w, http.StatusBadRequest, "id inválido")
 		return
 	}
-	linha, err := s.q.MarcarMensagemDeAtendimentoEnviada(r.Context(), id)
+	// O id da mensagem no WhatsApp vem no corpo: é o que depois distingue o eco da nossa própria
+	// resposta de um consultor escrevendo pelo celular (issue #128). Corpo vazio continua
+	// valendo, para um worker antigo não deixar de registrar o envio por causa disto.
+	var p struct {
+		WaID string `json:"wa_id"`
+	}
+	_ = lerJSON(w, r, &p, 1<<12)
+	linha, err := s.q.MarcarMensagemDeAtendimentoEnviada(r.Context(), db.MarcarMensagemDeAtendimentoEnviadaParams{
+		ID: id, WaID: textoOuNil(strings.TrimSpace(p.WaID)),
+	})
 	if errors.Is(err, pgx.ErrNoRows) {
 		// Já não estava pendente: outro ciclo registrou, ou alguém cancelou. Não é erro — e o
 		// worker não pode reagir reenviando.

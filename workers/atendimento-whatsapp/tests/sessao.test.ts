@@ -4,6 +4,7 @@ import assert from 'node:assert/strict'
 import {
   criarGuardaDeEnviadas,
   ehLid,
+  enderecoDaConversa,
   jidDe,
   mascarar,
   telefoneDeQuemEscreveu,
@@ -124,4 +125,44 @@ test('a guarda de enviadas atende o pedido de reenvio', () => {
   assert.equal(guarda.tamanho, 3)
   assert.equal(guarda.buscar('AAA'), undefined, 'a mais antiga saiu')
   assert.deepEqual(guarda.buscar('DDD'), { conversation: 'd' })
+})
+
+test('de quem é a conversa: mensagem que chega', () => {
+  // Endereço clássico: o telefone está no jid.
+  assert.deepEqual(enderecoDaConversa({ remoteJid: '5511900000000@s.whatsapp.net', fromMe: false }), {
+    telefone: '5511900000000',
+    lid: undefined,
+  })
+  // Endereço LID: o telefone vem à parte, e o LID identifica a conversa.
+  assert.deepEqual(
+    enderecoDaConversa({
+      remoteJid: '213090591355025@lid',
+      fromMe: false,
+      senderPn: '5511900000000@s.whatsapp.net',
+    }),
+    { telefone: '5511900000000', lid: '213090591355025' },
+  )
+})
+
+test('de quem é a conversa: mensagem que SAI pelo número do bot', () => {
+  // Saindo, quem interessa é o outro lado — e ele está no jid do chat.
+  assert.deepEqual(enderecoDaConversa({ remoteJid: '5511900000000@s.whatsapp.net', fromMe: true }), {
+    telefone: '5511900000000',
+    lid: undefined,
+  })
+  // Em conversa LID, saindo, o `senderPn` é o NOSSO próprio número: usá-lo faria o bot abrir
+  // conversa consigo mesmo. Só o LID vale, e a API acha a conversa por ele (issue #128).
+  assert.deepEqual(
+    enderecoDaConversa({
+      remoteJid: '213090591355025@lid',
+      fromMe: true,
+      senderPn: '5511952657883@s.whatsapp.net',
+    }),
+    { telefone: '', lid: '213090591355025' },
+  )
+  // Grupo continua de fora, saindo ou chegando.
+  assert.deepEqual(enderecoDaConversa({ remoteJid: '120363039023977288@g.us', fromMe: true }), {
+    telefone: '',
+    lid: undefined,
+  })
 })

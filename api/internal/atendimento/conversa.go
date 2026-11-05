@@ -37,7 +37,9 @@ const regrasFixas = `Como você se comporta nesta conversa:
   pagamento. Se a pessoa oferecer, peça para ela não mandar.
 - Se a pessoa pedir para falar com alguém, ou ficar claramente incomodada, registre o que ela
   precisa e diga que alguém da equipe vai responder. Depois chame a ferramenta de encerrar.
-- Se o assunto não é o seu, diga isso com clareza em vez de tentar ajudar por fora do escopo.`
+- Se o assunto não é o seu, diga isso com clareza em vez de tentar ajudar por fora do escopo.
+- **Escreva a despedida ANTES de chamar a ferramenta de encerrar, e não escreva nada depois
+  dela.** O que vier depois não chega à pessoa: ela já leu o que você disse antes.`
 
 // PerguntaPrompt é uma pergunta do atendimento, com o que já se sabe dela.
 type PerguntaPrompt struct {
@@ -61,19 +63,25 @@ func (p PerguntaPrompt) Respondida() bool { return strings.TrimSpace(p.Resposta)
 //
 // O bot **não repete a pergunta literalmente**: ela é o que se quer saber, não o texto a enviar.
 // Quem escreve a frase é o modelo, conforme o que a pessoa acabou de dizer.
-func Prompt(b BotPrompt, perguntas []PerguntaPrompt, extras map[string]string) string {
+// O prompt do bot vai em DUAS partes, e essa divisão é o que faz o cache do prompt funcionar
+// (issue #128, item "tokens gastos, otimizar"):
+//
+//   - `PromptEstavel` é quem o bot é, as regras da casa e a lista de perguntas. Só muda quando
+//     alguém edita o bot, então fica igual byte a byte entre as respostas de uma conversa — é o
+//     bloco cacheado. Ele **não** diz o que já foi respondido nem qual é a pergunta da vez.
+//   - `PromptDaVez` é o que muda a cada mensagem: o que já se sabe da pessoa, o que falta e qual
+//     é a pergunta agora. Vai no fim das mensagens, como instrução de sistema.
+//
+// Antes as duas coisas eram um texto só, no bloco cacheado: cada resposta registrada mudava o
+// prompt e **o cache morria toda vez**. Uma conversa de 17 respostas gastou 46.875 tokens de
+// entrada em produção em 05/11/2026.
+func PromptEstavel(b BotPrompt, perguntas []PerguntaPrompt) string {
 	var sb strings.Builder
 	fmt.Fprintf(&sb, "Você é o atendimento de %s no WhatsApp.\n\n%s\n\n%s\n", b.Nome, strings.TrimSpace(b.Instrucoes), regrasFixas)
 
 	if len(perguntas) == 0 {
 		sb.WriteString("\nEste atendimento não tem perguntas configuradas: converse, responda o que souber e " +
 			"chame a ferramenta de encerrar quando o assunto terminar.\n")
-		if fora := extrasEmOrdem(extras); len(fora) > 0 {
-			sb.WriteString("\nJá sabemos desta pessoa (não pergunte de novo):\n")
-			for _, l := range fora {
-				sb.WriteString("- " + l + "\n")
-			}
-		}
 		return sb.String()
 	}
 
@@ -83,37 +91,51 @@ func Prompt(b BotPrompt, perguntas []PerguntaPrompt, extras map[string]string) s
 		if q.Obrigatoria {
 			obrig = "obrigatória"
 		}
-		if q.Respondida() {
-			fmt.Fprintf(&sb, "%d. %s (%s) — JÁ RESPONDIDA: %q\n", i+1, q.Texto, obrig, q.Resposta)
-		} else {
-			fmt.Fprintf(&sb, "%d. %s (%s) — ainda sem resposta [dado: %s]\n", i+1, q.Texto, obrig, q.Campo)
-		}
+		fmt.Fprintf(&sb, "%d. %s (%s) [dado: %s]\n", i+1, q.Texto, obrig, q.Campo)
 		if q.Orientacao != nil && strings.TrimSpace(*q.Orientacao) != "" {
 			fmt.Fprintf(&sb, "   Orientação: %s\n", strings.TrimSpace(*q.Orientacao))
 		}
 	}
+	sb.WriteString("\nPergunte com as suas palavras, encaixado na conversa — não copie os textos acima e não " +
+		"anuncie que está seguindo uma lista. Uma pergunta por mensagem.\n")
+	sb.WriteString("\nUse `registrar_resposta` assim que a pessoa informar algo. Quando ela contar várias " +
+		"coisas de uma vez, registre **todas numa chamada só** (a ferramenta aceita uma lista). Não anuncie " +
+		"que está registrando: isso é assunto interno.\n")
+	return sb.String()
+}
 
-	if proxima := Proxima(perguntas); proxima != nil {
-		fmt.Fprintf(&sb, "\nAgora trate da pergunta %d: %s\n", proxima.Posicao, proxima.Texto)
-		sb.WriteString("Faça-a com as suas palavras, encaixada na conversa — não copie o texto acima e não " +
-			"anuncie que está seguindo uma lista. Se a pessoa já tiver dito a resposta sem você perguntar, " +
-			"registre e siga para a próxima.\n")
-	} else {
-		sb.WriteString("\nTodas as perguntas obrigatórias foram respondidas: encerre a conversa com a " +
-			"ferramenta de encerrar, depois de agradecer e dizer o que acontece em seguida.\n")
+// PromptDaVez é a parte que muda a cada mensagem: o que já se sabe e qual é a pergunta agora.
+func PromptDaVez(perguntas []PerguntaPrompt, extras map[string]string) string {
+	var sb strings.Builder
+	if len(perguntas) > 0 {
+		sb.WriteString("Situação deste atendimento agora:\n")
+		for i, q := range perguntas {
+			if q.Respondida() {
+				fmt.Fprintf(&sb, "%d. %s — JÁ RESPONDIDA: %q\n", i+1, q.Texto, q.Resposta)
+			} else {
+				fmt.Fprintf(&sb, "%d. %s — ainda sem resposta [dado: %s]\n", i+1, q.Texto, q.Campo)
+			}
+		}
+		if proxima := Proxima(perguntas); proxima != nil {
+			fmt.Fprintf(&sb, "\nAgora trate da pergunta %d: %s\n", proxima.Posicao, proxima.Texto)
+			sb.WriteString("Se a pessoa já tiver dito a resposta sem você perguntar, registre e siga para a " +
+				"próxima.\n")
+		} else {
+			sb.WriteString("\nTodas as perguntas obrigatórias foram respondidas: encerre a conversa com a " +
+				"ferramenta de encerrar, depois de agradecer e dizer o que acontece em seguida.\n")
+		}
 	}
-	sb.WriteString("\nUse `registrar_resposta` assim que a pessoa informar algo — inclusive quando ela contar " +
-		"várias coisas de uma vez (uma chamada por dado). Não anuncie que está registrando: isso é assunto " +
-		"interno.\n")
 
 	// O que foi registrado e não pertence a pergunta nenhuma: o modelo anotou algo a mais, ou a
-	// pergunta foi tirada depois. Entra em ordem estável (mapa em Go não tem ordem, e prompt que
-	// muda de ordem a cada resposta estraga o cache).
+	// pergunta foi tirada depois. Entra em ordem estável (mapa em Go não tem ordem).
 	if fora := extrasEmOrdem(extras); len(fora) > 0 {
 		sb.WriteString("\nOutras coisas que já sabemos desta pessoa (não pergunte de novo):\n")
 		for _, l := range fora {
 			sb.WriteString("- " + l + "\n")
 		}
+	}
+	if sb.Len() == 0 {
+		return ""
 	}
 	return sb.String()
 }

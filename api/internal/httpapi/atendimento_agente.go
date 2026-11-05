@@ -33,7 +33,11 @@ import (
 const (
 	// Histórico que vai para o modelo. Conversa de WhatsApp é curta; mais que isto é custo sem
 	// ganho, e o que importa de verdade já está em `coletas`.
-	historicoConversa = 40
+	// Quantas mensagens da conversa vão ao modelo. Eram 40, e cada resposta reenviava todas elas:
+	// numa conversa longa isso é a maior parte do gasto. O que a pessoa informou não se perde ao
+	// cortar o histórico, porque os dados colhidos vão no prompt da vez — o histórico serve para
+	// o tom e para o fio da última troca.
+	historicoConversa = 24
 	// Tempo de uma resposta. O worker espera por isto, então não pode ser o limite do assistente
 	// (4 min): quem está do outro lado desistiu muito antes.
 	tempoRespostaBot = 90 * time.Second
@@ -42,6 +46,8 @@ const (
 // motivos de uma resposta que não saiu; a tela mostra este texto.
 const (
 	motivoTetoHora = "teto de respostas por hora deste bot"
+	// Uma pessoa está atendendo esta conversa: o bot cala a boca até alguém devolvê-la a ele.
+	motivoAssumida = "uma pessoa assumiu esta conversa"
 )
 
 // resultadoAtendimento é o que aconteceu com uma mensagem recebida.
@@ -114,15 +120,27 @@ func (z *sessaoBot) ferramentas(ctx context.Context) []assistente.Ferramenta {
 	return []assistente.Ferramenta{
 		{
 			Nome: "registrar_resposta",
-			Descricao: "Guarda o que a pessoa informou. Chame assim que ela disser, uma vez por dado. " +
-				"Use os nomes de dado listados nas perguntas do atendimento.",
+			Descricao: "Guarda o que a pessoa informou. Chame assim que ela disser. Quando ela contar " +
+				"várias coisas de uma vez, mande todas em `respostas`, numa chamada só. Use os nomes " +
+				"de dado listados nas perguntas do atendimento.",
 			Parametros: map[string]any{
-				"campo": map[string]any{"type": "string", "description": "O nome do dado, como está entre colchetes na lista de perguntas."},
+				"campo": map[string]any{"type": "string", "description": "O nome do dado, como está entre colchetes na lista de perguntas. Use isto para um dado só."},
 				"valor": map[string]any{"type": "string", "description": "O que a pessoa informou, em texto, sem reformatar."},
+				"respostas": map[string]any{
+					"type":        "array",
+					"description": "Vários dados de uma vez, no lugar de campo/valor.",
+					"items": map[string]any{
+						"type": "object",
+						"properties": map[string]any{
+							"campo": map[string]any{"type": "string"},
+							"valor": map[string]any{"type": "string"},
+						},
+						"required": []string{"campo", "valor"},
+					},
+				},
 			},
-			Obrigatorio: []string{"campo", "valor"},
-			Rotulo:      "Registrando o que a pessoa informou",
-			Executar:    z.registrarResposta,
+			Rotulo:   "Registrando o que a pessoa informou",
+			Executar: z.registrarResposta,
 		},
 		{
 			Nome: "encerrar",
@@ -137,54 +155,79 @@ func (z *sessaoBot) ferramentas(ctx context.Context) []assistente.Ferramenta {
 			Obrigatorio: []string{"motivo"},
 			Rotulo:      "Encerrando o atendimento",
 			Executar:    z.encerrar,
+			// Depois de encerrar não se pergunta mais nada ao modelo: a despedida vem antes da
+			// ferramenta, e a rodada extra só gerava texto descartado.
+			Encerra: true,
 		},
 	}
 }
 
 func (z *sessaoBot) registrarResposta(ctx context.Context, entrada json.RawMessage) (string, error) {
 	var p struct {
-		Campo string `json:"campo"`
-		Valor string `json:"valor"`
+		Campo     string `json:"campo"`
+		Valor     string `json:"valor"`
+		Respostas []struct {
+			Campo string `json:"campo"`
+			Valor string `json:"valor"`
+		} `json:"respostas"`
 	}
 	if err := json.Unmarshal(entrada, &p); err != nil {
 		return "", fmt.Errorf("entrada inválida: %w", err)
 	}
-	campo := strings.TrimSpace(strings.ToLower(p.Campo))
-	valor := strings.TrimSpace(p.Valor)
-	if campo == "" || valor == "" {
-		return "", errors.New("campo e valor são obrigatórios")
+	// Uma chamada pode trazer um dado (campo/valor) ou vários (respostas). Aceitar as duas formas
+	// vale a pena: cada rodada de ferramenta reenvia o prompt e o histórico inteiros, então três
+	// dados em três chamadas custam três pedidos ao modelo.
+	pares := make([][2]string, 0, len(p.Respostas)+1)
+	if strings.TrimSpace(p.Campo) != "" || strings.TrimSpace(p.Valor) != "" {
+		pares = append(pares, [2]string{p.Campo, p.Valor})
 	}
-	// Campo que não é de pergunta nenhuma é recusado quando o bot TEM perguntas: senão o modelo
-	// inventaria chave e a tela mostraria dado que ninguém pediu. A mensagem diz o que vale, e o
-	// modelo corrige sozinho. Bot sem perguntas aceita qualquer campo — ali o dado solto é o
-	// único jeito de anotar algo.
-	pergunta := z.perguntaPorCampo(campo)
-	if pergunta == nil && len(z.perguntas) > 0 {
-		nomes := make([]string, 0, len(z.perguntas))
-		for _, q := range z.perguntas {
-			nomes = append(nomes, q.Campo)
+	for _, r := range p.Respostas {
+		pares = append(pares, [2]string{r.Campo, r.Valor})
+	}
+	if len(pares) == 0 {
+		return "", errors.New("informe campo e valor, ou uma lista em respostas")
+	}
+
+	gravados := make([]string, 0, len(pares))
+	for _, par := range pares {
+		campo := strings.TrimSpace(strings.ToLower(par[0]))
+		valor := strings.TrimSpace(par[1])
+		if campo == "" || valor == "" {
+			return "", errors.New("campo e valor são obrigatórios")
 		}
-		return "", fmt.Errorf("dado %q não existe neste atendimento (os dados são: %s)", campo, strings.Join(nomes, ", "))
+		// Campo que não é de pergunta nenhuma é recusado quando o bot TEM perguntas: senão o
+		// modelo inventaria chave e a tela mostraria dado que ninguém pediu. A mensagem diz o que
+		// vale, e o modelo corrige sozinho. Bot sem perguntas aceita qualquer campo — ali o dado
+		// solto é o único jeito de anotar algo.
+		pergunta := z.perguntaPorCampo(campo)
+		if pergunta == nil && len(z.perguntas) > 0 {
+			nomes := make([]string, 0, len(z.perguntas))
+			for _, q := range z.perguntas {
+				nomes = append(nomes, q.Campo)
+			}
+			return "", fmt.Errorf("dado %q não existe neste atendimento (os dados são: %s)", campo, strings.Join(nomes, ", "))
+		}
+		var perguntaID *int64
+		if pergunta != nil {
+			perguntaID = &pergunta.ID
+		}
+		if err := z.s.q.SalvarResposta(ctx, db.SalvarRespostaParams{
+			ConversaID: z.conversa.ID, PerguntaID: perguntaID, Campo: campo, Valor: valor,
+		}); err != nil {
+			return "", err
+		}
+		z.respondido[campo] = valor
+		gravados = append(gravados, campo)
 	}
-	var perguntaID *int64
-	if pergunta != nil {
-		perguntaID = &pergunta.ID
-	}
-	if err := z.s.q.SalvarResposta(ctx, db.SalvarRespostaParams{
-		ConversaID: z.conversa.ID, PerguntaID: perguntaID, Campo: campo, Valor: valor,
-	}); err != nil {
-		return "", err
-	}
-	z.respondido[campo] = valor
 
 	lista, _ := z.paraPrompt()
 	if proxima := atendimento.Proxima(lista); proxima != nil {
-		return fmt.Sprintf(`{"ok":true,"proxima_pergunta":%q}`, proxima.Texto), nil
+		return fmt.Sprintf(`{"ok":true,"registrados":%d,"proxima_pergunta":%q}`, len(gravados), proxima.Texto), nil
 	}
 	if faltam := atendimento.Pendentes(lista); len(faltam) > 0 {
-		return fmt.Sprintf(`{"ok":true,"ainda_faltam":%q}`, strings.Join(faltam, ", ")), nil
+		return fmt.Sprintf(`{"ok":true,"registrados":%d,"ainda_faltam":%q}`, len(gravados), strings.Join(faltam, ", ")), nil
 	}
-	return `{"ok":true,"todas_respondidas":true}`, nil
+	return fmt.Sprintf(`{"ok":true,"registrados":%d,"todas_respondidas":true}`, len(gravados)), nil
 }
 
 func (z *sessaoBot) encerrar(_ context.Context, entrada json.RawMessage) (string, error) {
@@ -207,7 +250,7 @@ func (z *sessaoBot) encerrar(_ context.Context, entrada json.RawMessage) (string
 // responderAtendimento é o caminho de uma mensagem recebida: abre ou continua a conversa, chama o
 // modelo e enfileira a resposta (ou a grava cancelada, com o motivo). O worker chama isto pela
 // rota interna e não decide nada.
-func (s *Servidor) responderAtendimento(ctx context.Context, bot db.AtendimentoBot, telefone, contato, texto string) (resultadoAtendimento, error) {
+func (s *Servidor) responderAtendimento(ctx context.Context, bot db.AtendimentoBot, telefone, contato, texto, lid string) (resultadoAtendimento, error) {
 	if s.cfg.ModeloAtendimento == nil {
 		return resultadoAtendimento{}, errors.New("atendimento indisponível: falta ANTHROPIC_API_KEY no servidor")
 	}
@@ -220,9 +263,7 @@ func (s *Servidor) responderAtendimento(ctx context.Context, bot db.AtendimentoB
 	if err != nil {
 		return resultadoAtendimento{}, err
 	}
-	conversa, err := s.q.AbrirOuContinuarConversa(ctx, db.AbrirOuContinuarConversaParams{
-		BotID: bot.ID, Telefone: telefone, ContatoNome: textoOuNil(contato),
-	})
+	conversa, err := s.conversaDoTelefone(ctx, bot, telefone, contato)
 	if err != nil {
 		return resultadoAtendimento{}, err
 	}
@@ -231,11 +272,26 @@ func (s *Servidor) responderAtendimento(ctx context.Context, bot db.AtendimentoB
 	}); err != nil {
 		return resultadoAtendimento{}, err
 	}
+	// O LID da conversa só aparece quando a pessoa escreve; guardá-lo é o que depois permite
+	// reconhecer a conversa numa mensagem que SAI pelo número do bot (issue #128).
+	if lid != "" {
+		if err := s.q.GuardarLidDaConversa(ctx, db.GuardarLidDaConversaParams{ID: conversa.ID, WaLid: &lid}); err != nil {
+			slog.Error("atendimento: falha ao guardar o lid da conversa", "conversa_id", conversa.ID, "erro", err)
+		}
+	}
 
 	res := resultadoAtendimento{ConversaID: conversa.ID, TokensGasto: conversa.TokensEntrada + conversa.TokensSaida}
 
+	// Uma pessoa assumiu: a mensagem fica registrada (quem atende precisa lê-la), mas o modelo
+	// não é chamado. Responder por cima de um consultor é pior que não responder.
+	if conversa.AssumidaEm != nil {
+		res.Status, res.Motivo = "sem_resposta", motivoAssumida
+		return res, nil
+	}
+
 	// Teto de tokens: a conversa que passou do limite é encerrada em vez de virar conta sem fim.
-	if res.TokensGasto >= bot.MaxTokensConversa {
+	// Conta o trecho atual — conversa reaberta não herda o gasto das passagens anteriores.
+	if res.TokensGasto-conversa.TokensMarco >= bot.MaxTokensConversa {
 		if _, err := s.q.EncerrarConversa(ctx, db.EncerrarConversaParams{
 			ID: conversa.ID, Status: "encerrada", Motivo: textoOuNil("teto de tokens da conversa"),
 		}); err != nil {
@@ -265,24 +321,34 @@ func (s *Servidor) responderAtendimento(ctx context.Context, bot db.AtendimentoB
 
 	agente := &assistente.Agente{
 		Modelo: s.cfg.ModeloAtendimento(bot.Modelo),
-		Instrucoes: atendimento.Prompt(
-			atendimento.BotPrompt{Nome: bot.Nome, Instrucoes: bot.Instrucoes}, lista, extras),
-		Contexto:    atendimento.Contexto(s.agora(), valorOuVazio(conversa.ContatoNome)),
-		Ferramentas: z.ferramentas(ctx),
+		// Bloco cacheado: só muda quando alguém edita o bot.
+		Instrucoes: atendimento.PromptEstavel(atendimento.BotPrompt{Nome: bot.Nome, Instrucoes: bot.Instrucoes}, lista),
+		Contexto:   atendimento.Contexto(s.agora(), valorOuVazio(conversa.ContatoNome)),
+		// O que muda a cada mensagem vai no fim, como instrução de sistema, para não invalidar o
+		// cache a cada dado registrado (ver `atendimento.PromptEstavel`).
+		InstrucaoDaVez: atendimento.PromptDaVez(lista, extras),
+		Ferramentas:    z.ferramentas(ctx),
 	}
 
 	ctxModelo, cancelar := context.WithTimeout(ctx, tempoRespostaBot)
 	defer cancelar()
 	var resposta strings.Builder
 	uso, err := agente.Responder(ctxModelo, historico, func(e assistente.Evento) {
-		if e.Tipo == "texto" {
+		// Texto escrito DEPOIS de `encerrar` não vai para o WhatsApp: a despedida é a que vem
+		// antes da ferramenta. Sem isto, as duas viram parágrafos da mesma mensagem e a pessoa lê
+		// a mesma despedida duas vezes ("vou passar para a equipe" + "o atendimento foi
+		// encerrado") — foi o que a issue #128 chamou de quebra da mensagem.
+		if e.Tipo == "texto" && !z.encerrou {
 			resposta.WriteString(e.Texto)
 		}
 	})
 	// O gasto é somado mesmo quando dá erro no meio: o token já foi cobrado.
-	if uso.TokensEntrada > 0 || uso.TokensSaida > 0 {
+	if uso.TokensEntrada > 0 || uso.TokensSaida > 0 || uso.TokensCacheLidos > 0 {
 		if soma, errSoma := s.q.SomarTokensDaConversa(ctx, db.SomarTokensDaConversaParams{
 			ID: conversa.ID, TokensEntrada: int32(uso.TokensEntrada), TokensSaida: int32(uso.TokensSaida),
+			// O cache fica em colunas próprias: leitura custa ~1/10 da entrada, e somar tudo
+			// esconderia exatamente o que esta medição existe para mostrar.
+			TokensCacheLidos: uso.TokensCacheLidos, TokensCacheGravados: uso.TokensCacheGravado,
 		}); errSoma == nil {
 			res.TokensGasto = soma.TokensEntrada + soma.TokensSaida
 		}
@@ -334,6 +400,91 @@ func (s *Servidor) responderAtendimento(ctx context.Context, bot db.AtendimentoB
 		// Conversa encerrada que colheu algo vira lead para alguém revisar (etapa E). Falha aqui
 		// não derruba o atendimento: a pessoa já foi respondida.
 		s.criarLeadSePreciso(ctx, bot, conversa.ID, z.motivo)
+	}
+	return res, nil
+}
+
+// conversaDoTelefone devolve a conversa daquela pessoa com aquele bot: **a mesma de antes**,
+// reaberta com histórico e dados colhidos, ou uma nova se ela nunca escreveu (issue #128).
+//
+// Antes, conversa encerrada não voltava: quem escrevia de novo caía numa conversa em branco e o
+// bot reperguntava tudo — aconteceu em produção com alguém que havia pedido atendimento humano
+// quatro minutos antes.
+func (s *Servidor) conversaDoTelefone(ctx context.Context, bot db.AtendimentoBot, telefone, contato string) (db.AtendimentoConversa, error) {
+	conversa, err := s.q.ReabrirConversaDoTelefone(ctx, db.ReabrirConversaDoTelefoneParams{
+		BotID: bot.ID, Telefone: telefone, ContatoNome: textoOuNil(contato),
+	})
+	if err == nil {
+		return conversa, nil
+	}
+	if !errors.Is(err, pgx.ErrNoRows) {
+		return db.AtendimentoConversa{}, err
+	}
+	// Primeira vez desta pessoa com este bot. O ON CONFLICT continua valendo para o caso de duas
+	// mensagens chegarem juntas.
+	return s.q.AbrirOuContinuarConversa(ctx, db.AbrirOuContinuarConversaParams{
+		BotID: bot.ID, Telefone: telefone, ContatoNome: textoOuNil(contato),
+	})
+}
+
+// conversaParaMensagemQueSaiu acha a conversa de uma mensagem que saiu pelo número do bot. Pelo
+// telefone quando o endereço é o clássico; pelo LID quando é o novo, em que o telefone do outro
+// lado não vem no evento. Não cria conversa: aqui só se reconhece o que já existe.
+func (s *Servidor) conversaParaMensagemQueSaiu(ctx context.Context, bot db.AtendimentoBot, telefone, lid string) (db.AtendimentoConversa, bool, error) {
+	if telefone != "" {
+		c, err := s.q.ReabrirConversaDoTelefone(ctx, db.ReabrirConversaDoTelefoneParams{
+			BotID: bot.ID, Telefone: telefone,
+		})
+		if err == nil {
+			return c, true, nil
+		}
+		if !errors.Is(err, pgx.ErrNoRows) {
+			return db.AtendimentoConversa{}, false, err
+		}
+	}
+	if lid != "" {
+		c, err := s.q.ConversaPeloLid(ctx, db.ConversaPeloLidParams{BotID: bot.ID, WaLid: &lid})
+		if err == nil {
+			return c, true, nil
+		}
+		if !errors.Is(err, pgx.ErrNoRows) {
+			return db.AtendimentoConversa{}, false, err
+		}
+	}
+	return db.AtendimentoConversa{}, false, nil
+}
+
+// registrarMensagemDePessoa guarda o que um consultor escreveu pelo WhatsApp do bot e passa a
+// conversa para ele: o bot não responde mais nela, e o que estava na fila é cancelado.
+func (s *Servidor) registrarMensagemDePessoa(ctx context.Context, bot db.AtendimentoBot, telefone, contato, texto, waID, lid string) (resultadoAtendimento, error) {
+	conversa, achou, err := s.conversaParaMensagemQueSaiu(ctx, bot, telefone, lid)
+	if err != nil {
+		return resultadoAtendimento{}, err
+	}
+	if !achou {
+		// Conversa que a plataforma não conhece: um consultor escreveu para alguém que nunca
+		// falou com o bot. Não há atendimento para assumir, e inventar uma conversa aqui encheria
+		// a tela de contato que o bot nunca atendeu.
+		return resultadoAtendimento{Status: "sem_resposta", Motivo: "conversa desconhecida"}, nil
+	}
+	res := resultadoAtendimento{ConversaID: conversa.ID, Status: "sem_resposta", Motivo: motivoAssumida}
+	if _, err := s.q.RegistrarMensagemDePessoa(ctx, db.RegistrarMensagemDePessoaParams{
+		ConversaID: conversa.ID, Texto: texto, WaID: textoOuNil(waID),
+	}); err != nil {
+		return res, err
+	}
+	if conversa.AssumidaEm == nil {
+		if _, err := s.q.AssumirConversa(ctx, db.AssumirConversaParams{ID: conversa.ID}); err != nil {
+			return res, err
+		}
+		canceladas, err := s.q.CancelarRespostasPendentesDaConversa(ctx, db.CancelarRespostasPendentesDaConversaParams{
+			ConversaID: conversa.ID, Motivo: textoOuNil(motivoAssumida),
+		})
+		if err != nil {
+			return res, err
+		}
+		slog.Info("atendimento: conversa assumida por uma pessoa pelo WhatsApp",
+			"bot", bot.Slug, "conversa_id", conversa.ID, "respostas_canceladas", canceladas)
 	}
 	return res, nil
 }

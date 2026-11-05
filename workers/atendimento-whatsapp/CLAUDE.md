@@ -51,9 +51,17 @@ reinicia (o socket do WhatsApp) não tem regra de negócio dentro.
 4. **Número sem WhatsApp é falha definitiva** (`SemWhatsappError`): não gasta tentativa e aparece
    na tela. A conferência (`onWhatsApp`) existe porque, sem ela, a mensagem "sai" sem erro e
    ninguém recebe nada.
-5. **O bot só responde conversa privada.** `telefoneDeQuemEscreveu` descarta grupo, status, canal
-   e lista de transmissão, e `fromMe` é ignorado. Bot respondendo em grupo alheio — ou a si mesmo —
-   é laço infinito em público.
+5. **O bot só responde conversa privada.** `enderecoDaConversa` descarta grupo, status, canal e
+   lista de transmissão. Bot respondendo em grupo alheio — ou a si mesmo — é laço infinito em
+   público.
+   - **Mensagem que SAI pelo número do bot (`fromMe`) é entregue, marcada** (issue #128): pode ser
+     um consultor escrevendo pelo celular, e aí a conversa passa a ser dele. O eco da nossa
+     própria resposta chega pelo mesmo caminho, e **quem distingue os dois é a API**, pelo `wa_id`
+     que o worker devolve no envio — o worker não sabe o que a plataforma enviou. Ele nunca
+     responde a essas mensagens; apenas as entrega.
+   - **Saindo, o telefone do outro lado está no jid do chat, não no `senderPn`** (que aí é o nosso
+     próprio número): em conversa endereçada por LID só o LID vale, e a API acha a conversa por
+     ele. Confundir isso faria o bot abrir conversa consigo mesmo.
    - **Os dois endereçamentos do WhatsApp.** O clássico traz o telefone no jid
      (`5511...@s.whatsapp.net`); o novo, **LID** (`213090591355025@lid`), **não traz** — o número
      vem à parte, em `senderPn` (o `sender_pn` da stanza). Contas migradas para LID já são a

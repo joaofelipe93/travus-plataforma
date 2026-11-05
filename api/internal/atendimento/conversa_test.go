@@ -23,11 +23,13 @@ func perguntasDeTeste(respostas map[string]string) []PerguntaPrompt {
 	return lista
 }
 
+// promptDeTeste é o prompt inteiro — as duas partes juntas, que é o que o modelo acaba vendo.
 func promptDeTeste(respostas map[string]string, extras map[string]string) string {
-	return Prompt(
+	lista := perguntasDeTeste(respostas)
+	return PromptEstavel(
 		BotPrompt{Nome: "Travus", Instrucoes: "Você é o primeiro atendimento da Travus e fala de plano empresarial."},
-		perguntasDeTeste(respostas), extras,
-	)
+		lista,
+	) + "\n" + PromptDaVez(lista, extras)
 }
 
 func TestPromptListaAsPerguntasNaOrdem(t *testing.T) {
@@ -47,7 +49,7 @@ func TestPromptListaAsPerguntasNaOrdem(t *testing.T) {
 		}
 	}
 	// A instrução mais importante da nova forma: a pergunta é o que se quer saber, não a frase.
-	if !strings.Contains(p, "não copie o texto acima") {
+	if !strings.Contains(p, "não copie os textos acima") {
 		t.Error("o prompt precisa dizer que o bot reescreve a pergunta com as palavras dele")
 	}
 }
@@ -72,7 +74,7 @@ func TestPromptTemAsRegrasQueProtegemOCliente(t *testing.T) {
 }
 
 func TestPromptSemPerguntas(t *testing.T) {
-	p := Prompt(BotPrompt{Nome: "Travus", Instrucoes: "Responda dúvidas sobre horário de atendimento."}, nil, nil)
+	p := PromptEstavel(BotPrompt{Nome: "Travus", Instrucoes: "Responda dúvidas sobre horário de atendimento."}, nil)
 	if !strings.Contains(p, "não tem perguntas configuradas") {
 		t.Errorf("bot sem perguntas devia dizer isso ao modelo:\n%s", p)
 	}
@@ -184,5 +186,45 @@ func TestContexto(t *testing.T) {
 	}
 	if strings.Contains(Contexto(agora, "   "), "está no nome de") {
 		t.Error("sem nome de contato, não devia inventar a linha")
+	}
+}
+
+// O ponto da divisão do prompt (issue #128, item dos tokens): o bloco cacheado **não muda** quando
+// a pessoa responde algo. Se este teste cair, o cache do prompt voltou a morrer a cada resposta e
+// a conta volta a crescer sem ninguém notar.
+func TestPromptEstavelNaoMudaQuandoAPessoaResponde(t *testing.T) {
+	bot := BotPrompt{Nome: "Travus", Instrucoes: "Primeiro atendimento."}
+	vazio := PromptEstavel(bot, perguntasDeTeste(nil))
+	comUma := PromptEstavel(bot, perguntasDeTeste(map[string]string{"nome_da_empresa": "Acme"}))
+	comDuas := PromptEstavel(bot, perguntasDeTeste(map[string]string{
+		"nome_da_empresa": "Acme", "quantas_pessoas": "40",
+	}))
+	if vazio != comUma || vazio != comDuas {
+		t.Error("o bloco cacheado mudou com as respostas: o cache do prompt morre a cada resposta")
+	}
+	// E ele não leva o que a pessoa disse — isso é da parte da vez.
+	if strings.Contains(comDuas, "Acme") || strings.Contains(comDuas, "JÁ RESPONDIDA") {
+		t.Errorf("o bloco cacheado não devia conter resposta nenhuma:\n%s", comDuas)
+	}
+	// A parte da vez, sim, muda e diz o que já se sabe.
+	daVez := PromptDaVez(perguntasDeTeste(map[string]string{"nome_da_empresa": "Acme"}), nil)
+	for _, esperado := range []string{`JÁ RESPONDIDA: "Acme"`, "Agora trate da pergunta 2"} {
+		if !strings.Contains(daVez, esperado) {
+			t.Errorf("a parte da vez devia conter %q:\n%s", esperado, daVez)
+		}
+	}
+	if PromptDaVez(perguntasDeTeste(nil), nil) == daVez {
+		t.Error("a parte da vez devia mudar com as respostas")
+	}
+}
+
+// O bloco cacheado precisa passar do mínimo que a API exige para cachear (512 tokens no Haiku
+// 5.5); abaixo disso o cache simplesmente não acontece, sem erro nenhum. Não dá para contar token
+// aqui sem chamar a API, então o teste guarda a ordem de grandeza em caracteres — com um bot de
+// instruções curtas, as regras fixas e a lista de perguntas já põem o bloco acima disso.
+func TestPromptEstavelTemTamanhoCacheavel(t *testing.T) {
+	p := PromptEstavel(BotPrompt{Nome: "Travus", Instrucoes: "Primeiro atendimento."}, perguntasDeTeste(nil))
+	if len(p) < 2000 {
+		t.Errorf("o bloco cacheado tem %d caracteres: perto do mínimo para o cache pegar", len(p))
 	}
 }

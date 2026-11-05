@@ -30,7 +30,7 @@ func conversaQueRendeu(t *testing.T, s *Servidor, slug, telefone string) resulta
 	}}
 	s.cfg.ModeloAtendimento = func(string) assistente.Modelo { return m }
 	bot := botComPerguntas(t, s, slug, true)
-	res, err := s.responderAtendimento(context.Background(), bot, telefone, "Fulano de Teste", "somos a Acme Ltda, meu telefone é 11988887777")
+	res, err := s.responderAtendimento(context.Background(), bot, telefone, "Fulano de Teste", "somos a Acme Ltda, meu telefone é 11988887777", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -100,7 +100,7 @@ func TestAtendimentoLeadUsaONomeDoWhatsappQuandoNaoHaOutro(t *testing.T) {
 	s := servidorComBot(t, m)
 	s.cfg.ModeloAtendimento = func(string) assistente.Modelo { return m }
 	bot := botComPerguntas(t, s, "so-telefone", true)
-	if _, err := s.responderAtendimento(context.Background(), bot, "5511900070010", "Fulano de Teste", "meu telefone é 11977776666"); err != nil {
+	if _, err := s.responderAtendimento(context.Background(), bot, "5511900070010", "Fulano de Teste", "meu telefone é 11977776666", ""); err != nil {
 		t.Fatal(err)
 	}
 	leads := leadsDoServidor(t, s, "novos")
@@ -121,7 +121,7 @@ func TestAtendimentoConversaSemDadoNaoViraLead(t *testing.T) {
 	}}
 	s := servidorComBot(t, m)
 	bot := botComPerguntas(t, s, "sem-dado", true)
-	if _, err := s.responderAtendimento(context.Background(), bot, "5511900070002", "", "vocês vendem carro?"); err != nil {
+	if _, err := s.responderAtendimento(context.Background(), bot, "5511900070002", "", "vocês vendem carro?", ""); err != nil {
 		t.Fatal(err)
 	}
 	if leads := leadsDoServidor(t, s, "todos"); len(leads) != 0 {
@@ -316,7 +316,7 @@ func TestAtendimentoConversaApontaParaOLead(t *testing.T) {
 	m := &modeloRoteiroBot{turnos: []turnoBot{{texto: "Oi!"}}}
 	s.cfg.ModeloAtendimento = func(string) assistente.Modelo { return m }
 	bot := botComPerguntas(t, s, "sem-lead", true)
-	aberta, err := s.responderAtendimento(context.Background(), bot, "5511900070009", "", "oi")
+	aberta, err := s.responderAtendimento(context.Background(), bot, "5511900070009", "", "oi", "")
 	if err != nil {
 		t.Fatal(err)
 	}

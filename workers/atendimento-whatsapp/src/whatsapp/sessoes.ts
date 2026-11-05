@@ -35,7 +35,12 @@ export function criarGerente(options?: {
   const buscarBots = options?.buscarBots ?? plataforma.bots
   const entregar =
     options?.entregar ??
-    ((m: MensagemRecebida) => plataforma.receber(m.bot, m.telefone, m.contato, m.texto))
+    ((m: MensagemRecebida) =>
+      plataforma.receber(m.bot, m.telefone, m.contato, m.texto, {
+        lid: m.lid,
+        doNumeroDoBot: m.doNumeroDoBot,
+        waID: m.waID,
+      }))
 
   const sessoes = new Map<string, Sessao>()
   // Bots que a API quer, mas que não couberam no teto. Aparecem no status para a tela explicar.
@@ -51,7 +56,8 @@ export function criarGerente(options?: {
       log.info(
         {
           bot: m.bot,
-          de: mascarar(m.telefone),
+          de: mascarar(m.telefone || (m.lid ?? '')),
+          doNumeroDoBot: m.doNumeroDoBot,
           conversa: res?.conversa_id,
           status: res?.status,
           encerrada: res?.encerrada,

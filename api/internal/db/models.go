@@ -103,17 +103,24 @@ type AtendimentoColeta struct {
 }
 
 type AtendimentoConversa struct {
-	ID            int64
-	BotID         int64
-	Telefone      string
-	ContatoNome   *string
-	Status        string
-	Motivo        *string
-	TokensEntrada int32
-	TokensSaida   int32
-	IniciadaEm    time.Time
-	UltimaEm      time.Time
-	EncerradaEm   *time.Time
+	ID                  int64
+	BotID               int64
+	Telefone            string
+	ContatoNome         *string
+	Status              string
+	Motivo              *string
+	TokensEntrada       int32
+	TokensSaida         int32
+	IniciadaEm          time.Time
+	UltimaEm            time.Time
+	EncerradaEm         *time.Time
+	AssumidaEm          *time.Time
+	AssumidaPor         *int64
+	ReabertaEm          *time.Time
+	TokensMarco         int32
+	WaLid               *string
+	TokensCacheLidos    int64
+	TokensCacheGravados int64
 }
 
 type AtendimentoLead struct {
@@ -145,6 +152,8 @@ type AtendimentoMensagen struct {
 	UltimoErro         *string
 	CriadaEm           time.Time
 	EnviadaEm          *time.Time
+	DePessoa           bool
+	WaID               *string
 }
 
 type AtendimentoPergunta struct {

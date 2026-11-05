@@ -147,6 +147,8 @@ function Conversas() {
                       </p>
                     </div>
                     <div className="flex items-center gap-3">
+                      {/* Conversa com uma pessoa atendendo: o bot está calado nela (issue #128). */}
+                      {c.assumida_em && <Badge variant="secondary">com nossa equipe</Badge>}
                       <Badge variant={corDoStatusConversa(c.status)}>{rotuloStatusConversa[c.status]}</Badge>
                       <span className="text-xs whitespace-nowrap text-muted-foreground">{dataHora(c.ultima_em)}</span>
                     </div>

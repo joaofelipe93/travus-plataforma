@@ -34,7 +34,7 @@ export type LacoDaFila = ReturnType<typeof criarLacoDaFila>
  */
 export type ApiDaFila = {
   proximasMensagens: (bots: string[], limite: number) => Promise<plataforma.MensagemParaEnviar[]>
-  marcarEnviada: (id: number) => Promise<void>
+  marcarEnviada: (id: number, waID?: string) => Promise<void>
   marcarFalha: (id: number, erro: string, tentativa: number, definitivo: boolean) => Promise<void>
 }
 
@@ -85,9 +85,9 @@ export function criarLacoDaFila(
       return 'parar'
     }
     try {
-      await sessao.enviarTexto(m.telefone, m.texto)
+      const waID = await sessao.enviarTexto(m.telefone, m.texto)
       try {
-        await api.marcarEnviada(m.id)
+        await api.marcarEnviada(m.id, waID)
       } catch (err) {
         enviadasSemRegistro.set(m.id, m.tentativa)
         log.error({ err, mensagem: m.id },
