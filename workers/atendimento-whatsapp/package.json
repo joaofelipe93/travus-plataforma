@@ -1,0 +1,36 @@
+{
+  "name": "atendimento-whatsapp",
+  "version": "1.0.0",
+  "description": "Conecta o WhatsApp de cada bot de atendimento (N sessões num processo) e transporta as mensagens entre o cliente e a API",
+  "type": "module",
+  "main": "dist/index.js",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/index.js",
+    "test": "node --import tsx --disable-warning=ExperimentalWarning --test --test-concurrency=1 'tests/**/*.test.ts'",
+    "test:watch": "npm test -- --watch",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "typecheck:tests": "tsc -p tsconfig.test.json"
+  },
+  "license": "ISC",
+  "dependencies": {
+    "@hapi/boom": "^10.0.1",
+    "baileys": "6.7.24",
+    "fastify": "^5.12.5",
+    "pino": "^10.4.0",
+    "pino-pretty": "^13.2.0",
+    "qrcode-terminal": "^0.12.0",
+    "zod": "^4.6.5"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.5",
+    "@types/qrcode-terminal": "^0.12.2",
+    "tsx": "^4.23.15",
+    "typescript": "^7.0.2"
+  },
+  "private": true
+}

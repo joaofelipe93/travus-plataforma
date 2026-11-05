@@ -1,5 +1,126 @@
 # Changelog
 
+## [0.27.3](https://github.com/joaofelipe93/travus-plataforma/compare/v0.27.2...v0.27.3) (2026-11-04)
+
+
+### Correções
+
+* **atendimento:** resposta do bot ficava em "Aguardando mensagem" no WhatsApp ([#126](https://github.com/joaofelipe93/travus-plataforma/issues/126)) ([799bc26](https://github.com/joaofelipe93/travus-plataforma/commit/799bc26090ca7aa3396402c16b4b458f1db2919a))
+
+## [0.27.2](https://github.com/joaofelipe93/travus-plataforma/compare/v0.27.1...v0.27.2) (2026-11-04)
+
+
+### Correções
+
+* **atendimento:** o bot não recebia mensagem de conta com endereço LID ([#124](https://github.com/joaofelipe93/travus-plataforma/issues/124)) ([e7bdd43](https://github.com/joaofelipe93/travus-plataforma/commit/e7bdd437080b58a50a052ce56bc58e3a33503961))
+
+## [0.27.1](https://github.com/joaofelipe93/travus-plataforma/compare/v0.27.0...v0.27.1) (2026-10-30)
+
+
+### Correções
+
+* **atendimento:** "Novo bot" quebrava a tela, e mais dois defeitos ao lado ([#121](https://github.com/joaofelipe93/travus-plataforma/issues/121)) ([87e75ea](https://github.com/joaofelipe93/travus-plataforma/commit/87e75ea5234dcbad01df9169aac69c8f1d6ec3cb))
+
+## [0.27.0](https://github.com/joaofelipe93/travus-plataforma/compare/v0.26.0...v0.27.0) (2026-10-30)
+
+
+### Novidades
+
+* **atendimento:** a lista de bots em cartões e o painel enxuto ([#119](https://github.com/joaofelipe93/travus-plataforma/issues/119)) ([d9148b2](https://github.com/joaofelipe93/travus-plataforma/commit/d9148b28eb4df8734c101999c2cb9f5edb88ec80))
+
+## [0.26.0](https://github.com/joaofelipe93/travus-plataforma/compare/v0.25.0...v0.26.0) (2026-10-30)
+
+
+### Novidades
+
+* **atendimento:** a tela do bot em três abas ([#116](https://github.com/joaofelipe93/travus-plataforma/issues/116)) ([45dfddc](https://github.com/joaofelipe93/travus-plataforma/commit/45dfddc879561ac4af738ef9db96fdb53ee06ad2))
+
+## [0.25.0](https://github.com/joaofelipe93/travus-plataforma/compare/v0.24.0...v0.25.0) (2026-10-30)
+
+
+### ⚠ BREAKING CHANGES
+
+* **atendimento:** perguntas na ordem e pontos de partida por segmento ([#114](https://github.com/joaofelipe93/travus-plataforma/issues/114))
+
+### Novidades
+
+* **atendimento:** perguntas na ordem e pontos de partida por segmento ([#114](https://github.com/joaofelipe93/travus-plataforma/issues/114)) ([abac701](https://github.com/joaofelipe93/travus-plataforma/commit/abac70148620bd6986783e92cc8b4f0ee0c9ad01))
+
+## [0.24.0](https://github.com/joaofelipe93/travus-plataforma/compare/v0.23.0...v0.24.0) (2026-10-29)
+
+
+### ⚠ BREAKING CHANGES
+
+* **atendimento:** um botão para ligar e desligar o bot ([#112](https://github.com/joaofelipe93/travus-plataforma/issues/112))
+
+### Novidades
+
+* **atendimento:** um botão para ligar e desligar o bot ([#112](https://github.com/joaofelipe93/travus-plataforma/issues/112)) ([27ee0ec](https://github.com/joaofelipe93/travus-plataforma/commit/27ee0ec976768448e964945d88052934338c2151))
+
+## [0.23.0](https://github.com/joaofelipe93/travus-plataforma/compare/v0.22.0...v0.23.0) (2026-10-29)
+
+
+### Novidades
+
+* **atendimento:** o serviço em produção, com vigia ([#110](https://github.com/joaofelipe93/travus-plataforma/issues/110)) ([072a5b8](https://github.com/joaofelipe93/travus-plataforma/commit/072a5b87a92139966ea117ff8fd527a9286ba62a))
+
+## [0.22.0](https://github.com/joaofelipe93/travus-plataforma/compare/v0.21.0...v0.22.0) (2026-10-29)
+
+
+### Novidades
+
+* **atendimento:** o lead revisável virando cliente ([#108](https://github.com/joaofelipe93/travus-plataforma/issues/108)) ([7f44553](https://github.com/joaofelipe93/travus-plataforma/commit/7f445535bab5fd4a1c35e283410e7e7902d5864f))
+
+## [0.21.0](https://github.com/joaofelipe93/travus-plataforma/compare/v0.20.0...v0.21.0) (2026-10-29)
+
+
+### Novidades
+
+* **atendimento:** o WhatsApp dos bots, uma sessão por bot ([#106](https://github.com/joaofelipe93/travus-plataforma/issues/106)) ([49d2b23](https://github.com/joaofelipe93/travus-plataforma/commit/49d2b2348987e5b7f9ff8af9a788f3d02b8c91e4))
+
+## [0.20.0](https://github.com/joaofelipe93/travus-plataforma/compare/v0.19.0...v0.20.0) (2026-10-29)
+
+
+### Novidades
+
+* **atendimento:** o agente do bot, com as travas do que sai ([#103](https://github.com/joaofelipe93/travus-plataforma/issues/103)) ([7ce2f8e](https://github.com/joaofelipe93/travus-plataforma/commit/7ce2f8e77ca9ca6da5212ae4b66d4d58757fb43f))
+* **atendimento:** o espaço do serviço, com o editor de fluxo ([#105](https://github.com/joaofelipe93/travus-plataforma/issues/105)) ([c934fa4](https://github.com/joaofelipe93/travus-plataforma/commit/c934fa4ad613e65f42d5ab016f18f4cf7eefb5c7))
+
+## [0.19.0](https://github.com/joaofelipe93/travus-plataforma/compare/v0.18.0...v0.19.0) (2026-10-29)
+
+
+### Novidades
+
+* **atendimento:** banco e cadastro dos bots de WhatsApp ([#101](https://github.com/joaofelipe93/travus-plataforma/issues/101)) ([1415cc5](https://github.com/joaofelipe93/travus-plataforma/commit/1415cc585a823409fbda257035106a9df155f9fb))
+
+## [0.18.0](https://github.com/joaofelipe93/travus-plataforma/compare/v0.17.0...v0.18.0) (2026-10-20)
+
+
+### Novidades
+
+* **web:** painel, configurações e conexões em cada serviço ([#96](https://github.com/joaofelipe93/travus-plataforma/issues/96)) ([793186a](https://github.com/joaofelipe93/travus-plataforma/commit/793186a10d48d02821d3eca6955d267e5b57e777))
+
+## [0.17.0](https://github.com/joaofelipe93/travus-plataforma/compare/v0.16.1...v0.17.0) (2026-10-20)
+
+
+### Novidades
+
+* **boletos:** texto do boleto e da cobrança configurável na tela ([#94](https://github.com/joaofelipe93/travus-plataforma/issues/94)) ([aa70e75](https://github.com/joaofelipe93/travus-plataforma/commit/aa70e7507c39010812239af317f1040cf1009aee))
+
+## [0.16.1](https://github.com/joaofelipe93/travus-plataforma/compare/v0.16.0...v0.16.1) (2026-10-20)
+
+
+### Correções
+
+* **boletos:** a mensagem de teste do WhatsApp sai em modo ensaio ([#92](https://github.com/joaofelipe93/travus-plataforma/issues/92)) ([8f371ba](https://github.com/joaofelipe93/travus-plataforma/commit/8f371ba0f42c8dff30d3838cfdc0a4736b0c02f3))
+
+## [0.16.0](https://github.com/joaofelipe93/travus-plataforma/compare/v0.15.0...v0.16.0) (2026-10-20)
+
+
+### Novidades
+
+* **web:** escolher os serviços do cliente no cadastro ([#90](https://github.com/joaofelipe93/travus-plataforma/issues/90)) ([40b0d6e](https://github.com/joaofelipe93/travus-plataforma/commit/40b0d6e200519b1b253c32474cdd311adfc98528))
+
 ## [0.15.0](https://github.com/joaofelipe93/travus-plataforma/compare/v0.14.0...v0.15.0) (2026-10-17)
 
 

@@ -50,6 +50,12 @@ boletos: env ## Sobe também o worker de boletos (só LÊ o Boleto Fácil; não 
 	@echo "Boletos no ar: make logs s=worker-boletos e s=boletos-whatsapp (make down derruba)"
 	@echo "ATENÇÃO: o boletos-whatsapp mostra QR de verdade. Pareie só o chip dos boletos, nunca o das reservas." 
 
+atendimento: env ## Sobe também o atendimento no WhatsApp (uma sessão por bot ligado; mostra QR de verdade)
+	$(FORA_DA_VM)
+	$(COMPOSE) --profile atendimento up -d --build atendimento-whatsapp
+	@echo "Atendimento no ar: make logs s=atendimento-whatsapp (make down derruba)"
+	@echo "ATENÇÃO: ele mostra QR de verdade, UM POR BOT. Pareie só chip de bot, nunca o das reservas nem o dos boletos."
+
 checkin: env ## Sobe também o notificador de check-in (conecta ao WhatsApp e mostra QR; NÃO pareie o número da produção aqui)
 	$(FORA_DA_VM)
 	$(COMPOSE) --profile checkin up -d --build --wait
@@ -96,6 +102,7 @@ testes-sem-fila: env
 	cd workers/boletos-canopus && for f in src/*.js; do node --check "$$f" || exit 1; done && npm test
 	$(COMPOSE) --profile teste run --rm --build checkin-teste
 	$(COMPOSE) --profile teste run --rm --build boletos-teste
+	$(COMPOSE) --profile teste run --rm --build atendimento-teste
 	sh -n workers/canopus/docker-entrypoint.sh
 	sh -n deploy/backup/backup.sh
 	for f in deploy/vm/*.sh tools/smoke/*.sh tools/teste-ip-vm/*.sh; do bash -n "$$f" || exit 1; done
@@ -194,6 +201,7 @@ env: deploy/.env
 	@grep -q '^CHECKIN_DB_SENHA=' deploy/.env || { umask 077; echo "CHECKIN_DB_SENHA=$$(openssl rand -hex 32)" >> deploy/.env; echo "Acrescentada CHECKIN_DB_SENHA ao deploy/.env (aplique com make migrate ou make up)"; }
 	@grep -q '^ASSISTENTE_DB_SENHA=' deploy/.env || { umask 077; echo "ASSISTENTE_DB_SENHA=$$(openssl rand -hex 32)" >> deploy/.env; echo "Acrescentada ASSISTENTE_DB_SENHA ao deploy/.env (aplique com make migrate ou make up)"; }
 	@grep -q '^BOLETOS_ADMIN_TOKEN=' deploy/.env || { umask 077; echo "BOLETOS_ADMIN_TOKEN=$$(openssl rand -hex 32)" >> deploy/.env; echo "Acrescentado BOLETOS_ADMIN_TOKEN ao deploy/.env"; }
+	@grep -q '^ATENDIMENTO_ADMIN_TOKEN=' deploy/.env || { umask 077; echo "ATENDIMENTO_ADMIN_TOKEN=$$(openssl rand -hex 32)" >> deploy/.env; echo "Acrescentado ATENDIMENTO_ADMIN_TOKEN ao deploy/.env"; }
 	@grep -q '^BOLETOS_DB_SENHA=' deploy/.env || { umask 077; echo "BOLETOS_DB_SENHA=$$(openssl rand -hex 32)" >> deploy/.env; echo "Acrescentada BOLETOS_DB_SENHA ao deploy/.env (aplique com make migrate ou make up)"; }
 	@grep -q '^CHAVE_CRIPTOGRAFIA=' deploy/.env || { umask 077; echo "CHAVE_CRIPTOGRAFIA=$$(openssl rand -hex 32)" >> deploy/.env; echo "Acrescentada CHAVE_CRIPTOGRAFIA ao deploy/.env (guarde com o backup do banco: sem ela, o token do Google não decifra)"; }
 

@@ -22,7 +22,7 @@ falha() { echo "x $*"; falhas=$((falhas + 1)); }
 # Variáveis só para o compose interpolar; nada aqui vai para lugar nenhum.
 export POSTGRES_PASSWORD=x WORKER_TOKEN=x CHAVE_CRIPTOGRAFIA=x \
   CHECKIN_WEBHOOK_SECRET=x CHECKIN_ADMIN_TOKEN=x CHECKIN_DB_SENHA=x ASSISTENTE_DB_SENHA=x \
-  BOLETOS_ADMIN_TOKEN=x BOLETOS_DB_SENHA=x \
+  BOLETOS_ADMIN_TOKEN=x BOLETOS_DB_SENHA=x ATENDIMENTO_ADMIN_TOKEN=x \
   DOMINIO_APP=app.exemplo.com.br DOMINIO_API=api.exemplo.com.br BACKUP_DIR=/tmp
 
 prod=$(docker compose -f deploy/docker-compose.yml -f deploy/docker-compose.prod.yml config 2> /dev/null)

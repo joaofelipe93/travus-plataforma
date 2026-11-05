@@ -6,7 +6,8 @@ Roteiro para colocar a Travus Plataforma numa VM e mantê-la. Decisões do usuá
 - **Domínio**: a definir (`app.<domínio>` e `api.<domínio>`).
 - **Backup do Postgres**: na própria VM, com cópia manual para fora (`make backup-baixar`).
 - **Alertas**: e-mail (vigia da API) + monitor externo.
-- **Notificador de check-in (WhatsApp)**: sai da VM `appairbnb` e passa a rodar nesta VM, com fila e eventos no mesmo Postgres. O número é **pareado de novo** pela tela WhatsApp (sem copiar a sessão nem o histórico da `appairbnb`). Roteiro na seção 9.
+- **Notificador de check-in (WhatsApp)**: sai da VM `appairbnb` e passa a rodar nesta VM, com fila e eventos no mesmo Postgres. O número é **pareado de novo** pela tela Reservas → Conexões (sem copiar a sessão nem o histórico da `appairbnb`). Roteiro na seção 9.
+- **Atendimento (bots de WhatsApp)**: sobe junto e **sobe vazio** — sem bot cadastrado não há sessão nem QR. Cada bot tem o próprio número, pareado pela tela Atendimento → Conexões, e **um bot só responde depois de ligado** (um botão, na tela). A VM de 2 GB comporta **2 bots** (`MAX_SESSOES=2`). Roteiro na seção 10.
 
 Nada disso roda sem pedido: criar a VM, mexer no DNS, publicar e ligar o lance real são decisões do usuário, na hora.
 
@@ -152,16 +153,16 @@ O notificador (`workers/checkin-whatsapp`) sobe junto com a plataforma, desde o 
 
 Só com o ok do usuário, com a plataforma já no ar pela seção 5 e um usuário admin criado.
 
-1. **Parear** (admin, pela tela): `https://app.<domínio>/reservas/whatsapp` (Reservas → WhatsApp) → aparece o QR. No celular do **chip dedicado** (o mesmo da `appairbnb`): WhatsApp → Configurações → Dispositivos conectados → Conectar dispositivo → escaneie. A tela mostra "conectado como +55 …". O aparelho novo aparece no celular como **Travus Plataforma**; o da `appairbnb` continua lá como **Check-in Notifier** (cada um tem a própria sessão, os dois funcionam ao mesmo tempo).
-2. **Grupo**: "Escolher grupo" → o mesmo grupo que recebe as notificações hoje → "Usar este grupo". Se ele não aparece na lista, o número não participa do grupo.
-3. **Teste**: "Enviar mensagem de teste" (todos do grupo recebem; avise antes).
+1. **Parear** (admin, pela tela): `https://app.<domínio>/reservas/conexoes` (Reservas → Conexões) → aparece o QR. No celular do **chip dedicado** (o mesmo da `appairbnb`): WhatsApp → Configurações → Dispositivos conectados → Conectar dispositivo → escaneie. A tela mostra "conectado como +55 …". O aparelho novo aparece no celular como **Travus Plataforma**; o da `appairbnb` continua lá como **Check-in Notifier** (cada um tem a própria sessão, os dois funcionam ao mesmo tempo).
+2. **Grupo** (em Reservas → Configurações): "Escolher grupo" → o mesmo grupo que recebe as notificações hoje → "Usar este grupo". Se ele não aparece na lista, o número não participa do grupo.
+3. **Teste** (em Conexões): "Enviar mensagem de teste" (todos do grupo recebem; avise antes).
 4. **Token do webhook** (novo, diferente do da `appairbnb`):
    ```bash
    ssh travus@<ip> 'grep ^CHECKIN_WEBHOOK_SECRET= /opt/travus/compartilhado/.env'
    ```
 5. **Trocar no PMS** (usuário): URL do webhook `https://api.<domínio>/webhooks/nova-reserva`, cabeçalho `x-webhook-token: <token do passo 4>` (ou `Authorization: Bearer <token>`), o mesmo formato de hoje. Só `POST` nessa rota chega ao notificador.
    - **Não reprocesse reservas antigas no PMS logo depois da troca**: o banco novo não conhece as que a `appairbnb` já notificou e mandaria de novo ao grupo.
-6. **Conferir** na próxima reserva ou cancelamento real: a mensagem chega **uma vez** no grupo e a tela WhatsApp mostra "Enviadas: 1". Se algo der errado, volte a URL e o token antigos no PMS: a `appairbnb` ainda está de pé.
+6. **Conferir** na próxima reserva ou cancelamento real: a mensagem chega **uma vez** no grupo e a tela Conexões mostra "Enviadas: 1". Se algo der errado, volte a URL e o token antigos no PMS: a `appairbnb` ainda está de pé.
 7. **Desligar a `appairbnb`** (usuário, depois de alguns dias sem problema): pare o notificador antigo na `appairbnb` (instalada pelo `bootstrap-vps.sh` do projeto airbnb: `sudo -iu checkin pm2 stop checkin-notifier && sudo -iu checkin pm2 save`) e, no celular, em Dispositivos conectados, **remova o "Check-in Notifier"** (nunca o "Travus Plataforma"). Destruir a VM é decisão sua, depois; o `data/` dela tem o histórico antigo de reservas.
 
 Depois da migração:
@@ -170,7 +171,64 @@ Depois da migração:
 - **Trocar o token do webhook**: apague a linha `CHECKIN_WEBHOOK_SECRET` do `.env` da VM, publique (o `publicar.sh` gera outro) e atualize o PMS.
 - **Backup**: eventos, reservas, resumos e fila estão no Postgres (`checkin.eventos`, `checkin.reservas`, `checkin.resumos`, `checkin.mensagens`) e entram no dump; os payloads têm nome, telefone e e-mail de hóspedes. A sessão do WhatsApp fica no volume `travus_checkin-dados` e **não** tem backup: perdida a VM, pareie de novo.
 
-## 10. Deploy pelo GitHub (padrão)
+## 10. Atendimento (bots de WhatsApp): parear cada número
+
+O serviço (`workers/atendimento-whatsapp`) sobe junto com a plataforma desde o deploy que o
+trouxer, e **sobe vazio**: sem bot cadastrado não existe sessão, nenhum QR aparece e nada é
+enviado. Ele é o único serviço com **vários números** — um por bot.
+
+**Um bot tem um botão**: ligado ou desligado (Atendimento → Bots, ou a lista em Configurações).
+Ligado, ele responde quem escrever para o número dele; desligado, não abre conversa nem responde,
+e o que estiver na fila espera. Admin e operador mexem nesse botão.
+
+Não há chave de ambiente no caminho: para parar tudo de uma vez, desligue os bots na tela ou
+derrube o container (`docker compose stop atendimento-whatsapp`). O que existe de limite, e não é
+botão, são os **tetos** de cada bot (tokens por conversa, respostas por hora).
+
+1. **Criar o bot** (admin ou operador): `https://app.<domínio>/atendimento/bots` → "Novo bot".
+   Escolha um **ponto de partida** (em branco, plano de saúde empresarial, consórcio ou
+   qualificação genérica), ajuste as instruções e confira **as perguntas** em Atendimento → Bots →
+   *o bot*. Ele nasce **desligado**.
+2. **Parear antes de ligar**: deixe o bot desligado e pareie o número (passo 3). Com ele
+   desligado, nada é respondido — e a mensagem de teste (passo 4) continua funcionando.
+3. **Parear o número** (admin): Atendimento → **Conexões** → o cartão daquele bot mostra o QR.
+   No celular do **chip daquele atendimento**: WhatsApp → Dispositivos conectados → Conectar
+   dispositivo → escaneie. **Confira o nome do bot no cartão antes de escanear**: cada QR é de um
+   bot, e o aparelho aparece no celular como `Travus <nome do bot>`.
+   - **Nunca pareie aqui o chip das reservas nem o dos boletos.** São três serviços e três
+     números; duas conexões na mesma sessão derrubam uma à outra.
+4. **Testar o pareamento** (em Conexões): "Enviar teste" para **o seu próprio número**. Ela sai
+   mesmo com o bot desligado — é com ela que se confere se o número pareado é o certo.
+5. **Ligar o bot** (Atendimento → Bots → *o bot*, ou a lista em Configurações). A partir daí **o
+   texto que o modelo escreve sai sem revisão humana** para quem escrever ao bot. **Antes de
+   divulgar o número, escreva para ele você mesmo pelo WhatsApp** e leia a conversa em
+   Atendimento → Conversas: é o teste que não mente, porque é o caminho de verdade.
+
+### Memória: quantos bots cabem
+
+Cada sessão do Baileys custa memória, e esta VM tem **2 GB** divididos com Postgres, API, web,
+Traefik e os outros dois serviços de WhatsApp. Por isso o compose de produção fixa
+`MAX_SESSOES=2` (o padrão do código é 4) e `mem_limit: 512m` neste serviço:
+
+- **até 2 bots**: cabe na VM atual;
+- **3 ou mais**: redimensione a VM para 4 GB **antes** de ligar o terceiro bot e só então suba
+  `ATENDIMENTO_MAX_SESSOES` no `.env`. Bot ligado acima do teto **fica sem sessão** — ele aparece
+  assim em Conexões e o vigia avisa, em vez de o processo morrer sem memória no meio de uma
+  conversa.
+
+### Depois de pareado
+
+- **Sessão caiu** (removida no celular, número trocado, conexão travada): o vigia avisa em 10 min
+  com o link da tela, e as respostas esperam na fila. Um admin escaneia o QR de novo; "Desconectar
+  e gerar novo QR" força uma sessão nova **daquele bot**, sem encostar nos outros.
+- **Custo**: cada mensagem respondida é uma chamada ao modelo. O painel mostra os tokens do mês, e
+  cada bot tem teto de tokens por conversa e de respostas por hora (Atendimento → Bots → *o bot*).
+- **Backup**: bots, fluxo, conversas, mensagens, coletas e leads estão no Postgres (schema
+  `atendimento`) e entram no dump — **com nome, telefone e o texto do que as pessoas escreveram**.
+  As sessões do WhatsApp ficam no volume `travus_atendimento-dados` e **não** têm backup: perdida
+  a VM, pareie de novo.
+
+## 11. Deploy pelo GitHub (padrão)
 
 Depois do primeiro deploy manual (seções 1 a 5), as versões seguintes vão pelo GitHub:
 
@@ -200,10 +258,10 @@ Para revogar a chave: apague a linha `restrict,command="/opt/travus/bin/entrada-
 
 | Tarefa | Como |
 |---|---|
-| Publicar | merge do PR de versão → aprovar o job Produção no GitHub (seção 10). Plano B: `make deploy VM=travus@<ip>` |
+| Publicar | merge do PR de versão → aprovar o job Produção no GitHub (seção 11). Plano B: `make deploy VM=travus@<ip>` |
 | Voltar uma versão | workflow **Voltar versão** no GitHub, ou `make deploy-voltar VM=travus@<ip>`. **Migrações não são desfeitas** (backup antes de cada deploy em `backups/antes-do-deploy`) |
 | Logs | `ssh -t travus@<ip> 'cd /opt/travus/atual && make logs s=api'` (api, worker-canopus, checkin-whatsapp, traefik, backup…) |
-| WhatsApp do notificador | tela `https://app.<domínio>/reservas/whatsapp` (só admin): conexão, QR, grupo, teste, fila |
+| WhatsApp do notificador | telas `https://app.<domínio>/reservas/conexoes` (conexão, QR, teste, fila) e `/reservas/configuracao` (grupo), só admin |
 | Estado | `ssh travus@<ip> 'cd /opt/travus/atual && make ps'` |
 | Cópia do backup | `make backup-baixar VM=travus@<ip>` (semanal; vai para `deploy/backups/`, fora do git; tem dados de clientes) |
 | Testar a restauração | `ssh -t travus@<ip> 'cd /opt/travus/atual && make restaurar-teste'` (mensal) |
@@ -227,7 +285,6 @@ Na VM, `make up`, `make prod-local` e `make dev-web` se recusam a rodar: a stack
   O `make restaurar-teste` confere que o dump restaura num banco temporário; a restauração por cima do banco em uso ainda não foi ensaiada.
 
 ### O que o vigia avisa (e-mail, a cada 5 min, só quando muda; lembrete a cada 12 h)
-
 - banco inacessível; worker sem contato com a API há mais de 10 min;
 - execução na fila há mais de 30 min, ou em andamento sem sinal do worker há mais de 5 min;
 - **cota em `erro_apos_confirmar`** (clicou em Confirmar sem resultado: conferir no Histórico);
@@ -235,6 +292,7 @@ Na VM, `make up`, `make prod-local` e `make dev-web` se recusam a rodar: a stack
 - backup atrasado (mais de 26 h) ou com erro; disco acima de 80%;
 - certificado HTTPS vencendo em menos de 14 dias ou não verificável (com `CERT_RESOLVER=le-teste`, esse alerta é esperado);
 - **notificador de check-in** (`VIGIA_CHECKIN=true`): serviço sem resposta ou WhatsApp desconectado/esperando QR há mais de 10 min; conectado sem grupo escolhido; mensagens que desistiram nas últimas 24 h; mensagens paradas há mais de 30 min com o WhatsApp conectado. Antes do passo 1 da seção 9, o alerta "esperando a leitura do QR" é esperado.
+- **atendimento** (`VIGIA_ATENDIMENTO=true`): serviço dos bots sem resposta há mais de 10 min; **bot ligado cujo número caiu**, está esperando QR ou ficou sem sessão por causa do teto; respostas que não chegaram a quem escreveu (24 h); fila de respostas parada há mais de 30 min com algum número conectado. Bot desligado não é vigiado. Sem nome, telefone nem texto de conversa no e-mail.
 
 Os e-mails não levam nome de cliente nem de hóspede, só grupo, cota e versão.
 

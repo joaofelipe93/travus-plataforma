@@ -65,6 +65,35 @@ test('envio desligado na configuração segura a fila', async () => {
   assert.equal((await buscar(id)).status, 'pendente')
 })
 
+// A mensagem de teste é quem responde "este número está pareado?". Se ela esperasse o envio
+// ser ligado, a tela diria que deu certo e nada chegaria — era o que acontecia.
+test('em modo ensaio, a mensagem de teste sai e o boleto espera', async () => {
+  const boleto = await enfileirar({})
+  const teste = await enfileirar({ tipo: 'teste', anexo: null, texto: 'Mensagem de teste da Travus Plataforma.' })
+  await desligarEnvio()
+  const carteiro = carteiroFalso()
+
+  await rodarUmCiclo(carteiro)
+
+  assert.equal(carteiro.enviados.length, 1, 'só a mensagem de teste devia sair')
+  assert.equal(carteiro.enviados[0]!.texto, 'Mensagem de teste da Travus Plataforma.')
+  assert.equal((await buscar(teste)).status, 'enviada')
+  assert.equal((await buscar(boleto)).status, 'pendente', 'o boleto continua esperando o envio ser ligado')
+})
+
+test('em modo ensaio, a mensagem de teste ainda respeita a conexão', async () => {
+  const teste = await enfileirar({ tipo: 'teste', anexo: null })
+  await desligarEnvio()
+  const carteiro = carteiroFalso({ conectado: false })
+
+  await rodarUmCiclo(carteiro)
+
+  assert.equal(carteiro.enviados.length, 0)
+  const m = await buscar(teste)
+  assert.equal(m.status, 'pendente')
+  assert.equal(m.tentativas, 0, 'sem conexão não gasta tentativa, como qualquer outra mensagem')
+})
+
 test('número sem WhatsApp é falha definitiva, sem gastar as cinco tentativas', async () => {
   const id = await enfileirar({})
   const carteiro = carteiroFalso({ falhar: new SemWhatsappError('5511900000000') })

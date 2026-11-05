@@ -1,0 +1,51 @@
+# Serviço de atendimento no WhatsApp: N sessões (uma por bot) ↔ API da plataforma
+# (Baileys). Cada bot tem o PRÓPRIO número e a própria pasta de credenciais; nunca aponte o
+# AUTH_DIR deste serviço para a pasta do notificador nem para a dos boletos.
+# Um processo só: não escale (duas conexões na mesma sessão do Baileys derrubam uma à outra e
+# cada processo tem o próprio laço da fila, o que mandaria a resposta duas vezes à pessoa).
+
+# Dependências (com as de desenvolvimento: o make test roda nesta fase). O libsignal do baileys
+# vem do GitHub (git). O git não vai para a imagem final.
+FROM node:24.21.0-bookworm-slim AS deps
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends git ca-certificates \
+ && rm -rf /var/lib/apt/lists/*
+WORKDIR /app
+COPY package.json package-lock.json ./
+# Retentativas de rede: o registry do npm derrubou o deploy e a CI em 15/10/2026 com
+# ECONNRESET no meio do download (o padrão do npm é 2 tentativas). Não muda o que é
+# instalado — o package-lock.json continua mandando.
+RUN npm ci --no-audit --no-fund \
+    --fetch-retries=5 --fetch-retry-mintimeout=2000 --fetch-retry-maxtimeout=60000 --fetch-timeout=600000
+
+FROM deps AS build
+COPY tsconfig.json ./
+COPY src ./src
+RUN npm run build && npm prune --omit=dev --no-audit --no-fund
+
+FROM node:24.21.0-bookworm-slim
+WORKDIR /app
+# Versão (version.txt) e commit, passados pelo compose; aparecem no /health.
+ARG VERSAO=dev
+ARG COMMIT=desconhecido
+ENV VERSAO=${VERSAO} \
+    COMMIT=${COMMIT} \
+    NODE_ENV=production \
+    HOST=0.0.0.0 \
+    PORT=3000 \
+    LOG_FORMAT=json \
+    AUTH_DIR=/dados/sessoes
+COPY --from=build /app/package.json ./
+COPY --from=build /app/node_modules ./node_modules
+COPY --from=build /app/dist ./dist
+
+# /dados (volume): uma subpasta por bot, com as credenciais do número pareado. Nunca na imagem.
+RUN mkdir -p /dados && chown node:node /dados
+USER node
+VOLUME ["/dados"]
+EXPOSE 3000
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
+  CMD ["node", "-e", "fetch('http://127.0.0.1:3000/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+
+CMD ["node", "dist/index.js"]

@@ -155,6 +155,29 @@ jobs:
         working-directory: workers/boletos-whatsapp
         run: npm run typecheck && npm run typecheck:tests && npm test
 
+  atendimento-whatsapp:
+    name: Atendimento no WhatsApp (TypeScript)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: workers/atendimento-whatsapp
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: workers/atendimento-whatsapp/package-lock.json
+      - name: Dependências
+        run: npm ci --no-audit --no-fund
+      - name: baileys fixo em 6.7.24
+        run: |
+          versao=$(node -p "require('./package-lock.json').packages['node_modules/baileys'].version")
+          [ "$versao" = "6.7.24" ] || { echo "::error::baileys em $versao; a 7.x tem quedas silenciosas de conexão"; exit 1; }
+      - name: Typecheck e testes (nenhum fala com o WhatsApp nem com a API)
+        run: npm run typecheck && npm run typecheck:tests && npm test
+
   web:
     name: Web (Next.js)
     runs-on: ubuntu-24.04
@@ -244,6 +267,7 @@ jobs:
           ASSISTENTE_DB_SENHA: x
           BOLETOS_ADMIN_TOKEN: x
           BOLETOS_DB_SENHA: x
+          ATENDIMENTO_ADMIN_TOKEN: x
         run: |
           docker compose -f deploy/docker-compose.yml config --quiet
           DOMINIO_APP=app.exemplo.com.br DOMINIO_API=api.exemplo.com.br BACKUP_DIR=/tmp \

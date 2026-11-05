@@ -1,6 +1,7 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import Link from "next/link";
 import { useState } from "react";
 import { toast } from "sonner";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -393,6 +394,13 @@ function Configuracao({
                   {c.drive_pasta_origem === "ambiente" && " (definida no servidor, em GOOGLE_DRIVE_PASTA_ID)"}
                 </>
               )}
+            </p>
+            <p className="text-sm text-muted-foreground">
+              A conta do Google em si (token importado, aplicativo OAuth, cofre) aparece em{" "}
+              <Link href="/lances/conexoes" className="underline underline-offset-4">
+                Conexões
+              </Link>
+              .
             </p>
           </div>
         </Secao>

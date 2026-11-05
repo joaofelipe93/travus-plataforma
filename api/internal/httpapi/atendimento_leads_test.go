@@ -1,0 +1,463 @@
+package httpapi
+
+// Etapa E: o lead. O que está guardado aqui é o que separa "o atendimento rendeu algo" de
+// "alguém sujou o cadastro": o lead nasce sozinho, mas **virar cliente é decisão de gente**, o
+// cliente nasce ativo em nenhum serviço, e lead decidido não se decide de novo.
+
+import (
+	"context"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"sync"
+	"testing"
+	"time"
+
+	"github.com/joaofelipe93/travus-plataforma/api/internal/assistente"
+	"github.com/joaofelipe93/travus-plataforma/api/internal/atendimentowa"
+	"github.com/joaofelipe93/travus-plataforma/api/internal/db"
+)
+
+// conversaQueRendeu roda uma conversa inteira que coleta dois dados e encerra, do jeito que
+// acontece de verdade — o lead tem de sair disso, sem ninguém pedir.
+func conversaQueRendeu(t *testing.T, s *Servidor, slug, telefone string) resultadoAtendimento {
+	t.Helper()
+	m := &modeloRoteiroBot{turnos: []turnoBot{
+		{ferramenta: "registrar_resposta", entrada: `{"campo":"nome_da_empresa","valor":"Acme Ltda"}`},
+		{ferramenta: "registrar_resposta", entrada: `{"campo":"melhor_telefone","valor":"11988887777"}`},
+		{ferramenta: "encerrar", entrada: `{"motivo":"concluido"}`},
+		{texto: "Obrigado! A equipe vai falar com você."},
+	}}
+	s.cfg.ModeloAtendimento = func(string) assistente.Modelo { return m }
+	bot := botComPerguntas(t, s, slug, true)
+	res, err := s.responderAtendimento(context.Background(), bot, telefone, "Fulano de Teste", "somos a Acme Ltda, meu telefone é 11988887777")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !res.Encerrada {
+		t.Fatalf("a conversa devia encerrar: %+v", res)
+	}
+	return res
+}
+
+func leadsDoServidor(t *testing.T, s *Servidor, situacao string) []leadJSON {
+	t.Helper()
+	rec := pegar(t, s, db.PerfilUsuarioOperador, "/atendimento/leads?situacao="+situacao)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("listar leads: %d %s", rec.Code, rec.Body)
+	}
+	var resposta struct {
+		Leads []leadJSON `json:"leads"`
+	}
+	decodificarEm(t, rec, &resposta)
+	return resposta.Leads
+}
+
+func postar(t *testing.T, s *Servidor, perfil db.PerfilUsuario, caminho string, corpo any) *httptest.ResponseRecorder {
+	t.Helper()
+	nav := navegadorDoPerfil(t, s, perfil)
+	return nav.enviarJSON(http.MethodPost, caminho, corpo)
+}
+
+func TestAtendimentoLeadNasceDaConversaEncerrada(t *testing.T) {
+	s := servidorComBot(t, &modeloRoteiroBot{})
+	res := conversaQueRendeu(t, s, "leads", "5511900070001")
+
+	leads := leadsDoServidor(t, s, "novos")
+	if len(leads) != 1 {
+		t.Fatalf("a conversa encerrada devia ter virado lead: %+v", leads)
+	}
+	l := leads[0]
+	if l.ConversaID != res.ConversaID || l.Status != "novo" {
+		t.Errorf("lead errado: %+v", l)
+	}
+	// O telefone do lead é o do WhatsApp (de onde a pessoa escreveu), não o que ela ditou.
+	if l.Telefone == nil || *l.Telefone != "5511900070001" {
+		t.Errorf("o telefone devia ser o do WhatsApp: %v", l.Telefone)
+	}
+	// O outro telefone não se perde: entra como observação para a revisão julgar.
+	if l.Observacoes == nil || *l.Observacoes == "" {
+		t.Error("o telefone informado na conversa devia virar observação")
+	}
+	// O nome coletado ganha do nome do WhatsApp: em venda para empresa, o cliente do cadastro é
+	// a empresa, e o push name é só o apelido do celular de quem escreveu.
+	if l.Nome == nil || *l.Nome != "Acme Ltda" {
+		t.Errorf("o nome devia vir do dado coletado: %v", valorOuVazio(l.Nome))
+	}
+	// Tudo o que o bot colheu fica no lead, inclusive o que não tem campo próprio.
+	if l.Dados["nome_da_empresa"] != "Acme Ltda" {
+		t.Errorf("os dados crus deviam estar no lead: %+v", l.Dados)
+	}
+}
+
+// Sem nenhum nome coletado, o nome do WhatsApp serve de ponto de partida para a revisão.
+func TestAtendimentoLeadUsaONomeDoWhatsappQuandoNaoHaOutro(t *testing.T) {
+	m := &modeloRoteiroBot{turnos: []turnoBot{
+		{ferramenta: "registrar_resposta", entrada: `{"campo":"melhor_telefone","valor":"11977776666"}`},
+		{ferramenta: "encerrar", entrada: `{"motivo":"concluido"}`},
+		{texto: "Obrigado!"},
+	}}
+	s := servidorComBot(t, m)
+	s.cfg.ModeloAtendimento = func(string) assistente.Modelo { return m }
+	bot := botComPerguntas(t, s, "so-telefone", true)
+	if _, err := s.responderAtendimento(context.Background(), bot, "5511900070010", "Fulano de Teste", "meu telefone é 11977776666"); err != nil {
+		t.Fatal(err)
+	}
+	leads := leadsDoServidor(t, s, "novos")
+	if len(leads) != 1 {
+		t.Fatalf("devia ter um lead: %+v", leads)
+	}
+	if leads[0].Nome == nil || *leads[0].Nome != "Fulano de Teste" {
+		t.Errorf("sem nome coletado, o do WhatsApp serve de partida: %v", valorOuVazio(leads[0].Nome))
+	}
+}
+
+// Conversa que não colheu nada não vira lead: senão a tela de leads seria a lista de toda
+// conversa que passou.
+func TestAtendimentoConversaSemDadoNaoViraLead(t *testing.T) {
+	m := &modeloRoteiroBot{turnos: []turnoBot{
+		{ferramenta: "encerrar", entrada: `{"motivo":"fora_do_escopo"}`},
+		{texto: "Isso não é com a gente, desculpe."},
+	}}
+	s := servidorComBot(t, m)
+	bot := botComPerguntas(t, s, "sem-dado", true)
+	if _, err := s.responderAtendimento(context.Background(), bot, "5511900070002", "", "vocês vendem carro?"); err != nil {
+		t.Fatal(err)
+	}
+	if leads := leadsDoServidor(t, s, "todos"); len(leads) != 0 {
+		t.Errorf("conversa sem dado coletado não devia virar lead: %+v", leads)
+	}
+}
+
+func TestAtendimentoLeadViraCliente(t *testing.T) {
+	s := servidorComBot(t, &modeloRoteiroBot{})
+	conversaQueRendeu(t, s, "vira-cliente", "5511900070003")
+	lead := leadsDoServidor(t, s, "novos")[0]
+
+	// A revisão corrige o que o modelo entendeu torto.
+	nav := navegadorDoPerfil(t, s, db.PerfilUsuarioOperador)
+	rec := nav.enviarJSON(http.MethodPatch, "/atendimento/leads/"+idTexto(lead.ID), map[string]any{
+		"nome": "Maria da Silva", "telefone": "11988887777", "email": "maria@exemplo.com",
+	})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("corrigir o lead: %d %s", rec.Code, rec.Body)
+	}
+
+	rec = postar(t, s, db.PerfilUsuarioOperador, "/atendimento/leads/"+idTexto(lead.ID)+"/aproveitar", map[string]any{})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("aproveitar: %d %s", rec.Code, rec.Body)
+	}
+	var r struct {
+		Lead leadJSON `json:"lead"`
+	}
+	decodificarEm(t, rec, &r)
+	if r.Lead.Status != "aproveitado" || r.Lead.ClienteID == nil {
+		t.Fatalf("o lead devia virar aproveitado com cliente: %+v", r.Lead)
+	}
+	// O cadastro guarda o nome como foi digitado (a forma maiúscula só serve para comparar).
+	if r.Lead.ClienteNome == nil || *r.Lead.ClienteNome != "Maria da Silva" {
+		t.Errorf("o cliente devia ter o nome da revisão: %v", valorOuVazio(r.Lead.ClienteNome))
+	}
+	if r.Lead.RevisadoPorNome == nil {
+		t.Error("quem revisou devia ficar registrado")
+	}
+
+	// **O cliente nasce ativo em nenhum serviço**: um lead de atendimento não entra em dry-run
+	// de lance nem em rodada de boletos por ter sido cadastrado.
+	var ativos int
+	if err := s.pool.QueryRow(context.Background(),
+		"SELECT count(*) FROM cliente_servicos WHERE cliente_id = $1 AND ativo", *r.Lead.ClienteID).
+		Scan(&ativos); err != nil {
+		t.Fatal(err)
+	}
+	if ativos != 0 {
+		t.Errorf("o cliente do lead não podia nascer ativo em serviço nenhum: %d ativo(s)", ativos)
+	}
+	// E ele existe no cadastro de verdade, com o contato revisado.
+	var telefone, email *string
+	if err := s.pool.QueryRow(context.Background(),
+		"SELECT telefone, email FROM clientes WHERE id = $1", *r.Lead.ClienteID).Scan(&telefone, &email); err != nil {
+		t.Fatal(err)
+	}
+	if telefone == nil || *telefone != "11988887777" || email == nil || *email != "maria@exemplo.com" {
+		t.Errorf("o cliente devia nascer com o contato da revisão: %v %v", telefone, email)
+	}
+
+	// Decidido não se decide de novo.
+	if rec := postar(t, s, db.PerfilUsuarioOperador, "/atendimento/leads/"+idTexto(lead.ID)+"/aproveitar", map[string]any{}); rec.Code != http.StatusConflict {
+		t.Errorf("aproveitar duas vezes devia dar 409, veio %d", rec.Code)
+	}
+	if rec := nav.enviarJSON(http.MethodPatch, "/atendimento/leads/"+idTexto(lead.ID), map[string]any{"nome": "Outro"}); rec.Code != http.StatusConflict {
+		t.Errorf("editar lead decidido devia dar 409, veio %d", rec.Code)
+	}
+}
+
+// O caso que evita cadastro duplicado: alguém da carteira escreveu no WhatsApp.
+func TestAtendimentoLeadLigaAClienteExistente(t *testing.T) {
+	s := servidorComBot(t, &modeloRoteiroBot{})
+	nav := navegadorDoPerfil(t, s, db.PerfilUsuarioOperador)
+	criado := nav.cadastrarCliente(t, map[string]any{"nome": "Cliente Antigo"})
+
+	conversaQueRendeu(t, s, "ja-cliente", "5511900070004")
+	lead := leadsDoServidor(t, s, "novos")[0]
+
+	rec := postar(t, s, db.PerfilUsuarioOperador, "/atendimento/leads/"+idTexto(lead.ID)+"/aproveitar",
+		map[string]any{"cliente_id": criado.Cliente.ID})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("ligar ao cliente existente: %d %s", rec.Code, rec.Body)
+	}
+	var r struct {
+		Lead leadJSON `json:"lead"`
+	}
+	decodificarEm(t, rec, &r)
+	if r.Lead.ClienteID == nil || *r.Lead.ClienteID != criado.Cliente.ID {
+		t.Fatalf("o lead devia apontar para o cliente existente: %+v", r.Lead)
+	}
+	// Nenhum cliente novo foi criado.
+	var quantos int
+	if err := s.pool.QueryRow(context.Background(), "SELECT count(*) FROM clientes").Scan(&quantos); err != nil {
+		t.Fatal(err)
+	}
+	if quantos != 1 {
+		t.Errorf("não devia ter criado cliente novo: %d clientes", quantos)
+	}
+}
+
+func TestAtendimentoLeadDescartado(t *testing.T) {
+	s := servidorComBot(t, &modeloRoteiroBot{})
+	conversaQueRendeu(t, s, "descarte", "5511900070005")
+	lead := leadsDoServidor(t, s, "novos")[0]
+
+	// Descartar sem motivo é recusado: "por que isto não virou cliente?" é pergunta de depois.
+	if rec := postar(t, s, db.PerfilUsuarioOperador, "/atendimento/leads/"+idTexto(lead.ID)+"/descartar", map[string]any{}); rec.Code != http.StatusBadRequest {
+		t.Errorf("descartar sem motivo devia dar 400, veio %d", rec.Code)
+	}
+	rec := postar(t, s, db.PerfilUsuarioOperador, "/atendimento/leads/"+idTexto(lead.ID)+"/descartar",
+		map[string]any{"motivo": "não era do nosso ramo"})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("descartar: %d %s", rec.Code, rec.Body)
+	}
+	var r struct {
+		Lead leadJSON `json:"lead"`
+	}
+	decodificarEm(t, rec, &r)
+	if r.Lead.Status != "descartado" || r.Lead.MotivoDescarte == nil {
+		t.Fatalf("devia ficar descartado com motivo: %+v", r.Lead)
+	}
+	// A conversa e os dados continuam guardados: descartar o lead não apaga histórico.
+	var mensagens int
+	if err := s.pool.QueryRow(context.Background(),
+		"SELECT count(*) FROM atendimento.mensagens WHERE conversa_id = $1", r.Lead.ConversaID).Scan(&mensagens); err != nil {
+		t.Fatal(err)
+	}
+	if mensagens == 0 {
+		t.Error("as mensagens da conversa não podiam desaparecer")
+	}
+	if len(leadsDoServidor(t, s, "novos")) != 0 {
+		t.Error("o lead descartado não devia continuar na lista de novos")
+	}
+	if len(leadsDoServidor(t, s, "descartados")) != 1 {
+		t.Error("o lead devia aparecer entre os descartados")
+	}
+}
+
+// Lead é dado pessoal de quem escreveu, e promovê-lo mexe no cadastro: leitura não entra.
+func TestAtendimentoLeadNaoEDeLeitura(t *testing.T) {
+	s := servidorComBot(t, &modeloRoteiroBot{})
+	conversaQueRendeu(t, s, "privacidade-lead", "5511900070006")
+	lead := leadsDoServidor(t, s, "novos")[0]
+
+	for _, caminho := range []string{"/atendimento/leads", "/atendimento/leads/" + idTexto(lead.ID)} {
+		if rec := pegar(t, s, db.PerfilUsuarioLeitura, caminho); rec.Code != http.StatusForbidden {
+			t.Errorf("%s com perfil leitura devia dar 403, veio %d", caminho, rec.Code)
+		}
+	}
+	if rec := postar(t, s, db.PerfilUsuarioLeitura, "/atendimento/leads/"+idTexto(lead.ID)+"/aproveitar", map[string]any{}); rec.Code != http.StatusForbidden {
+		t.Errorf("aproveitar com perfil leitura devia dar 403, veio %d", rec.Code)
+	}
+}
+
+func TestAtendimentoLeadNoResumoDoPainel(t *testing.T) {
+	s := servidorComBot(t, &modeloRoteiroBot{})
+	conversaQueRendeu(t, s, "resumo-lead", "5511900070007")
+
+	rec := pegar(t, s, db.PerfilUsuarioLeitura, "/atendimento/resumo")
+	var res struct {
+		Leads struct {
+			Novos        int64 `json:"novos"`
+			Aproveitados int64 `json:"aproveitados"`
+			NoMes        int64 `json:"no_mes"`
+		} `json:"leads"`
+	}
+	decodificarEm(t, rec, &res)
+	if res.Leads.Novos != 1 || res.Leads.NoMes != 1 {
+		t.Errorf("o painel devia contar o lead novo: %+v", res.Leads)
+	}
+}
+
+// A conversa aponta para o lead que ela originou: é o atalho de quem está lendo a conversa.
+func TestAtendimentoConversaApontaParaOLead(t *testing.T) {
+	s := servidorComBot(t, &modeloRoteiroBot{})
+	res := conversaQueRendeu(t, s, "aponta-lead", "5511900070008")
+
+	rec := pegar(t, s, db.PerfilUsuarioOperador, "/atendimento/conversas/"+idTexto(res.ConversaID))
+	var detalhe struct {
+		Lead *struct {
+			ID     int64  `json:"id"`
+			Status string `json:"status"`
+		} `json:"lead"`
+	}
+	decodificarEm(t, rec, &detalhe)
+	if detalhe.Lead == nil || detalhe.Lead.Status != "novo" {
+		t.Fatalf("a conversa devia apontar para o lead: %+v", detalhe.Lead)
+	}
+
+	// Conversa sem lead devolve null, não erro.
+	m := &modeloRoteiroBot{turnos: []turnoBot{{texto: "Oi!"}}}
+	s.cfg.ModeloAtendimento = func(string) assistente.Modelo { return m }
+	bot := botComPerguntas(t, s, "sem-lead", true)
+	aberta, err := s.responderAtendimento(context.Background(), bot, "5511900070009", "", "oi")
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec = pegar(t, s, db.PerfilUsuarioOperador, "/atendimento/conversas/"+idTexto(aberta.ConversaID))
+	decodificarEm(t, rec, &detalhe)
+	if detalhe.Lead != nil {
+		t.Errorf("conversa aberta não tem lead ainda: %+v", detalhe.Lead)
+	}
+}
+
+// Etapa F: o vigia dos bots. O alerta que mais importa é o do **bot autorizado sem sessão** —
+// alguém ligou o envio, a pessoa escreve, o bot responde e a resposta fica na fila porque o
+// número caiu. Sem vigia, isso se descobre pelo cliente reclamando.
+func TestVigiaAtendimento(t *testing.T) {
+	s := servidorComBot(t, &modeloRoteiroBot{})
+	ctx := context.Background()
+
+	// Dublê do serviço de WhatsApp dos bots: responde o status que o teste pedir.
+	var mu sync.Mutex
+	sessoes := "[]"
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/whatsapp/status" {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		mu.Lock()
+		corpo := `{"envio_habilitado_servico":true,"sessoes":` + sessoes + `}`
+		mu.Unlock()
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(corpo))
+	}))
+	defer srv.Close()
+
+	s.cfg.AtendimentoWhatsapp = atendimentowa.NovoCliente(srv.URL, "token-de-teste")
+	s.cfg.Vigia.Atendimento = true
+	s.inicio = time.Now().Add(-time.Hour)
+	s.ultimoContatoWorker.Store(time.Now().UnixNano())
+	relogio := time.Now()
+	s.agora = func() time.Time { return relogio }
+	avancar := func(d time.Duration) { relogio = relogio.Add(d) }
+
+	achados := func() map[string]achado {
+		t.Helper()
+		lista, ok := s.verificarSaude(ctx)
+		if !ok {
+			t.Fatal("banco indisponível")
+		}
+		m := map[string]achado{}
+		for _, a := range lista {
+			if strings.HasPrefix(a.Chave, "atendimento-") {
+				m[a.Chave] = a
+			}
+		}
+		return m
+	}
+
+	// Bot ligado e autorizado, sem sessão no worker: tolera 10 min (deploy, pareamento).
+	bot := botComPerguntas(t, s, "vigiado", true)
+	if a := achados(); len(a) != 0 {
+		t.Fatalf("alerta antes da tolerância: %+v", a)
+	}
+	avancar(11 * time.Minute)
+	a := achados()
+	alerta, ok := a["atendimento-bot-vigiado"]
+	if !ok || !strings.Contains(alerta.Titulo, "sem sessão") {
+		t.Fatalf("esperado alerta de bot sem sessão: %+v", a)
+	}
+	if !strings.Contains(alerta.Detalhe, "app.teste/atendimento/conexoes") {
+		t.Errorf("o alerta devia apontar a tela: %q", alerta.Detalhe)
+	}
+
+	// Sessão esperando QR: o alerta muda de texto, porque a ação é outra (escanear).
+	mu.Lock()
+	sessoes = `[{"bot":"vigiado","estado":"qr","conectado":false,"numero":null,"qr":"x"}]`
+	mu.Unlock()
+	if alerta := achados()["atendimento-bot-vigiado"]; !strings.Contains(alerta.Titulo, "QR") {
+		t.Errorf("esperado alerta de QR: %+v", alerta)
+	}
+
+	// Conectou: o alerta do bot sai.
+	mu.Lock()
+	sessoes = `[{"bot":"vigiado","estado":"aberta","conectado":true,"numero":"5511900000000:1@s.whatsapp.net","qr":null}]`
+	mu.Unlock()
+	if a := achados(); len(a) != 0 {
+		t.Fatalf("conectado não devia ter alerta: %+v", a)
+	}
+
+	// Bot desligado não gera alerta nenhum, mesmo sem sessão.
+	s.exec(t, "UPDATE atendimento.bots SET ativo = false WHERE id = $1", bot.ID)
+	mu.Lock()
+	sessoes = "[]"
+	mu.Unlock()
+	avancar(time.Hour)
+	if a := achados(); len(a) != 0 {
+		t.Fatalf("bot desligado não devia ser vigiado: %+v", a)
+	}
+	s.exec(t, "UPDATE atendimento.bots SET ativo = true WHERE id = $1", bot.ID)
+
+	// Resposta que desistiu e resposta parada na fila, com o WhatsApp conectado.
+	mu.Lock()
+	sessoes = `[{"bot":"vigiado","estado":"aberta","conectado":true,"numero":"5511900000000:1@s.whatsapp.net","qr":null}]`
+	mu.Unlock()
+	s.exec(t, `INSERT INTO atendimento.conversas (bot_id, telefone) VALUES ($1, '5511900080001')`, bot.ID)
+	var conversaID int64
+	if err := s.pool.QueryRow(ctx, "SELECT id FROM atendimento.conversas ORDER BY id DESC LIMIT 1").Scan(&conversaID); err != nil {
+		t.Fatal(err)
+	}
+	s.exec(t, `INSERT INTO atendimento.mensagens (conversa_id, direcao, texto, status, tentativas)
+	           VALUES ($1, 'enviada', 'resposta que não chegou', 'falhou', 5)`, conversaID)
+	s.exec(t, `INSERT INTO atendimento.mensagens (conversa_id, direcao, texto, status, criada_em)
+	           VALUES ($1, 'enviada', 'resposta parada', 'pendente', now() - interval '1 hour')`, conversaID)
+
+	a = achados()
+	if f, ok := a["atendimento-falhas"]; !ok || !strings.HasPrefix(f.Titulo, "1 resposta") {
+		t.Fatalf("esperado alerta de resposta não entregue: %+v", a)
+	}
+	if _, ok := a["atendimento-fila"]; !ok {
+		t.Fatalf("esperado alerta de fila parada: %+v", a)
+	}
+	// Nome e telefone de quem conversou não entram no alerta: o e-mail do vigia não é lugar de
+	// dado de cliente.
+	for _, x := range a {
+		if strings.Contains(x.Titulo+x.Detalhe, "5511900080001") || strings.Contains(x.Titulo+x.Detalhe, "resposta que não chegou") {
+			t.Errorf("o alerta não pode levar dado da conversa: %+v", x)
+		}
+	}
+
+	// Serviço fora do ar: um alerta só, e a fila parada deixa de ser incidente (sem sessão,
+	// esperar é o certo).
+	srv.Close()
+	// O primeiro ciclo sem resposta marca o início da ausência; o alerta sai depois da
+	// tolerância — é assim que o laço de 5 min se comporta de verdade.
+	if a := achados(); len(a) > 1 {
+		t.Fatalf("o primeiro ciclo sem resposta não devia alertar do serviço: %+v", a)
+	}
+	avancar(11 * time.Minute)
+	a = achados()
+	if _, ok := a["atendimento-servico"]; !ok {
+		t.Fatalf("esperado alerta de serviço sem resposta: %+v", a)
+	}
+	if _, ok := a["atendimento-fila"]; ok {
+		t.Errorf("sem sessão, fila parada não é incidente: %+v", a)
+	}
+}

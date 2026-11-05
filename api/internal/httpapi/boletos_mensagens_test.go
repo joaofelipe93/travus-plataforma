@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/joaofelipe93/travus-plataforma/api/internal/db"
+	"github.com/joaofelipe93/travus-plataforma/api/internal/mensagem"
 )
 
 // rodadaDeEnvioComParcela: um envio concluído, com uma parcela e PDF, pelo caminho do worker.
@@ -69,7 +70,8 @@ func TestFilaDeEnvioEmEnsaio(t *testing.T) {
 		t.Errorf("em ensaio a mensagem devia ficar cancelada com o motivo: %+v", m)
 	}
 	// O texto é montado de qualquer jeito: é assim que se confere o que sairia.
-	for _, pedaco := range []string{"Oi Cliente,", "Grupo 006650", "Vencimento: 16/11/2026", "R$ 644,62"} {
+	for _, pedaco := range []string{"Chegou o boleto", "Grupo 006650", "Vencimento: 16/11/2026", "R$ 644,62",
+		"mensagem automática"} {
 		if !strings.Contains(m.Texto, pedaco) {
 			t.Errorf("texto sem %q: %s", pedaco, m.Texto)
 		}
@@ -152,9 +154,10 @@ func TestCobrancaSoAvisaQuemRecebeuBoletoENaoPagou(t *testing.T) {
 	if m.Tipo != "cobranca" || m.Status != "pendente" || m.ParcelaID != nil || m.PdfID != nil {
 		t.Errorf("mensagem de cobrança = %+v (é por cliente e sem anexo)", m)
 	}
-	// Texto da issue #48, literal.
+	// As frases da issue #48 continuam, e o padrão avisa que ninguém lê a resposta.
 	if !strings.Contains(m.Texto, "ainda está disponível para pagamento") ||
-		!strings.Contains(m.Texto, "Caso já tenha pago, desconsidere essa mensagem") {
+		!strings.Contains(m.Texto, "Caso já tenha pago, desconsidere esta mensagem") ||
+		!strings.Contains(m.Texto, "mensagem automática") {
 		t.Errorf("texto da cobrança fora do que a issue pede: %s", m.Texto)
 	}
 	if d.Cobranca == nil || d.Cobranca.Enviadas != 1 || d.Cobranca.Pagas != 0 {
@@ -240,6 +243,7 @@ func TestConfiguracaoDeBoletos(t *testing.T) {
 			"agendamento_ativo": false, "dia_envio": 8, "hora_envio": 9,
 			"dia_cobranca": 14, "hora_cobranca": 9, "antecipar_dia_util": true,
 			"envio_habilitado": false, "pausa_envio_segundos": 20, "max_mensagens_rodada": 200,
+			"texto_envio": mensagem.PadraoEnvio, "texto_cobranca": mensagem.PadraoCobranca,
 		}
 		for k, v := range extras {
 			corpo[k] = v
@@ -247,10 +251,13 @@ func TestConfiguracaoDeBoletos(t *testing.T) {
 		return corpo
 	}
 	for nome, extras := range map[string]map[string]any{
-		"dia fora do mês":    {"dia_envio": 0},
-		"hora inválida":      {"hora_cobranca": 24},
-		"pausa curta demais": {"pausa_envio_segundos": 1},
-		"teto zerado":        {"max_mensagens_rodada": 0},
+		"dia fora do mês":             {"dia_envio": 0},
+		"hora inválida":               {"hora_cobranca": 24},
+		"pausa curta demais":          {"pausa_envio_segundos": 1},
+		"teto zerado":                 {"max_mensagens_rodada": 0},
+		"campo inventado no boleto":   {"texto_envio": "Oi {nmoe}, chegou o boleto"},
+		"campo de boleto na cobrança": {"texto_cobranca": "Vence em {vencimento}"},
+		"mensagem vazia":              {"texto_envio": "   "},
 	} {
 		esperarStatus(t, n.enviarJSON(http.MethodPut, "/boletos/configuracao", completa(extras)), http.StatusBadRequest, nome)
 	}
@@ -316,6 +323,7 @@ func TestRodadasAgendadas(t *testing.T) {
 	esperarStatus(t, admin.enviarJSON(http.MethodPut, "/boletos/configuracao", map[string]any{
 		"agendamento_ativo": true, "dia_envio": 8, "hora_envio": 9, "dia_cobranca": 14, "hora_cobranca": 9,
 		"antecipar_dia_util": true, "envio_habilitado": false, "pausa_envio_segundos": 20, "max_mensagens_rodada": 200,
+		"texto_envio": mensagem.PadraoEnvio, "texto_cobranca": mensagem.PadraoCobranca,
 	}), http.StatusOK, "ligar o agendamento")
 
 	// Antes da hora: nada.
@@ -365,6 +373,7 @@ func TestAgendamentoNaoRodaAtrasado(t *testing.T) {
 	esperarStatus(t, admin.enviarJSON(http.MethodPut, "/boletos/configuracao", map[string]any{
 		"agendamento_ativo": true, "dia_envio": 8, "hora_envio": 9, "dia_cobranca": 14, "hora_cobranca": 9,
 		"antecipar_dia_util": true, "envio_habilitado": false, "pausa_envio_segundos": 20, "max_mensagens_rodada": 200,
+		"texto_envio": mensagem.PadraoEnvio, "texto_cobranca": mensagem.PadraoCobranca,
 	}), http.StatusOK, "ligar o agendamento")
 
 	// Dois dias depois da ocorrência: a API estava fora do ar. Boleto atrasado não ajuda.
@@ -391,6 +400,7 @@ func ligarEnvioBoletos(t *testing.T, admin *navegador) {
 	esperarStatus(t, admin.enviarJSON(http.MethodPut, "/boletos/configuracao", map[string]any{
 		"agendamento_ativo": false, "dia_envio": 8, "hora_envio": 9, "dia_cobranca": 14, "hora_cobranca": 9,
 		"antecipar_dia_util": true, "envio_habilitado": true, "pausa_envio_segundos": 20, "max_mensagens_rodada": 200,
+		"texto_envio": mensagem.PadraoEnvio, "texto_cobranca": mensagem.PadraoCobranca,
 	}), http.StatusOK, "ligar o envio")
 }
 
@@ -435,4 +445,30 @@ func temEvento(eventos []eventoBoletoJSON, nivel, pedaco string) bool {
 		}
 	}
 	return false
+}
+
+// O texto da tela é o que chega ao cliente: a rodada seguinte usa o modelo configurado, com os
+// campos preenchidos. É a garantia de que a configuração não é enfeite.
+func TestTextoConfiguradoVaiParaAMensagem(t *testing.T) {
+	s, n, interno := cenarioBoletos(t)
+	s.cfg.BoletosEnvioHabilitado = false
+
+	corpo := map[string]any{
+		"agendamento_ativo": false, "dia_envio": 8, "hora_envio": 9,
+		"dia_cobranca": 14, "hora_cobranca": 9, "antecipar_dia_util": true,
+		"envio_habilitado": false, "pausa_envio_segundos": 20, "max_mensagens_rodada": 200,
+		"texto_envio":    "Boleto da cota {cota} (grupo {grupo}), vence {vencimento}, {valor}. Mensagem automática.",
+		"texto_cobranca": mensagem.PadraoCobranca,
+	}
+	esperarStatus(t, n.enviarJSON(http.MethodPut, "/boletos/configuracao", corpo), http.StatusOK, "salvar os textos")
+
+	id, _ := rodadaDeEnvioComParcela(t, s, n, interno)
+	d := n.rodada(t, id)
+	if len(d.Mensagens) != 1 {
+		t.Fatalf("mensagens = %d, quer 1", len(d.Mensagens))
+	}
+	quer := "Boleto da cota 0236 (grupo 006650), vence 16/11/2026, R$ 644,62. Mensagem automática."
+	if d.Mensagens[0].Texto != quer {
+		t.Errorf("texto da mensagem:\n%s\n\nquer:\n%s", d.Mensagens[0].Texto, quer)
+	}
 }

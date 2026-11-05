@@ -26,6 +26,7 @@ import (
 	_ "github.com/jackc/pgx/v5/stdlib"
 	"github.com/pressly/goose/v3"
 
+	"github.com/joaofelipe93/travus-plataforma/api/internal/atendimentowa"
 	"github.com/joaofelipe93/travus-plataforma/api/internal/boletoswa"
 	"github.com/joaofelipe93/travus-plataforma/api/internal/checkin"
 	"github.com/joaofelipe93/travus-plataforma/api/internal/cripto"
@@ -122,8 +123,14 @@ func serve() error {
 		BoletosEnvioHabilitado: os.Getenv("BOLETOS_ENVIO_HABILITADO") == "true",
 		// Serviço que manda os boletos no WhatsApp dos clientes (workers/boletos-whatsapp).
 		BoletosWhatsapp: boletoswa.NovoCliente(os.Getenv("BOLETOS_WHATSAPP_URL"), os.Getenv("BOLETOS_ADMIN_TOKEN")),
-		ValidadeDryRun:  2 * time.Hour,
-		Cofre:           cofre,
+		// Serviço de Atendimento (issue #100): a fábrica de modelo por bot. Quem decide se um bot
+		// responde é o botão dele na tela, e nada mais.
+		ModeloAtendimento: modeloAtendimentoDoAmbiente(),
+		// Serviço que conecta os WhatsApps dos bots (um processo, N sessões).
+		AtendimentoWhatsapp: atendimentowa.NovoCliente(
+			os.Getenv("ATENDIMENTO_WHATSAPP_URL"), os.Getenv("ATENDIMENTO_ADMIN_TOKEN")),
+		ValidadeDryRun: 2 * time.Hour,
+		Cofre:          cofre,
 		Google: httpapi.ConfigGoogle{
 			ClientID:     os.Getenv("GOOGLE_CLIENT_ID"),
 			ClientSecret: os.Getenv("GOOGLE_CLIENT_SECRET"),
@@ -134,6 +141,7 @@ func serve() error {
 			BackupDir:       os.Getenv("VIGIA_BACKUP_DIR"),
 			CertificadoHost: os.Getenv("VIGIA_CERTIFICADO"),
 			Checkin:         os.Getenv("VIGIA_CHECKIN") == "true",
+			Atendimento:     os.Getenv("VIGIA_ATENDIMENTO") == "true",
 		},
 		Versao:  versao,
 		Commit:  commit,

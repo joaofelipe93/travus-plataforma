@@ -20,7 +20,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { api } from "@/lib/api";
 
 import { podeEditar, useSessao } from "@/lib/sessao";
-import type { ClienteResumo, Cota } from "@/lib/tipos";
+import type { ClienteResumo, Cota, ServicoCatalogo } from "@/lib/tipos";
 import { useAdiado } from "@/lib/use-adiado";
 import { cn } from "@/lib/utils";
 
@@ -44,7 +44,7 @@ export function EspacoClientes({ selecionadoId }: { selecionadoId?: number }) {
   // dizer de qual serviço o cliente está fora.
   const catalogo = useQuery({
     queryKey: ["servicos"],
-    queryFn: () => api<{ servicos: { id: string; nome: string }[] }>("/servicos"),
+    queryFn: () => api<{ servicos: ServicoCatalogo[] }>("/servicos"),
     staleTime: Infinity,
   });
 
@@ -140,7 +140,7 @@ function ItemCliente({
 }: {
   cliente: ClienteResumo;
   selecionado: boolean;
-  catalogo: { id: string; nome: string }[];
+  catalogo: ServicoCatalogo[];
 }) {
   // Ficar em todos os serviços é o normal e não merece tinta; o que interessa é quem está fora.
   const fora = catalogo.filter((s) => !cliente.servicos.includes(s.id));

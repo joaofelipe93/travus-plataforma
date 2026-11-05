@@ -63,7 +63,8 @@ jobs:
           # Serviço novo em produção entra aqui E em deploy/docker-compose.imagens.yml
           # (tools/ci/checar-imagens-deploy.sh confere os dois na CI).
           for par in api:api web:web worker-canopus:workers/canopus checkin-whatsapp:workers/checkin-whatsapp \
-                     worker-boletos:workers/boletos-canopus boletos-whatsapp:workers/boletos-whatsapp; do
+                     worker-boletos:workers/boletos-canopus boletos-whatsapp:workers/boletos-whatsapp \
+                     atendimento-whatsapp:workers/atendimento-whatsapp; do
             nome=${par%%:*}; contexto=${par#*:}
             imagem="$REGISTRO/travus-$nome:$versao"
             if docker manifest inspect "$imagem" > /dev/null 2>&1; then
@@ -85,7 +86,8 @@ jobs:
         run: |
           {
             echo "### Imagens de $TAG"
-            for nome in api web worker-canopus checkin-whatsapp; do echo "- \`$REGISTRO/travus-$nome:${TAG#v}\`"; done
+            for nome in api web worker-canopus checkin-whatsapp worker-boletos boletos-whatsapp \
+                        atendimento-whatsapp; do echo "- \`$REGISTRO/travus-$nome:${TAG#v}\`"; done
             echo
             echo "A publicação em produção espera a aprovação no job **producao**."
           } >> "$GITHUB_STEP_SUMMARY"

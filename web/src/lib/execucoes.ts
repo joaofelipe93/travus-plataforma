@@ -1,6 +1,6 @@
 import type { VariantProps } from "class-variance-authority";
 import type { badgeVariants } from "@/components/ui/badge";
-import type { StatusCotaExecucao, StatusDrive, StatusExecucao, TipoExecucao } from "@/lib/tipos";
+import type { ResultadoDisparo, StatusCotaExecucao, StatusDrive, StatusExecucao, TipoExecucao } from "@/lib/tipos";
 
 type Variante = NonNullable<VariantProps<typeof badgeVariants>["variant"]>;
 
@@ -41,6 +41,17 @@ export function execucaoTerminou(status: StatusExecucao) {
 export function nomeTipo(tipo: TipoExecucao) {
   return { dry_run: "Dry-run", real: "Lance real", reimpressao: "Reimpressão" }[tipo];
 }
+
+// Resultado da ocorrência do dry-run automático (configuracao_canopus.ultimo_disparo_resultado),
+// em três palavras, do tamanho de um rótulo no painel. A tela de Configurações explica o mesmo
+// resultado numa frase inteira (`resultadoDisparo`, lá), porque é onde se conserta a causa.
+export const rotuloDisparo: Record<ResultadoDisparo, string> = {
+  criada: "dry-run criado",
+  sem_cotas: "nenhuma cota ativa",
+  sem_responsavel: "sem responsável para assinar",
+  atrasada: "atrasada: não rodou",
+  antes_de_ligar: "antes de o agendamento ser ligado",
+};
 
 export function hora(iso: string) {
   return new Date(iso).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit", second: "2-digit" });

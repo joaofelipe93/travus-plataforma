@@ -72,12 +72,16 @@ export type ClienteResumo = {
   servicos: string[];
 };
 
-// Um serviço do catálogo com a situação deste cliente nele. A API manda sempre o catálogo
-// inteiro, então a tela desenha um interruptor por serviço, ligado ou não.
-export type ServicoDoCliente = {
+// Os serviços que agem sobre um cliente (GET /servicos). A lista é a de api/internal/servicos.
+export type ServicoCatalogo = {
   id: string;
   nome: string;
   descricao: string;
+};
+
+// Um serviço do catálogo com a situação deste cliente nele. A API manda sempre o catálogo
+// inteiro, então a tela desenha um interruptor por serviço, ligado ou não.
+export type ServicoDoCliente = ServicoCatalogo & {
   ativo: boolean;
   atualizado_em: string | null;
   alterado_por_nome: string | null;
@@ -419,6 +423,20 @@ export type RespostaConfiguracaoCanopus = {
   lance_real_habilitado: boolean;
 };
 
+// Conta do Google que recebe os comprovantes de lance (GET /integracoes/google-drive, só admin).
+// O token fica cifrado no banco e é importado no servidor (make google-token): aqui só se sabe
+// se ele existe e de quando é.
+export type SituacaoGoogleDrive = {
+  lance_real_habilitado: boolean;
+  // Sem CHAVE_CRIPTOGRAFIA na API o token não decifra: não há envio ao Drive.
+  cofre_configurado: boolean;
+  client_configurado: boolean;
+  pasta_configurada: boolean;
+  pasta_origem: "configuracao" | "ambiente" | "nenhuma";
+  token_importado: boolean;
+  token_atualizado_em: string | null;
+};
+
 
 // ===== Serviço de boletos da Canopus (issue #48) =====
 
@@ -554,6 +572,9 @@ export type ConfiguracaoBoletos = {
   envio_habilitado: boolean;
   pausa_envio_segundos: number;
   max_mensagens_rodada: number;
+  // Modelo das mensagens: a mesma para todos, com os campos entre chaves preenchidos no envio.
+  texto_envio: string;
+  texto_cobranca: string;
   envio_habilitado_por_nome: string;
   atualizado_por_nome: string;
   atualizado_em: string;
@@ -572,6 +593,21 @@ export type RespostaConfiguracaoBoletos = {
   // Chave BOLETOS_ENVIO_HABILITADO do servidor: desligada, nada sai.
   envio_habilitado_servidor: boolean;
   fila: { pendentes: number; falharam: number; proxima: string | null };
+  // O que a tela precisa para a ajuda dos campos, a prévia e o "voltar ao texto padrão".
+  mensagens: {
+    campos_envio: CampoMensagem[];
+    campos_cobranca: CampoMensagem[];
+    padrao_envio: string;
+    padrao_cobranca: string;
+    max_caracteres: number;
+  };
+};
+
+// Um campo que a plataforma preenche no texto ({grupo}, {valor}…).
+export type CampoMensagem = {
+  nome: string;
+  descricao: string;
+  exemplo: string;
 };
 
 export type SituacaoWhatsappBoletos = {
@@ -585,4 +621,200 @@ export type SituacaoWhatsappBoletos = {
   envio_habilitado_servidor: boolean;
   pausa_envio_segundos: number;
   fila: Partial<Record<StatusMensagemBoleto, number>>;
+};
+
+// ---------------------------------------------------------------------------
+// Atendimento (bots de WhatsApp, issue #100)
+// ---------------------------------------------------------------------------
+
+export type ModeloBot = {
+  id: string;
+  nome: string;
+  descricao: string;
+};
+
+// Uma pergunta do atendimento. O bot faz uma por vez, na ordem, com as palavras dele — o texto
+// aqui é o que ele precisa descobrir, não a frase que vai enviar.
+export type PerguntaBot = {
+  id: number;
+  ordem: number;
+  texto: string;
+  // Onde a resposta é guardada: vira campo do lead.
+  campo: string;
+  orientacao: string | null;
+  obrigatoria: boolean;
+};
+
+// Um bot pré-escrito que a tela oferece em "Novo bot" (a Travus tem vários segmentos, então é
+// catálogo, não padrão).
+export type PontoDePartida = {
+  id: string;
+  nome: string;
+  descricao: string;
+  instrucoes: string;
+  saudacao: string;
+  // A API manda `[]`; o tipo admite a lista ausente porque lista vazia em Go pode vir `null` se
+  // alguém esquecer de inicializá-la — e a tela não deve quebrar por isso.
+  perguntas: { texto: string; campo: string; orientacao: string | null; obrigatoria: boolean }[] | null;
+};
+
+export type Bot = {
+  id: number;
+  nome: string;
+  slug: string;
+  modelo: string;
+  instrucoes: string;
+  saudacao: string | null;
+  ativo: boolean;
+  max_mensagens_hora: number;
+  max_tokens_conversa: number;
+  pausa_resposta_segundos: number;
+  criado_em: string;
+  atualizado_em: string;
+  // Só na lista.
+  perguntas?: number;
+  conversas_abertas?: number;
+};
+
+export type DetalheBot = {
+  bot: Bot;
+  perguntas: PerguntaBot[];
+  conversas: { total: number; abertas: number };
+};
+
+export type StatusConversa = "aberta" | "encerrada" | "abandonada" | "erro";
+export type StatusMensagemBot = "recebida" | "pendente" | "enviada" | "falhou" | "cancelada";
+
+export type ConversaResumo = {
+  id: number;
+  bot_id: number;
+  bot_nome: string;
+  bot_slug: string;
+  telefone: string;
+  contato_nome: string | null;
+  status: StatusConversa;
+  motivo: string | null;
+  mensagens: number;
+  dados: number;
+  ultimo_texto: string;
+  ultima_direcao: string;
+  tokens: number;
+  iniciada_em: string;
+  ultima_em: string;
+  encerrada_em: string | null;
+};
+
+export type MensagemBot = {
+  id: number;
+  direcao: "recebida" | "enviada";
+  texto: string;
+  status: StatusMensagemBot;
+  motivo: string | null;
+  tentativas: number;
+  ultimo_erro: string | null;
+  criada_em: string;
+  enviada_em: string | null;
+};
+
+export type DadoColetado = {
+  campo: string;
+  valor: string;
+  // A pergunta que originou a resposta; nula quando a pessoa contou sem ser perguntada.
+  pergunta: string | null;
+  criado_em: string;
+  atualizado_em: string;
+};
+
+export type DetalheConversa = {
+  // O lead que esta conversa originou (etapa E), quando existe.
+  lead: { id: number; status: StatusLead; cliente_id: number | null } | null;
+  conversa: {
+    id: number;
+    bot_id: number;
+    bot_nome: string;
+    bot_slug: string;
+    telefone: string;
+    contato_nome: string | null;
+    status: StatusConversa;
+    motivo: string | null;
+    perguntas_do_bot: number;
+    respostas: number;
+    tokens_entrada: number;
+    tokens_saida: number;
+    iniciada_em: string;
+    ultima_em: string;
+    encerrada_em: string | null;
+  };
+  mensagens: MensagemBot[];
+  dados: DadoColetado[];
+};
+
+export type ResumoAtendimento = {
+  bots: { total: number; ativos: number };
+  conversas: { abertas: number; hoje: number; concluidas_mes: number; pediram_humano_mes: number };
+  fila: { pendentes: number; falharam: number; canceladas_mes: number; proxima: string | null };
+  leads: { novos: number; aproveitados: number; descartados: number; no_mes: number };
+  dados_coletados_mes: number;
+  tokens_mes: number;
+  modelo_disponivel: boolean;
+};
+
+// Um bot na tela de Conexões: o cadastro + o estado da sessão de WhatsApp dele no worker.
+export type BotNaConexao = {
+  id: number;
+  nome: string;
+  slug: string;
+  ativo: boolean;
+  estado: EstadoWhatsapp;
+  // O worker está no ar e não tem sessão para este bot (bot desligado, ou acima do teto).
+  sem_sessao: boolean;
+  conectado: boolean;
+  numero: string | null;
+  qr: string | null;
+  aberta_ha_ms: number | null;
+  ultimo_erro: string | null;
+  fila: Partial<Record<StatusMensagemBot, number>>;
+};
+
+export type SituacaoWhatsappAtendimento = {
+  // O worker respondeu? Sem ele, nenhum bot conversa — e isso não é erro da tela.
+  disponivel: boolean;
+  motivo?: string;
+  modelo_disponivel: boolean;
+  bots: BotNaConexao[];
+};
+
+// Um lead: a conversa que colheu algo, esperando alguém revisar e promover a cliente.
+export type StatusLead = "novo" | "aproveitado" | "descartado";
+
+export type Lead = {
+  id: number;
+  conversa_id: number;
+  bot_id: number;
+  bot_nome: string;
+  bot_slug: string;
+  status: StatusLead;
+  nome: string | null;
+  telefone: string | null;
+  email: string | null;
+  observacoes: string | null;
+  // Tudo o que o bot colheu, inclusive o que não tem campo próprio aqui.
+  dados: Record<string, string>;
+  contato_nome: string | null;
+  conversa_telefone: string;
+  conversa_status: StatusConversa;
+  conversa_motivo: string | null;
+  mensagens: number;
+  ultima_em: string;
+  cliente_id: number | null;
+  cliente_nome: string | null;
+  motivo_descarte: string | null;
+  revisado_por_nome: string | null;
+  revisado_em: string | null;
+  criado_em: string;
+};
+
+export type RespostaLeads = {
+  leads: Lead[];
+  contagem: { novos: number; aproveitados: number; descartados: number; no_mes: number };
 };

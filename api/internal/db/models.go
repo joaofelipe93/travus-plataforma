@@ -75,6 +75,90 @@ type Arquivo struct {
 	ExpiraEm    *time.Time
 }
 
+type AtendimentoBot struct {
+	ID                    int64
+	Nome                  string
+	Slug                  string
+	Modelo                string
+	Instrucoes            string
+	Saudacao              *string
+	Ativo                 bool
+	MaxMensagensHora      int32
+	MaxTokensConversa     int32
+	PausaRespostaSegundos int32
+	CriadoPor             *int64
+	AtualizadoPor         *int64
+	CriadoEm              time.Time
+	AtualizadoEm          time.Time
+}
+
+type AtendimentoColeta struct {
+	ID           int64
+	ConversaID   int64
+	Campo        string
+	Valor        string
+	CriadoEm     time.Time
+	AtualizadoEm time.Time
+	PerguntaID   *int64
+}
+
+type AtendimentoConversa struct {
+	ID            int64
+	BotID         int64
+	Telefone      string
+	ContatoNome   *string
+	Status        string
+	Motivo        *string
+	TokensEntrada int32
+	TokensSaida   int32
+	IniciadaEm    time.Time
+	UltimaEm      time.Time
+	EncerradaEm   *time.Time
+}
+
+type AtendimentoLead struct {
+	ID             int64
+	ConversaID     int64
+	BotID          int64
+	Status         string
+	Nome           *string
+	Telefone       *string
+	Email          *string
+	Observacoes    *string
+	Dados          []byte
+	ClienteID      *int64
+	MotivoDescarte *string
+	RevisadoPor    *int64
+	RevisadoEm     *time.Time
+	CriadoEm       time.Time
+}
+
+type AtendimentoMensagen struct {
+	ID                 int64
+	ConversaID         int64
+	Direcao            string
+	Texto              string
+	Status             string
+	Motivo             *string
+	Tentativas         int32
+	ProximaTentativaEm time.Time
+	UltimoErro         *string
+	CriadaEm           time.Time
+	EnviadaEm          *time.Time
+}
+
+type AtendimentoPergunta struct {
+	ID           int64
+	BotID        int64
+	Ordem        int32
+	Texto        string
+	Campo        string
+	Orientacao   *string
+	Obrigatoria  bool
+	CriadoEm     time.Time
+	AtualizadoEm time.Time
+}
+
 type Auditoria struct {
 	ID         int64
 	UsuarioID  *int64
@@ -106,6 +190,8 @@ type BoletosConfiguracao struct {
 	UltimaCobrancaResultado *string
 	AtualizadoPor           *int64
 	AtualizadoEm            time.Time
+	TextoEnvio              string
+	TextoCobranca           string
 }
 
 type BoletosEvento struct {

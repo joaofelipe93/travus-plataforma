@@ -67,7 +67,7 @@ func preparar(ctx context.Context, dsn string) error {
 	// Todo schema que alguma migração cria precisa cair aqui, senão ele sobrevive de uma
 	// execução para a outra e o CREATE SCHEMA da migração falha com "already exists" —
 	// deixando o banco de teste quebrado até alguém apagar o schema à mão.
-	if _, err := db.ExecContext(ctx, "DROP SCHEMA IF EXISTS boletos CASCADE; DROP SCHEMA IF EXISTS checkin CASCADE; DROP SCHEMA IF EXISTS public CASCADE; CREATE SCHEMA public"); err != nil {
+	if _, err := db.ExecContext(ctx, "DROP SCHEMA IF EXISTS atendimento CASCADE; DROP SCHEMA IF EXISTS boletos CASCADE; DROP SCHEMA IF EXISTS checkin CASCADE; DROP SCHEMA IF EXISTS public CASCADE; CREATE SCHEMA public"); err != nil {
 		return fmt.Errorf("recriando esquema: %w", err)
 	}
 	provider, err := goose.NewProvider(goose.DialectPostgres, db, migrations.FS)

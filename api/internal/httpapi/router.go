@@ -13,6 +13,8 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/joaofelipe93/travus-plataforma/api/internal/assistente"
+	"github.com/joaofelipe93/travus-plataforma/api/internal/atendimentowa"
 	"github.com/joaofelipe93/travus-plataforma/api/internal/boletoswa"
 	"github.com/joaofelipe93/travus-plataforma/api/internal/checkin"
 	"github.com/joaofelipe93/travus-plataforma/api/internal/cripto"
@@ -66,6 +68,18 @@ type Config struct {
 	BoletosWhatsapp *boletoswa.Cliente
 	// Assistente da tela inicial (assistente.go).
 	Assistente ConfigAssistente
+
+	// Atendimento (atendimento_agente.go, issue #100). Cada bot escolhe o modelo dele, então
+	// aqui vai uma fábrica em vez de um modelo pronto; nil (sem ANTHROPIC_API_KEY) deixa o
+	// serviço indisponível.
+	//
+	// Não há chave de envio no servidor: **o botão do bot é o único interruptor** (decisão do
+	// usuário em 29/10/2026). Para parar tudo de uma vez, o jeito é desligar os bots na tela ou
+	// derrubar o container do WhatsApp.
+	ModeloAtendimento func(nome string) assistente.Modelo
+	// Serviço que conecta os WhatsApps dos bots (workers/atendimento-whatsapp). nil = as rotas
+	// de Conexões respondem "indisponível" em vez de falhar.
+	AtendimentoWhatsapp *atendimentowa.Cliente
 	// Versão publicada (version.txt) e commit, mostrados no /health.
 	Versao string
 	Commit string
@@ -104,6 +118,10 @@ type Servidor struct {
 	// goroutine do vigia mexe).
 	checkinSemRespostaDesde time.Time
 	whatsappForaDesde       time.Time
+	// Atendimento: desde quando o serviço está sem resposta, e desde quando o número de cada
+	// bot está fora (só a goroutine do vigia mexe).
+	atendimentoSemRespostaDesde time.Time
+	atendimentoBotForaDesde     map[string]time.Time
 
 	// Assistente: uma pergunta por vez e limite por hora, por pessoa.
 	limiteAssistente limitadorAssistente
@@ -193,6 +211,35 @@ func (s *Servidor) Rotas() http.Handler {
 	mux.Handle("DELETE /clientes/{id}", s.autenticado(exigirPerfil(s.excluirCliente, editores...)))
 	mux.Handle("PUT /clientes/{id}/servicos/{servico}", s.autenticado(exigirPerfil(s.definirServicoDoCliente, editores...)))
 	mux.Handle("GET /servicos", s.autenticado(s.listarServicos))
+
+	// Serviço de Atendimento (atendimento.go, issue #100): os bots de WhatsApp e o fluxo de cada
+	// um. Todo perfil enxerga; admin e operador mexem. `envio_habilitado` — o que autoriza a
+	// plataforma a falar com cliente de verdade — é **só admin**, como aprovar lance real.
+	mux.Handle("GET /atendimento/modelos", s.autenticado(s.listarModelosAtendimento))
+	mux.Handle("GET /atendimento/pontos-de-partida", s.autenticado(s.listarPontosDePartida))
+	mux.Handle("GET /atendimento/bots", s.autenticado(s.listarBots))
+	mux.Handle("POST /atendimento/bots", s.autenticado(exigirPerfil(s.criarBot, editores...)))
+	mux.Handle("GET /atendimento/bots/{id}", s.autenticado(s.buscarBot))
+	mux.Handle("PUT /atendimento/bots/{id}", s.autenticado(exigirPerfil(s.atualizarBot, editores...)))
+	mux.Handle("DELETE /atendimento/bots/{id}", s.autenticado(exigirPerfil(s.excluirBot, editores...)))
+	mux.Handle("PUT /atendimento/bots/{id}/perguntas", s.autenticado(exigirPerfil(s.definirPerguntasDoBot, editores...)))
+	// Etapa D: Conexões do Atendimento. Só admin: quem vê o QR pareia um aparelho na conta do
+	// WhatsApp daquele bot, e a mensagem de teste sai para um telefone de verdade.
+	mux.Handle("GET /atendimento/whatsapp", s.autenticado(exigirPerfil(s.situacaoWhatsappAtendimento, admins...)))
+	mux.Handle("POST /atendimento/bots/{id}/whatsapp/teste", s.autenticado(exigirPerfil(s.testarWhatsappAtendimento, admins...)))
+	mux.Handle("POST /atendimento/bots/{id}/whatsapp/desconectar", s.autenticado(exigirPerfil(s.desconectarWhatsappAtendimento, admins...)))
+	// Etapa C: as telas. O painel é contagem, todo perfil vê; a conversa traz telefone e o que a
+	// pessoa escreveu, então fica com admin e operador (a mesma régua da tela de Reservas).
+	mux.Handle("GET /atendimento/resumo", s.autenticado(s.resumoAtendimento))
+	mux.Handle("GET /atendimento/conversas", s.autenticado(exigirPerfil(s.listarConversas, editores...)))
+	mux.Handle("GET /atendimento/conversas/{id}", s.autenticado(exigirPerfil(s.buscarConversa, editores...)))
+	// Etapa E: os leads. Dado pessoal de quem escreveu, e a promoção a cliente mexe no cadastro
+	// de toda a plataforma: admin e operador, como no resto do cadastro.
+	mux.Handle("GET /atendimento/leads", s.autenticado(exigirPerfil(s.listarLeads, editores...)))
+	mux.Handle("GET /atendimento/leads/{id}", s.autenticado(exigirPerfil(s.buscarLeadNaTela, editores...)))
+	mux.Handle("PATCH /atendimento/leads/{id}", s.autenticado(exigirPerfil(s.atualizarLead, editores...)))
+	mux.Handle("POST /atendimento/leads/{id}/aproveitar", s.autenticado(exigirPerfil(s.aproveitarLead, editores...)))
+	mux.Handle("POST /atendimento/leads/{id}/descartar", s.autenticado(exigirPerfil(s.descartarLead, editores...)))
 	mux.Handle("GET /cotas", s.autenticado(s.listarCotas))
 	mux.Handle("POST /cotas", s.autenticado(exigirPerfil(s.criarCota, editores...)))
 	mux.Handle("GET /cotas/grupos", s.autenticado(s.listarGrupos))
