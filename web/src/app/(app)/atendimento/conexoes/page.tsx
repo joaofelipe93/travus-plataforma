@@ -29,7 +29,12 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
 import { api } from "@/lib/api";
-import type { BotNaConexao, ResumoAtendimento, SituacaoWhatsappAtendimento } from "@/lib/tipos";
+import type {
+  BotNaConexao,
+  IntegracaoFunil,
+  ResumoAtendimento,
+  SituacaoWhatsappAtendimento,
+} from "@/lib/tipos";
 
 // Conexões do Atendimento (só admin): o WhatsApp de cada bot.
 //
@@ -155,8 +160,143 @@ export default function PaginaConexoesAtendimento() {
           </div>
         )}
       </Secao>
+
+      <FunilDeVendas />
     </Colunas>
   );
+}
+
+// A integração com o Funil de Vendas (o CRM). Mora em Conexões, e não em Configurações, porque é
+// **conta de terceiros**: ligar isto manda nome, telefone e o que a pessoa contou para fora da
+// plataforma. Por isso também é só admin, como as outras conexões.
+function FunilDeVendas() {
+  const cliente = useQueryClient();
+  const consulta = useQuery({
+    queryKey: ["atendimento-funil"],
+    queryFn: () => api<IntegracaoFunil>("/atendimento/integracao/funil"),
+    refetchInterval: 30_000,
+  });
+  const [form, setForm] = useState<Record<string, string>>({});
+  const dados = consulta.data;
+
+  const campo = (nome: keyof IntegracaoFunil) =>
+    form[nome] ?? (dados && dados[nome] !== null ? String(dados[nome]) : "");
+
+  const salvar = useMutation({
+    mutationFn: (habilitado: boolean) =>
+      api("/atendimento/integracao/funil", {
+        metodo: "PUT",
+        json: {
+          habilitado,
+          codigo_vendedor: numeroOuNulo(campo("codigo_vendedor")),
+          codigo_funil: numeroOuNulo(campo("codigo_funil")),
+          codigo_etapa: numeroOuNulo(campo("codigo_etapa")),
+          codigo_canal: numeroOuNulo(campo("codigo_canal")),
+          codigo_segmento: numeroOuNulo(campo("codigo_segmento")),
+        },
+      }),
+    onSuccess: (_r, habilitado) => {
+      toast.success(habilitado ? "Integração ligada." : "Integração salva (desligada).");
+      setForm({});
+      void cliente.invalidateQueries({ queryKey: ["atendimento-funil"] });
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
+  if (!dados) {
+    return <Skeleton className="h-64 w-full" />;
+  }
+
+  return (
+    <Secao
+      titulo="Funil de Vendas"
+      descricao="O CRM que recebe os leads do atendimento. Ligado, cada conversa que colher algum dado vira oportunidade lá — sem ninguém revisar antes."
+    >
+      {!dados.chave_presente && (
+        <Alert variant="destructive">
+          <AlertTitle>Falta a chave no servidor</AlertTitle>
+          <AlertDescription>
+            A chave de integração fica no <code>deploy/.env</code> (<code>FUNIL_CHAVE</code>), e
+            não nesta tela: ela é segredo e autoriza criar oportunidade no CRM. Sem ela a
+            integração não liga.
+          </AlertDescription>
+        </Alert>
+      )}
+      {dados.habilitado && (
+        <Alert>
+          <AlertTitle>Envio automático ligado</AlertTitle>
+          <AlertDescription>
+            Toda conversa que encerrar tendo colhido algum dado cria uma oportunidade no Funil de
+            Vendas, sem revisão. Cada lead sobe uma vez só.
+          </AlertDescription>
+        </Alert>
+      )}
+
+      <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_22rem]">
+        <div className="grid gap-4 sm:grid-cols-2">
+          {(
+            [
+              ["codigo_vendedor", "Vendedor", "quem recebe os leads no CRM"],
+              ["codigo_funil", "Funil", "a que funil a oportunidade entra"],
+              ["codigo_etapa", "Etapa", "opcional; em branco, o CRM usa a primeira"],
+              ["codigo_canal", "Canal de vendas", "por onde o lead chegou"],
+              ["codigo_segmento", "Segmento da empresa", "exigido pelo CRM em toda empresa"],
+            ] as const
+          ).map(([nome, rotulo, ajuda]) => (
+            <div key={nome} className="grid gap-1.5">
+              <Label htmlFor={nome}>{rotulo}</Label>
+              <Input
+                id={nome}
+                inputMode="numeric"
+                value={campo(nome)}
+                onChange={(e) => setForm((f) => ({ ...f, [nome]: e.target.value }))}
+                placeholder="código"
+              />
+              <p className="text-xs text-muted-foreground">{ajuda}</p>
+            </div>
+          ))}
+          <div className="sm:col-span-2 flex flex-wrap gap-3">
+            <Button onClick={() => salvar.mutate(true)} disabled={salvar.isPending || !dados.chave_presente}>
+              {dados.habilitado ? "Salvar (segue ligada)" : "Salvar e ligar"}
+            </Button>
+            <Button
+              variant="outline"
+              onClick={() => salvar.mutate(false)}
+              disabled={salvar.isPending || !dados.habilitado}
+            >
+              Desligar
+            </Button>
+          </div>
+        </div>
+
+        <Bloco titulo="Envio ao CRM" tom={dados.fila.com_erro > 0 ? "erro" : dados.habilitado ? "ok" : "neutro"}>
+          <Estados
+            itens={[
+              {
+                rotulo: "Integração",
+                valor: dados.habilitado ? "ligada" : "desligada",
+                tom: dados.habilitado ? "ok" : "neutro",
+                detalhe: dados.codigos_completos ? undefined : "faltam códigos",
+              },
+              { rotulo: "Enviados no mês", valor: String(dados.fila.enviados_mes) },
+              { rotulo: "Na fila", valor: String(dados.fila.pendentes + dados.fila.enviando) },
+              {
+                rotulo: "Falharam",
+                valor: String(dados.fila.com_erro),
+                tom: dados.fila.com_erro > 0 ? "erro" : "ok",
+                detalhe: dados.fila.ultimo_erro || undefined,
+              },
+            ]}
+          />
+        </Bloco>
+      </div>
+    </Secao>
+  );
+}
+
+function numeroOuNulo(valor: string): number | null {
+  const n = Number(String(valor).replace(/\D/g, ""));
+  return Number.isFinite(n) && n > 0 ? n : null;
 }
 
 function CartaoDoBot({ bot, servicoNoAr }: { bot: BotNaConexao; servicoNoAr: boolean }) {

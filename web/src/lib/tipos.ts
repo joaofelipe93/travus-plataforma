@@ -830,3 +830,24 @@ export type RespostaLeads = {
   leads: Lead[];
   contagem: { novos: number; aproveitados: number; descartados: number; no_mes: number };
 };
+
+// Integração do Atendimento com o Funil de Vendas, o CRM (issue #128). A chave nunca volta ao
+// navegador: a tela só sabe se ela existe no servidor.
+export type IntegracaoFunil = {
+  habilitado: boolean;
+  chave_presente: boolean;
+  codigos_completos: boolean;
+  codigo_vendedor: number | null;
+  codigo_funil: number | null;
+  codigo_etapa: number | null;
+  codigo_canal: number | null;
+  codigo_segmento: number | null;
+  atualizado_em: string;
+  fila: {
+    pendentes: number;
+    enviando: number;
+    com_erro: number;
+    enviados_mes: number;
+    ultimo_erro: string;
+  };
+};

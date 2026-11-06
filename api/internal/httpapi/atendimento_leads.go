@@ -113,6 +113,10 @@ func (s *Servidor) criarLeadSePreciso(ctx context.Context, bot db.AtendimentoBot
 	}
 	slog.Info("atendimento: lead criado", "lead_id", lead.ID, "bot", bot.Slug,
 		"conversa_id", conversaID, "motivo", motivo, "dados", len(dados))
+	// Com a integração ligada, o lead sobe sozinho para o Funil de Vendas (issue #128, decisão
+	// do usuário em 06/11/2026). Entra na fila aqui, no nascimento: ligar o interruptor depois
+	// não despeja no CRM o que ficou para trás.
+	s.marcarLeadParaOFunil(ctx, lead.ID)
 }
 
 type leadJSON struct {
