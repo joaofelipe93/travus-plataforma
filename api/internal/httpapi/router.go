@@ -20,6 +20,7 @@ import (
 	"github.com/joaofelipe93/travus-plataforma/api/internal/cripto"
 	"github.com/joaofelipe93/travus-plataforma/api/internal/db"
 	"github.com/joaofelipe93/travus-plataforma/api/internal/drive"
+	"github.com/joaofelipe93/travus-plataforma/api/internal/funil"
 )
 
 // Pinger é o que o /health precisa do banco (o *pgxpool.Pool satisfaz).
@@ -80,6 +81,12 @@ type Config struct {
 	// Serviço que conecta os WhatsApps dos bots (workers/atendimento-whatsapp). nil = as rotas
 	// de Conexões respondem "indisponível" em vez de falhar.
 	AtendimentoWhatsapp *atendimentowa.Cliente
+	// Chave de integração do Funil de Vendas, o CRM da Smart (FUNIL_CHAVE no .env). Vazia: a
+	// integração não liga, e a tela diz que falta a chave no servidor. É segredo: a API deles a
+	// recebe na query string, então ela não entra em log nenhum (ver internal/funil).
+	FunilChave string
+	// Substitui o cliente do Funil nos testes: nenhum teste fala com o CRM.
+	FunilCliente *funil.Cliente
 	// Versão publicada (version.txt) e commit, mostrados no /health.
 	Versao string
 	Commit string
@@ -99,7 +106,9 @@ type Servidor struct {
 
 	// Fila do Drive: acordada quando um lance ganha PDF. enviadorDrive substitui o
 	// cliente do Google nos testes.
-	acordarDrive  chan struct{}
+	acordarDrive chan struct{}
+	// Fila do Funil de Vendas: acordada quando um lead nasce com a integração ligada.
+	acordarFunil  chan struct{}
 	enviadorDrive drive.Enviador
 	driveMu       sync.Mutex
 	driveCliente  drive.Enviador
@@ -140,7 +149,8 @@ func NovoServidor(cfg Config, pool *pgxpool.Pool) *Servidor {
 	return &Servidor{
 		cfg: cfg, pool: pool, q: db.New(pool), ping: pool, hub: NovoHub(pool), agora: time.Now,
 		encerrando: make(chan struct{}), acordarDrive: make(chan struct{}, 1),
-		inicio: time.Now(), alertas: map[string]*alertaAtivo{},
+		acordarFunil: make(chan struct{}, 1),
+		inicio:       time.Now(), alertas: map[string]*alertaAtivo{},
 	}
 }
 
@@ -155,6 +165,7 @@ func (s *Servidor) Encerrar() {
 func (s *Servidor) RodarTarefasDeFundo(ctx context.Context) {
 	go s.hub.Rodar(ctx)
 	go s.rodarFilaDrive(ctx)
+	go s.rodarFilaFunil(ctx)
 	go s.rodarAgendador(ctx)
 	go s.rodarAgendadorBoletos(ctx)
 	go s.rodarVigia(ctx)
@@ -236,6 +247,11 @@ func (s *Servidor) Rotas() http.Handler {
 	// Assumir e devolver: quem atende a pessoa é quem pode ler a conversa (issue #128).
 	mux.Handle("POST /atendimento/conversas/{id}/assumir", s.autenticado(exigirPerfil(s.assumirConversa, editores...)))
 	mux.Handle("POST /atendimento/conversas/{id}/devolver", s.autenticado(exigirPerfil(s.devolverConversaAoBot, editores...)))
+	// Funil de Vendas (issue #128): a configuração é conta de terceiros, então **só admin**; o
+	// reenvio de um lead que falhou é de quem já mexe em lead.
+	mux.Handle("GET /atendimento/integracao/funil", s.autenticado(exigirPerfil(s.integracaoFunil, "admin")))
+	mux.Handle("PUT /atendimento/integracao/funil", s.autenticado(exigirPerfil(s.salvarIntegracaoFunil, "admin")))
+	mux.Handle("POST /atendimento/leads/{id}/reenviar-funil", s.autenticado(exigirPerfil(s.reenviarLeadAoFunil, editores...)))
 	// Etapa E: os leads. Dado pessoal de quem escreveu, e a promoção a cliente mexe no cadastro
 	// de toda a plataforma: admin e operador, como no resto do cadastro.
 	mux.Handle("GET /atendimento/leads", s.autenticado(exigirPerfil(s.listarLeads, editores...)))

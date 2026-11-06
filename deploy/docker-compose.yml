@@ -67,6 +67,8 @@ x-api: &api-base
     # Assistente da tela inicial. Sem ANTHROPIC_API_KEY, a tela avisa que ele não está configurado.
     # ASSISTENTE_DB_SENHA: papel só leitura `assistente` no Postgres (`api migrate up` liga o login).
     ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+    # Funil de Vendas (CRM): sem a chave, a integração do Atendimento não liga.
+    FUNIL_CHAVE: ${FUNIL_CHAVE:-}
     ASSISTENTE_MODELO: ${ASSISTENTE_MODELO:-}
     ASSISTENTE_PERGUNTAS_POR_HORA: ${ASSISTENTE_PERGUNTAS_POR_HORA:-}
     ASSISTENTE_DB_SENHA: ${ASSISTENTE_DB_SENHA:?defina ASSISTENTE_DB_SENHA em deploy/.env (make up gera)}

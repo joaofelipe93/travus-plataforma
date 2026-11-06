@@ -123,21 +123,39 @@ type AtendimentoConversa struct {
 	TokensCacheGravados int64
 }
 
+type AtendimentoIntegracaoFunil struct {
+	ID             bool
+	Habilitado     bool
+	CodigoVendedor *int32
+	CodigoFunil    *int32
+	CodigoEtapa    *int32
+	CodigoCanal    *int32
+	CodigoSegmento *int32
+	AtualizadoPor  *int64
+	AtualizadoEm   time.Time
+}
+
 type AtendimentoLead struct {
-	ID             int64
-	ConversaID     int64
-	BotID          int64
-	Status         string
-	Nome           *string
-	Telefone       *string
-	Email          *string
-	Observacoes    *string
-	Dados          []byte
-	ClienteID      *int64
-	MotivoDescarte *string
-	RevisadoPor    *int64
-	RevisadoEm     *time.Time
-	CriadoEm       time.Time
+	ID              int64
+	ConversaID      int64
+	BotID           int64
+	Status          string
+	Nome            *string
+	Telefone        *string
+	Email           *string
+	Observacoes     *string
+	Dados           []byte
+	ClienteID       *int64
+	MotivoDescarte  *string
+	RevisadoPor     *int64
+	RevisadoEm      *time.Time
+	CriadoEm        time.Time
+	FunilStatus     string
+	FunilTentativas int32
+	FunilProximaEm  *time.Time
+	FunilEnviadoEm  *time.Time
+	FunilResposta   *string
+	FunilErro       *string
 }
 
 type AtendimentoMensagen struct {

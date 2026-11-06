@@ -129,6 +129,9 @@ func serve() error {
 		// Serviço que conecta os WhatsApps dos bots (um processo, N sessões).
 		AtendimentoWhatsapp: atendimentowa.NovoCliente(
 			os.Getenv("ATENDIMENTO_WHATSAPP_URL"), os.Getenv("ATENDIMENTO_ADMIN_TOKEN")),
+		// Chave do Funil de Vendas, o CRM da Smart (issue #128). Sem ela a integração não liga;
+		// os códigos da conta ficam na tela, porque trocar um não pode exigir deploy.
+		FunilChave: os.Getenv("FUNIL_CHAVE"),
 		ValidadeDryRun: 2 * time.Hour,
 		Cofre:          cofre,
 		Google: httpapi.ConfigGoogle{

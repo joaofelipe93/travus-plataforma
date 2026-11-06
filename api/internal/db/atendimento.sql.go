@@ -69,7 +69,7 @@ UPDATE atendimento.leads
 SET status = 'aproveitado', cliente_id = $1, revisado_por = $2,
     revisado_em = now(), motivo_descarte = NULL
 WHERE id = $3 AND status = 'novo'
-RETURNING id, conversa_id, bot_id, status, nome, telefone, email, observacoes, dados, cliente_id, motivo_descarte, revisado_por, revisado_em, criado_em
+RETURNING id, conversa_id, bot_id, status, nome, telefone, email, observacoes, dados, cliente_id, motivo_descarte, revisado_por, revisado_em, criado_em, funil_status, funil_tentativas, funil_proxima_em, funil_enviado_em, funil_resposta, funil_erro
 `
 
 type AproveitarLeadParams struct {
@@ -96,6 +96,12 @@ func (q *Queries) AproveitarLead(ctx context.Context, arg AproveitarLeadParams) 
 		&i.RevisadoPor,
 		&i.RevisadoEm,
 		&i.CriadoEm,
+		&i.FunilStatus,
+		&i.FunilTentativas,
+		&i.FunilProximaEm,
+		&i.FunilEnviadoEm,
+		&i.FunilResposta,
+		&i.FunilErro,
 	)
 	return i, err
 }
@@ -206,12 +212,60 @@ func (q *Queries) AtualizarBot(ctx context.Context, arg AtualizarBotParams) (Ate
 	return i, err
 }
 
+const atualizarConfiguracaoFunil = `-- name: AtualizarConfiguracaoFunil :one
+UPDATE atendimento.integracao_funil SET
+    habilitado      = $1,
+    codigo_vendedor = $2,
+    codigo_funil    = $3,
+    codigo_etapa    = $4,
+    codigo_canal    = $5,
+    codigo_segmento = $6,
+    atualizado_por  = $7,
+    atualizado_em   = now()
+WHERE id RETURNING id, habilitado, codigo_vendedor, codigo_funil, codigo_etapa, codigo_canal, codigo_segmento, atualizado_por, atualizado_em
+`
+
+type AtualizarConfiguracaoFunilParams struct {
+	Habilitado     bool
+	CodigoVendedor *int32
+	CodigoFunil    *int32
+	CodigoEtapa    *int32
+	CodigoCanal    *int32
+	CodigoSegmento *int32
+	AtualizadoPor  *int64
+}
+
+func (q *Queries) AtualizarConfiguracaoFunil(ctx context.Context, arg AtualizarConfiguracaoFunilParams) (AtendimentoIntegracaoFunil, error) {
+	row := q.db.QueryRow(ctx, atualizarConfiguracaoFunil,
+		arg.Habilitado,
+		arg.CodigoVendedor,
+		arg.CodigoFunil,
+		arg.CodigoEtapa,
+		arg.CodigoCanal,
+		arg.CodigoSegmento,
+		arg.AtualizadoPor,
+	)
+	var i AtendimentoIntegracaoFunil
+	err := row.Scan(
+		&i.ID,
+		&i.Habilitado,
+		&i.CodigoVendedor,
+		&i.CodigoFunil,
+		&i.CodigoEtapa,
+		&i.CodigoCanal,
+		&i.CodigoSegmento,
+		&i.AtualizadoPor,
+		&i.AtualizadoEm,
+	)
+	return i, err
+}
+
 const atualizarLead = `-- name: AtualizarLead :one
 UPDATE atendimento.leads
 SET nome = $1, telefone = $2, email = $3,
     observacoes = $4
 WHERE id = $5 AND status = 'novo'
-RETURNING id, conversa_id, bot_id, status, nome, telefone, email, observacoes, dados, cliente_id, motivo_descarte, revisado_por, revisado_em, criado_em
+RETURNING id, conversa_id, bot_id, status, nome, telefone, email, observacoes, dados, cliente_id, motivo_descarte, revisado_por, revisado_em, criado_em, funil_status, funil_tentativas, funil_proxima_em, funil_enviado_em, funil_resposta, funil_erro
 `
 
 type AtualizarLeadParams struct {
@@ -247,6 +301,12 @@ func (q *Queries) AtualizarLead(ctx context.Context, arg AtualizarLeadParams) (A
 		&i.RevisadoPor,
 		&i.RevisadoEm,
 		&i.CriadoEm,
+		&i.FunilStatus,
+		&i.FunilTentativas,
+		&i.FunilProximaEm,
+		&i.FunilEnviadoEm,
+		&i.FunilResposta,
+		&i.FunilErro,
 	)
 	return i, err
 }
@@ -372,7 +432,7 @@ func (q *Queries) BuscarConversa(ctx context.Context, id int64) (BuscarConversaR
 }
 
 const buscarLead = `-- name: BuscarLead :one
-SELECT l.id, l.conversa_id, l.bot_id, l.status, l.nome, l.telefone, l.email, l.observacoes, l.dados, l.cliente_id, l.motivo_descarte, l.revisado_por, l.revisado_em, l.criado_em, b.nome AS bot_nome, b.slug AS bot_slug,
+SELECT l.id, l.conversa_id, l.bot_id, l.status, l.nome, l.telefone, l.email, l.observacoes, l.dados, l.cliente_id, l.motivo_descarte, l.revisado_por, l.revisado_em, l.criado_em, l.funil_status, l.funil_tentativas, l.funil_proxima_em, l.funil_enviado_em, l.funil_resposta, l.funil_erro, b.nome AS bot_nome, b.slug AS bot_slug,
        c.contato_nome, c.telefone AS conversa_telefone, c.status AS conversa_status,
        c.motivo AS conversa_motivo, c.ultima_em,
        cl.nome AS cliente_nome,
@@ -401,6 +461,12 @@ type BuscarLeadRow struct {
 	RevisadoPor      *int64
 	RevisadoEm       *time.Time
 	CriadoEm         time.Time
+	FunilStatus      string
+	FunilTentativas  int32
+	FunilProximaEm   *time.Time
+	FunilEnviadoEm   *time.Time
+	FunilResposta    *string
+	FunilErro        *string
 	BotNome          string
 	BotSlug          string
 	ContatoNome      *string
@@ -431,6 +497,12 @@ func (q *Queries) BuscarLead(ctx context.Context, id int64) (BuscarLeadRow, erro
 		&i.RevisadoPor,
 		&i.RevisadoEm,
 		&i.CriadoEm,
+		&i.FunilStatus,
+		&i.FunilTentativas,
+		&i.FunilProximaEm,
+		&i.FunilEnviadoEm,
+		&i.FunilResposta,
+		&i.FunilErro,
 		&i.BotNome,
 		&i.BotSlug,
 		&i.ContatoNome,
@@ -514,6 +586,33 @@ func (q *Queries) ColetasDaConversa(ctx context.Context, conversaID int64) ([]Co
 		return nil, err
 	}
 	return items, nil
+}
+
+const configuracaoFunil = `-- name: ConfiguracaoFunil :one
+
+SELECT id, habilitado, codigo_vendedor, codigo_funil, codigo_etapa, codigo_canal, codigo_segmento, atualizado_por, atualizado_em FROM atendimento.integracao_funil WHERE id
+`
+
+// ===== Issue #128, item 3: o lead sobe para o Funil de Vendas =====
+//
+// A fila é a mesma forma da fila do Drive (lances): reserva com SKIP LOCKED, tentativas com
+// espera dobrando e recuperação do que ficou travado. CRM fora do ar não pode perder lead, e o
+// atendimento não espera o CRM para responder a pessoa.
+func (q *Queries) ConfiguracaoFunil(ctx context.Context) (AtendimentoIntegracaoFunil, error) {
+	row := q.db.QueryRow(ctx, configuracaoFunil)
+	var i AtendimentoIntegracaoFunil
+	err := row.Scan(
+		&i.ID,
+		&i.Habilitado,
+		&i.CodigoVendedor,
+		&i.CodigoFunil,
+		&i.CodigoEtapa,
+		&i.CodigoCanal,
+		&i.CodigoSegmento,
+		&i.AtualizadoPor,
+		&i.AtualizadoEm,
+	)
+	return i, err
 }
 
 const contarConversasDoBot = `-- name: ContarConversasDoBot :one
@@ -678,7 +777,7 @@ INSERT INTO atendimento.leads (conversa_id, bot_id, nome, telefone, email, obser
 VALUES ($1, $2, $3, $4, $5,
         $6, $7)
 ON CONFLICT (conversa_id) WHERE status = 'novo' DO NOTHING
-RETURNING id, conversa_id, bot_id, status, nome, telefone, email, observacoes, dados, cliente_id, motivo_descarte, revisado_por, revisado_em, criado_em
+RETURNING id, conversa_id, bot_id, status, nome, telefone, email, observacoes, dados, cliente_id, motivo_descarte, revisado_por, revisado_em, criado_em, funil_status, funil_tentativas, funil_proxima_em, funil_enviado_em, funil_resposta, funil_erro
 `
 
 type CriarLeadDaConversaParams struct {
@@ -723,6 +822,12 @@ func (q *Queries) CriarLeadDaConversa(ctx context.Context, arg CriarLeadDaConver
 		&i.RevisadoPor,
 		&i.RevisadoEm,
 		&i.CriadoEm,
+		&i.FunilStatus,
+		&i.FunilTentativas,
+		&i.FunilProximaEm,
+		&i.FunilEnviadoEm,
+		&i.FunilResposta,
+		&i.FunilErro,
 	)
 	return i, err
 }
@@ -812,12 +917,39 @@ func (q *Queries) DadosDaConversa(ctx context.Context, conversaID int64) ([]Dado
 	return items, nil
 }
 
+const dadosDoLeadParaFunil = `-- name: DadosDoLeadParaFunil :one
+SELECT id, nome, telefone, email, dados, funil_tentativas FROM atendimento.leads WHERE id = $1
+`
+
+type DadosDoLeadParaFunilRow struct {
+	ID              int64
+	Nome            *string
+	Telefone        *string
+	Email           *string
+	Dados           []byte
+	FunilTentativas int32
+}
+
+func (q *Queries) DadosDoLeadParaFunil(ctx context.Context, id int64) (DadosDoLeadParaFunilRow, error) {
+	row := q.db.QueryRow(ctx, dadosDoLeadParaFunil, id)
+	var i DadosDoLeadParaFunilRow
+	err := row.Scan(
+		&i.ID,
+		&i.Nome,
+		&i.Telefone,
+		&i.Email,
+		&i.Dados,
+		&i.FunilTentativas,
+	)
+	return i, err
+}
+
 const descartarLead = `-- name: DescartarLead :one
 UPDATE atendimento.leads
 SET status = 'descartado', motivo_descarte = $1,
     revisado_por = $2, revisado_em = now()
 WHERE id = $3 AND status = 'novo'
-RETURNING id, conversa_id, bot_id, status, nome, telefone, email, observacoes, dados, cliente_id, motivo_descarte, revisado_por, revisado_em, criado_em
+RETURNING id, conversa_id, bot_id, status, nome, telefone, email, observacoes, dados, cliente_id, motivo_descarte, revisado_por, revisado_em, criado_em, funil_status, funil_tentativas, funil_proxima_em, funil_enviado_em, funil_resposta, funil_erro
 `
 
 type DescartarLeadParams struct {
@@ -844,6 +976,12 @@ func (q *Queries) DescartarLead(ctx context.Context, arg DescartarLeadParams) (A
 		&i.RevisadoPor,
 		&i.RevisadoEm,
 		&i.CriadoEm,
+		&i.FunilStatus,
+		&i.FunilTentativas,
+		&i.FunilProximaEm,
+		&i.FunilEnviadoEm,
+		&i.FunilResposta,
+		&i.FunilErro,
 	)
 	return i, err
 }
@@ -1038,6 +1176,31 @@ func (q *Queries) FilaDeAtendimentoPorBot(ctx context.Context) ([]FilaDeAtendime
 		return nil, err
 	}
 	return items, nil
+}
+
+const garantirConfiguracaoFunil = `-- name: GarantirConfiguracaoFunil :one
+INSERT INTO atendimento.integracao_funil (id) VALUES (true)
+ON CONFLICT (id) DO UPDATE SET id = true
+RETURNING id, habilitado, codigo_vendedor, codigo_funil, codigo_etapa, codigo_canal, codigo_segmento, atualizado_por, atualizado_em
+`
+
+// A linha é única e pode sumir (o TRUNCATE em cascata dos testes a leva). Recria com os padrões
+// — desligada — em vez de a integração virar erro por falta de linha.
+func (q *Queries) GarantirConfiguracaoFunil(ctx context.Context) (AtendimentoIntegracaoFunil, error) {
+	row := q.db.QueryRow(ctx, garantirConfiguracaoFunil)
+	var i AtendimentoIntegracaoFunil
+	err := row.Scan(
+		&i.ID,
+		&i.Habilitado,
+		&i.CodigoVendedor,
+		&i.CodigoFunil,
+		&i.CodigoEtapa,
+		&i.CodigoCanal,
+		&i.CodigoSegmento,
+		&i.AtualizadoPor,
+		&i.AtualizadoEm,
+	)
+	return i, err
 }
 
 const guardarLidDaConversa = `-- name: GuardarLidDaConversa :exec
@@ -1292,7 +1455,7 @@ func (q *Queries) ListarConversas(ctx context.Context, arg ListarConversasParams
 }
 
 const listarLeads = `-- name: ListarLeads :many
-SELECT l.id, l.conversa_id, l.bot_id, l.status, l.nome, l.telefone, l.email, l.observacoes, l.dados, l.cliente_id, l.motivo_descarte, l.revisado_por, l.revisado_em, l.criado_em, b.nome AS bot_nome, b.slug AS bot_slug,
+SELECT l.id, l.conversa_id, l.bot_id, l.status, l.nome, l.telefone, l.email, l.observacoes, l.dados, l.cliente_id, l.motivo_descarte, l.revisado_por, l.revisado_em, l.criado_em, l.funil_status, l.funil_tentativas, l.funil_proxima_em, l.funil_enviado_em, l.funil_resposta, l.funil_erro, b.nome AS bot_nome, b.slug AS bot_slug,
        c.contato_nome, c.telefone AS conversa_telefone, c.status AS conversa_status,
        c.motivo AS conversa_motivo, c.ultima_em,
        cl.nome AS cliente_nome,
@@ -1330,6 +1493,12 @@ type ListarLeadsRow struct {
 	RevisadoPor      *int64
 	RevisadoEm       *time.Time
 	CriadoEm         time.Time
+	FunilStatus      string
+	FunilTentativas  int32
+	FunilProximaEm   *time.Time
+	FunilEnviadoEm   *time.Time
+	FunilResposta    *string
+	FunilErro        *string
 	BotNome          string
 	BotSlug          string
 	ContatoNome      *string
@@ -1366,6 +1535,12 @@ func (q *Queries) ListarLeads(ctx context.Context, arg ListarLeadsParams) ([]Lis
 			&i.RevisadoPor,
 			&i.RevisadoEm,
 			&i.CriadoEm,
+			&i.FunilStatus,
+			&i.FunilTentativas,
+			&i.FunilProximaEm,
+			&i.FunilEnviadoEm,
+			&i.FunilResposta,
+			&i.FunilErro,
 			&i.BotNome,
 			&i.BotSlug,
 			&i.ContatoNome,
@@ -1419,6 +1594,58 @@ func (q *Queries) ListarPerguntasDoBot(ctx context.Context, botID int64) ([]Aten
 		return nil, err
 	}
 	return items, nil
+}
+
+const marcarFunilEnviado = `-- name: MarcarFunilEnviado :exec
+UPDATE atendimento.leads
+SET funil_status = 'enviado', funil_enviado_em = now(), funil_resposta = $1,
+    funil_erro = NULL, funil_proxima_em = NULL
+WHERE id = $2
+`
+
+type MarcarFunilEnviadoParams struct {
+	Resposta *string
+	ID       int64
+}
+
+func (q *Queries) MarcarFunilEnviado(ctx context.Context, arg MarcarFunilEnviadoParams) error {
+	_, err := q.db.Exec(ctx, marcarFunilEnviado, arg.Resposta, arg.ID)
+	return err
+}
+
+const marcarFunilErro = `-- name: MarcarFunilErro :exec
+UPDATE atendimento.leads
+SET funil_status = 'erro', funil_erro = $1,
+    funil_proxima_em = CASE WHEN funil_tentativas < 5
+                            THEN now() + make_interval(mins => power(2, funil_tentativas - 1)::int)
+                            ELSE NULL END
+WHERE id = $2
+`
+
+type MarcarFunilErroParams struct {
+	Erro *string
+	ID   int64
+}
+
+// A espera dobra a cada tentativa; esgotadas as cinco, `funil_proxima_em` fica nulo e o lead sai
+// da fila com o erro guardado — alguém reenvia pela tela em vez de o CRM levar o mesmo pedido
+// para sempre.
+func (q *Queries) MarcarFunilErro(ctx context.Context, arg MarcarFunilErroParams) error {
+	_, err := q.db.Exec(ctx, marcarFunilErro, arg.Erro, arg.ID)
+	return err
+}
+
+const marcarLeadParaFunil = `-- name: MarcarLeadParaFunil :exec
+UPDATE atendimento.leads
+SET funil_status = 'pendente', funil_proxima_em = now()
+WHERE id = $1 AND funil_status = 'nao_enviado'
+`
+
+// O lead entra na fila no momento em que nasce, e só com a integração ligada: ligar o
+// interruptor depois não despeja no CRM o que ficou para trás.
+func (q *Queries) MarcarLeadParaFunil(ctx context.Context, id int64) error {
+	_, err := q.db.Exec(ctx, marcarLeadParaFunil, id)
+	return err
 }
 
 const marcarMensagemDeAtendimentoEnviada = `-- name: MarcarMensagemDeAtendimentoEnviada :one
@@ -1581,6 +1808,20 @@ func (q *Queries) ReabrirConversaDoTelefone(ctx context.Context, arg ReabrirConv
 	return i, err
 }
 
+const recuperarEnviosFunilTravados = `-- name: RecuperarEnviosFunilTravados :execrows
+UPDATE atendimento.leads
+SET funil_status = 'pendente'
+WHERE funil_status = 'enviando' AND funil_proxima_em < now() - interval '10 minutes'
+`
+
+func (q *Queries) RecuperarEnviosFunilTravados(ctx context.Context) (int64, error) {
+	result, err := q.db.Exec(ctx, recuperarEnviosFunilTravados)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const reenfileirarMensagemDeAtendimento = `-- name: ReenfileirarMensagemDeAtendimento :one
 UPDATE atendimento.mensagens
 SET ultimo_erro = $1, proxima_tentativa_em = now() + make_interval(secs => $2)
@@ -1607,6 +1848,20 @@ func (q *Queries) ReenfileirarMensagemDeAtendimento(ctx context.Context, arg Ree
 	var i ReenfileirarMensagemDeAtendimentoRow
 	err := row.Scan(&i.ID, &i.Tentativas, &i.ProximaTentativaEm)
 	return i, err
+}
+
+const reenviarLeadAoFunil = `-- name: ReenviarLeadAoFunil :execrows
+UPDATE atendimento.leads
+SET funil_status = 'pendente', funil_tentativas = 0, funil_proxima_em = now(), funil_erro = NULL
+WHERE id = $1 AND funil_status <> 'enviado'
+`
+
+func (q *Queries) ReenviarLeadAoFunil(ctx context.Context, id int64) (int64, error) {
+	result, err := q.db.Exec(ctx, reenviarLeadAoFunil, id)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const registrarMensagemDePessoa = `-- name: RegistrarMensagemDePessoa :one
@@ -1675,6 +1930,41 @@ func (q *Queries) RegistrarMensagemRecebida(ctx context.Context, arg RegistrarMe
 		&i.WaID,
 	)
 	return i, err
+}
+
+const reservarLeadsParaFunil = `-- name: ReservarLeadsParaFunil :many
+UPDATE atendimento.leads
+SET funil_status = 'enviando', funil_tentativas = funil_tentativas + 1, funil_proxima_em = now()
+WHERE id IN (
+    SELECT l.id FROM atendimento.leads l
+    WHERE l.funil_status IN ('pendente', 'erro')
+      AND l.funil_tentativas < 5
+      AND l.funil_proxima_em <= now()
+    ORDER BY l.id
+    LIMIT $1
+    FOR UPDATE SKIP LOCKED
+)
+RETURNING id
+`
+
+func (q *Queries) ReservarLeadsParaFunil(ctx context.Context, limite int32) ([]int64, error) {
+	rows, err := q.db.Query(ctx, reservarLeadsParaFunil, limite)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []int64
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const reservarMensagensDeAtendimento = `-- name: ReservarMensagensDeAtendimento :many
@@ -1818,6 +2108,38 @@ func (q *Queries) ResumoAtendimento(ctx context.Context, arg ResumoAtendimentoPa
 		&i.ProximaDaFila,
 		&i.DadosMes,
 		&i.TokensMes,
+	)
+	return i, err
+}
+
+const resumoDoFunil = `-- name: ResumoDoFunil :one
+SELECT
+    (SELECT count(*) FROM atendimento.leads WHERE funil_status = 'pendente')::bigint  AS pendentes,
+    (SELECT count(*) FROM atendimento.leads WHERE funil_status = 'enviando')::bigint  AS enviando,
+    (SELECT count(*) FROM atendimento.leads WHERE funil_status = 'erro')::bigint      AS com_erro,
+    (SELECT count(*) FROM atendimento.leads
+       WHERE funil_status = 'enviado' AND funil_enviado_em >= date_trunc('month', now()))::bigint AS enviados_mes,
+    coalesce((SELECT l.funil_erro FROM atendimento.leads l
+       WHERE l.funil_status = 'erro' ORDER BY l.id DESC LIMIT 1), '')::text           AS ultimo_erro
+`
+
+type ResumoDoFunilRow struct {
+	Pendentes   int64
+	Enviando    int64
+	ComErro     int64
+	EnviadosMes int64
+	UltimoErro  string
+}
+
+func (q *Queries) ResumoDoFunil(ctx context.Context) (ResumoDoFunilRow, error) {
+	row := q.db.QueryRow(ctx, resumoDoFunil)
+	var i ResumoDoFunilRow
+	err := row.Scan(
+		&i.Pendentes,
+		&i.Enviando,
+		&i.ComErro,
+		&i.EnviadosMes,
+		&i.UltimoErro,
 	)
 	return i, err
 }

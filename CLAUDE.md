@@ -42,6 +42,20 @@ hora, conforme o que a pessoa disse.
   colhidos vão na instrução da vez. **O cache é medido** (`conversas.tokens_cache_lidos`,
   migração 00026) e aparece na tela da conversa: cache que morre é silencioso, e sem medir a
   economia seria promessa.
+- **O lead sobe para o Funil de Vendas** (issue #128, item 3; migração 00027): o CRM que a Smart
+  usa. A API deles é um POST só (`/api/Opportunity`, chave na query string) e pensa em
+  **oportunidade = empresa + contato**, que é a forma do lead do bot. O envio é **automático
+  quando a conversa encerra** — decisão do usuário em 06/11/2026, ciente de que isso tira a
+  triagem da etapa E e de que o modelo erra. O que limita o estrago: **cada lead sobe uma vez**
+  (o id vai no `codigo_interno` deles), **nada sobe retroativo** (o lead entra na fila ao nascer,
+  com a integração já ligada), há **interruptor** e a resposta do CRM fica guardada, inclusive a
+  recusa. A fila é a do Drive: reserva com `SKIP LOCKED`, cinco tentativas com espera dobrando,
+  e o que esgotar fica com o erro na tela para alguém reenviar. **A chave é segredo** e fica no
+  `deploy/.env` (`FUNIL_CHAVE`) — a tela só diz se ela existe, e `internal/funil` a remove de
+  qualquer erro, porque ela viaja na URL. Os **códigos da conta** (vendedor, funil, etapa, canal,
+  segmento) ficam em **Atendimento → Conexões** (só admin: é conta de terceiros), não no código,
+  e sem todos eles a integração não liga. Campo personalizado só chega ao CRM se o **título bater
+  letra por letra** com o de lá (`camposNoFunil`): "Idades", "Qtde de vidas", "Plano atual".
 - **Pessoa atendendo cala o bot** (issue #128): `conversas.assumida_em`. Dois caminhos, os dois
   pedidos pelo usuário: o botão **"Assumir conversa"** na tela e, automático, **um consultor
   respondendo pelo WhatsApp do bot** — o worker passou a entregar o que sai do próprio número e a
@@ -119,7 +133,7 @@ make backup-baixar VM=travus@<ip>  # copia o último backup da VM para deploy/ba
 
 Endereços locais: http://app.localhost (web e, em `/api/...`, a API), http://api.localhost (API para ferramentas; só `/health` é público), http://traefik.localhost (dashboard).
 
-Não há cadastro público de usuários: só `make usuario`. A senha é pedida no terminal ou lida da entrada padrão (mínimo 12 caracteres). `deploy/.env` guarda a senha do Postgres, o `WORKER_TOKEN`, a `CHAVE_CRIPTOGRAFIA` (sem ela, o token do Google no banco não decifra), `CHECKIN_WEBHOOK_SECRET` (o token que o PMS manda), `CHECKIN_ADMIN_TOKEN` (API → notificador), `CHECKIN_DB_SENHA` (papel `checkin` no Postgres), `BOLETOS_ADMIN_TOKEN` (API → serviço de boletos no WhatsApp), `BOLETOS_DB_SENHA` (papel `boletos`) e `ASSISTENTE_DB_SENHA` (papel só leitura `assistente`), todos gerados pelo `make` (e pelo `publicar.sh` na VM), e, opcionalmente, `ANTHROPIC_API_KEY` (sem ela, o assistente fica indisponível), `ASSISTENTE_MODELO` (padrão `claude-haiku-4-5`), `ASSISTENTE_PERGUNTAS_POR_HORA` (padrão 60), `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_DRIVE_PASTA_ID` (pasta inicial; admin e operador escolhem em Lances → Configurações) e `CHECKIN_WHATSAPP_GROUP_JID` (grupo inicial; o admin escolhe pela tela).
+Não há cadastro público de usuários: só `make usuario`. A senha é pedida no terminal ou lida da entrada padrão (mínimo 12 caracteres). `deploy/.env` guarda a senha do Postgres, o `WORKER_TOKEN`, a `CHAVE_CRIPTOGRAFIA` (sem ela, o token do Google no banco não decifra), `CHECKIN_WEBHOOK_SECRET` (o token que o PMS manda), `CHECKIN_ADMIN_TOKEN` (API → notificador), `CHECKIN_DB_SENHA` (papel `checkin` no Postgres), `BOLETOS_ADMIN_TOKEN` (API → serviço de boletos no WhatsApp), `BOLETOS_DB_SENHA` (papel `boletos`) e `ASSISTENTE_DB_SENHA` (papel só leitura `assistente`), todos gerados pelo `make` (e pelo `publicar.sh` na VM), e, opcionalmente, `ANTHROPIC_API_KEY` (sem ela, o assistente fica indisponível), `FUNIL_CHAVE` (chave do Funil de Vendas; sem ela a integração do Atendimento não liga), `ASSISTENTE_MODELO` (padrão `claude-haiku-4-5`), `ASSISTENTE_PERGUNTAS_POR_HORA` (padrão 60), `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_DRIVE_PASTA_ID` (pasta inicial; admin e operador escolhem em Lances → Configurações) e `CHECKIN_WHATSAPP_GROUP_JID` (grupo inicial; o admin escolhe pela tela).
 
 **Texto das mensagens** (migração 00019, decisão do usuário em 20/10/2026): o que chega ao cliente é um **modelo configurável** na tela Boletos → Configuração, um para o boleto e outro para a cobrança. É **a mesma mensagem para todos** — ninguém edita nada cliente a cliente —, e o que varia são os campos entre chaves que a plataforma preenche no envio: `{grupo}`, `{cota}`, `{parcela}`, `{vencimento}`, `{valor}` e `{nome}` (opcional) no boleto, só `{nome}` na cobrança. Campo que não existe é recusado no salvar (400), e campo vazio — na prática a parcela, que o site nem sempre informa — leva junto o pedaço da linha e o separador ` · `. O catálogo, os padrões e a renderização estão em `api/internal/mensagem` (fixados por teste: é texto que chega a cliente). **Os dois padrões dizem que a mensagem é automática e que o número não recebe resposta**: não há atendente nesse WhatsApp. Trocar o texto vale da próxima rodada em diante; mensagem já na fila guarda o texto com que foi montada.
 

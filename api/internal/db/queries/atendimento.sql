@@ -446,3 +446,92 @@ SELECT
       WHERE m1.status = 'falhou' AND m1.criada_em > now() - interval '24 hours')     AS falharam,
     (SELECT count(*) FROM atendimento.mensagens m2
       WHERE m2.status = 'pendente' AND m2.criada_em < now() - interval '30 minutes') AS paradas;
+
+-- ===== Issue #128, item 3: o lead sobe para o Funil de Vendas =====
+--
+-- A fila é a mesma forma da fila do Drive (lances): reserva com SKIP LOCKED, tentativas com
+-- espera dobrando e recuperação do que ficou travado. CRM fora do ar não pode perder lead, e o
+-- atendimento não espera o CRM para responder a pessoa.
+
+-- name: ConfiguracaoFunil :one
+SELECT * FROM atendimento.integracao_funil WHERE id;
+
+-- A linha é única e pode sumir (o TRUNCATE em cascata dos testes a leva). Recria com os padrões
+-- — desligada — em vez de a integração virar erro por falta de linha.
+-- name: GarantirConfiguracaoFunil :one
+INSERT INTO atendimento.integracao_funil (id) VALUES (true)
+ON CONFLICT (id) DO UPDATE SET id = true
+RETURNING *;
+
+-- name: AtualizarConfiguracaoFunil :one
+UPDATE atendimento.integracao_funil SET
+    habilitado      = @habilitado,
+    codigo_vendedor = sqlc.narg(codigo_vendedor),
+    codigo_funil    = sqlc.narg(codigo_funil),
+    codigo_etapa    = sqlc.narg(codigo_etapa),
+    codigo_canal    = sqlc.narg(codigo_canal),
+    codigo_segmento = sqlc.narg(codigo_segmento),
+    atualizado_por  = sqlc.narg(atualizado_por),
+    atualizado_em   = now()
+WHERE id RETURNING *;
+
+-- O lead entra na fila no momento em que nasce, e só com a integração ligada: ligar o
+-- interruptor depois não despeja no CRM o que ficou para trás.
+-- name: MarcarLeadParaFunil :exec
+UPDATE atendimento.leads
+SET funil_status = 'pendente', funil_proxima_em = now()
+WHERE id = @id AND funil_status = 'nao_enviado';
+
+-- name: RecuperarEnviosFunilTravados :execrows
+UPDATE atendimento.leads
+SET funil_status = 'pendente'
+WHERE funil_status = 'enviando' AND funil_proxima_em < now() - interval '10 minutes';
+
+-- name: ReservarLeadsParaFunil :many
+UPDATE atendimento.leads
+SET funil_status = 'enviando', funil_tentativas = funil_tentativas + 1, funil_proxima_em = now()
+WHERE id IN (
+    SELECT l.id FROM atendimento.leads l
+    WHERE l.funil_status IN ('pendente', 'erro')
+      AND l.funil_tentativas < 5
+      AND l.funil_proxima_em <= now()
+    ORDER BY l.id
+    LIMIT @limite
+    FOR UPDATE SKIP LOCKED
+)
+RETURNING id;
+
+-- name: DadosDoLeadParaFunil :one
+SELECT id, nome, telefone, email, dados, funil_tentativas FROM atendimento.leads WHERE id = @id;
+
+-- name: MarcarFunilEnviado :exec
+UPDATE atendimento.leads
+SET funil_status = 'enviado', funil_enviado_em = now(), funil_resposta = sqlc.narg(resposta),
+    funil_erro = NULL, funil_proxima_em = NULL
+WHERE id = @id;
+
+-- A espera dobra a cada tentativa; esgotadas as cinco, `funil_proxima_em` fica nulo e o lead sai
+-- da fila com o erro guardado — alguém reenvia pela tela em vez de o CRM levar o mesmo pedido
+-- para sempre.
+-- name: MarcarFunilErro :exec
+UPDATE atendimento.leads
+SET funil_status = 'erro', funil_erro = @erro,
+    funil_proxima_em = CASE WHEN funil_tentativas < 5
+                            THEN now() + make_interval(mins => power(2, funil_tentativas - 1)::int)
+                            ELSE NULL END
+WHERE id = @id;
+
+-- name: ReenviarLeadAoFunil :execrows
+UPDATE atendimento.leads
+SET funil_status = 'pendente', funil_tentativas = 0, funil_proxima_em = now(), funil_erro = NULL
+WHERE id = @id AND funil_status <> 'enviado';
+
+-- name: ResumoDoFunil :one
+SELECT
+    (SELECT count(*) FROM atendimento.leads WHERE funil_status = 'pendente')::bigint  AS pendentes,
+    (SELECT count(*) FROM atendimento.leads WHERE funil_status = 'enviando')::bigint  AS enviando,
+    (SELECT count(*) FROM atendimento.leads WHERE funil_status = 'erro')::bigint      AS com_erro,
+    (SELECT count(*) FROM atendimento.leads
+       WHERE funil_status = 'enviado' AND funil_enviado_em >= date_trunc('month', now()))::bigint AS enviados_mes,
+    coalesce((SELECT l.funil_erro FROM atendimento.leads l
+       WHERE l.funil_status = 'erro' ORDER BY l.id DESC LIMIT 1), '')::text           AS ultimo_erro;
