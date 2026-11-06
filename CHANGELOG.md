@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.29.0](https://github.com/joaofelipe93/travus-plataforma/compare/v0.28.0...v0.29.0) (2026-11-06)
+
+
+### Novidades
+
+* **atendimento:** o lead sobe para o Funil de Vendas ([#132](https://github.com/joaofelipe93/travus-plataforma/issues/132)) ([edceacd](https://github.com/joaofelipe93/travus-plataforma/commit/edceacd15f49b68e16b85f4ca5cc62162adf70ef))
+
 ## [0.28.0](https://github.com/joaofelipe93/travus-plataforma/compare/v0.27.3...v0.28.0) (2026-11-05)
 
 
