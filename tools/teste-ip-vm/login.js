@@ -22,7 +22,11 @@ async function main() {
   });
 
   try {
-    const resp = await page.goto(NEWCON_URL, { waitUntil: 'domcontentloaded' });
+    // Sem Referer o Newcon derruba a conexão e este teste acusaria "IP bloqueado" sem ser.
+    const resp = await page.goto(NEWCON_URL, {
+      waitUntil: 'domcontentloaded',
+      referer: process.env.NEWCON_REFERER || 'https://parceiroscanopus.com.br/',
+    });
     console.log(`  · página de login: HTTP ${resp ? resp.status() : '?'}`);
     await page.locator('#edtUsuario').fill(NEWCON_USER);
     await page.locator('#edtSenha').fill(NEWCON_PASS);

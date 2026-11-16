@@ -61,6 +61,8 @@ const config = {
     url: required('NEWCON_URL'),
     user: required('NEWCON_USER'),
     pass: required('NEWCON_PASS'),
+    // Em branco, o NewconClient usa o endereço do Portal do Parceiro (REFERER_PADRAO).
+    referer: optional('NEWCON_REFERER', ''),
   },
   csvPath: resolve(optional('CSV_PATH', './cotasreal.csv')),
   drive: {

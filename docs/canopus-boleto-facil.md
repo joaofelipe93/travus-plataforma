@@ -159,17 +159,31 @@ Duas conclusões, e nenhuma delas é a que se esperava:
    expõe `navigator.webdriver`. **Se o serviço usar Chromium aqui, o User-Agent tem de ser trocado**
    (`newContext({ userAgent })`, mais `--disable-blink-features=AutomationControlled`).
 2. A Cloudflare está combinando **reputação do IP** com a **cara do cliente**: o mesmo `curl` que
-   passa do escritório é recusado da VM. Falta **uma** medição para fechar: `curl` com User-Agent
-   de navegador **na VM**.
+   passa do escritório é recusado da VM.
+
+**A medição que faltava foi feita em 16/11/2026, e fechou pelo lado ruim**: da VM **não passa de
+jeito nenhum**.
+
+| De onde | Cliente | Resultado |
+|---|---|---|
+| VM | `curl` com User-Agent de Chrome, sem `Referer` | **403** |
+| VM | `curl` com User-Agent de Chrome e `Referer` da página do Boleto Fácil | **403** |
+| VM | Chromium de verdade (o do worker de boletos), User-Agent de Chrome | **403**, com a página `Just a moment...` da Cloudflare |
+
+Ou seja: não é cabeçalho, é **o IP de saída da VM**. O caminho "roda na VM mandando User-Agent de
+Chrome", que era o desfecho barato, está descartado — valem só as três opções abaixo, e **nenhuma
+foi escolhida ainda**. Enquanto isso, **uma rodada de boletos criada em produção vai falhar**: o
+serviço nunca rodou lá (nenhuma linha em `boletos.rodadas` até 16/11/2026), então isso não quebrou
+nada — mas também não adianta criar uma rodada esperando que funcione.
 
 ```bash
 # Na VM (só leitura, não gera boleto):
 scp -r tools/teste-ip-vm travus@<ip>:/tmp/ && ssh travus@<ip> 'bash /tmp/teste-ip-vm/teste-boleto.sh --navegador'
 ```
 
-- **Se passar com cara de navegador**: o bloqueio é de cabeçalho. O serviço roda na VM, por HTTP,
-  mandando User-Agent de Chrome e `Referer` da página do Boleto Fácil. Nada de arquitetura nova.
-- **Se não passar de jeito nenhum**: é o IP de saída, e aí as opções são **sair pela rede do
+- ~~**Se passar com cara de navegador**: o bloqueio é de cabeçalho.~~ Descartado pela medição de
+  16/11/2026 acima: não passa.
+- **Como não passou de jeito nenhum**: é o IP de saída, e aí as opções são **sair pela rede do
   escritório** (túnel só para `*.consorciocanopus.com.br`, sem entregar dado de cliente a
   terceiro), **proxy residencial pago** (CPF e boleto passariam por um intermediário) ou **rodar o
   worker fora da VM**, do jeito que a plataforma já foi desenhada — o worker é cliente da API
