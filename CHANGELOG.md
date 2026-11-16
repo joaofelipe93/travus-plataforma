@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.29.1](https://github.com/joaofelipe93/travus-plataforma/compare/v0.29.0...v0.29.1) (2026-11-16)
+
+
+### Correções
+
+* **canopus:** o Newcon exige Referer e derrubava a conexão do worker ([#141](https://github.com/joaofelipe93/travus-plataforma/issues/141)) ([1340995](https://github.com/joaofelipe93/travus-plataforma/commit/1340995a96b7c6cacce702e45753a67f77f05be9))
+
 ## [0.29.0](https://github.com/joaofelipe93/travus-plataforma/compare/v0.28.0...v0.29.0) (2026-11-06)
 
 
