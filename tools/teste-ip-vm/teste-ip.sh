@@ -43,7 +43,9 @@ echo "== 2. Rede até a Canopus (sem login)"
 http_check "Site institucional (www.consorciocanopus.com.br)" "https://www.consorciocanopus.com.br/" informativo
 http_check "Servidor do Newcon (cnp3, raiz)" "https://cnp3.consorciocanopus.com.br/"
 
-HTML=$(curl -sS --max-time 30 "$NEWCON_URL" 2>&1)
+# Sem Referer o Newcon derruba a conexão: sem este cabeçalho, o teste acusaria IP bloqueado
+# onde o problema é outro (ver docs/canopus-newcon.md).
+HTML=$(curl -sS --max-time 30 -e "${NEWCON_REFERER:-https://parceiroscanopus.com.br/}" "$NEWCON_URL" 2>&1)
 if [[ "$HTML" == *edtUsuario* ]]; then
   ok "Página de login do Newcon carregou com o formulário"
 else

@@ -62,7 +62,7 @@ Dois registros do tipo **A**, TTL 300: `app.<domínio>` e `api.<domínio>` → I
 
 ## 4. Segredos na VM
 
-**Credenciais do Newcon do worker** (só as três variáveis; a URL com essa caixa exata):
+**Credenciais do Newcon do worker** (as três variáveis; a caixa da URL tanto faz):
 
 ```bash
 ssh travus@<ip> 'umask 077; cat > /opt/travus/compartilhado/canopus.env'
@@ -70,6 +70,7 @@ ssh travus@<ip> 'umask 077; cat > /opt/travus/compartilhado/canopus.env'
 # NEWCON_URL=https://cnp3.consorciocanopus.com.br/WWW/frmCorCcCnsLogin.aspx
 # NEWCON_USER=...
 # NEWCON_PASS=...
+# NEWCON_REFERER=   (opcional: em branco vai o Portal do Parceiro, que o Newcon exige)
 ```
 
 **deploy/.env de produção**: o primeiro `make deploy` cria `/opt/travus/compartilhado/.env` a partir de `deploy/.env.producao.example`, com senha do Postgres, `WORKER_TOKEN` e `CHAVE_CRIPTOGRAFIA` novos, e para. A cada deploy, o `publicar.sh` acrescenta os segredos que faltarem sem trocar os existentes (`CHECKIN_WEBHOOK_SECRET`, `CHECKIN_ADMIN_TOKEN`, `CHECKIN_DB_SENHA`, `ASSISTENTE_DB_SENHA`). Então:

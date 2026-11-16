@@ -39,7 +39,20 @@ The Dockerfile base image is pinned to `mcr.microsoft.com/playwright:v1.47.0-jam
 - **`auth.js`** pushes `--dry-run` onto `process.argv` before requiring config to get past the mode check — so `npm run auth` still requires the Newcon env vars and an existing CSV.
 - **`newcon.js` (`NewconClient`)** holds all page interaction. Selectors are hardcoded ASP.NET control IDs (`#ctl00_Conteudo_...`, TreeView node `#ctl00_Conteudo_ctl00_tvwMenut3`), and navigation is confirmed via `waitForURL` on `.aspx` page names (`frmMain`, `frmMainMenu`, `frmConCpCadCredenciamentoLance_Filtro`, `frmConCpCadCredenciamentoLance`, `frmConCmNewconReports`). A page-level `dialog` listener registered in `start()` auto-accepts **every** alert/confirm — this is how the two confirmation popups after "Confirmar" get through. This is intentional, including the "Consorciado já credenciado nesta assembleia… Deseja continuar?" confirm for a cota that already has bids in that assembly: the user wants the bid registered anyway, so don't add logic to dismiss or skip it. Always start from the login URL: the session's `applicationKey` is dynamic, so deep URLs from old sessions don't work. In the top menu, "Contemplação" is an `<a>` with no `href` (so `getByRole('link')` can't find it) and its submenu is hover-only; `_openPreContemplacao()` instead reads the `href` of the hidden "Pré-Contemplação" item (`frmMainMenu.aspx?ID_Modulo=CP&ID_SubGrupo=PC…`), caches the absolute URL, and `goto`s it. Both `goToCredenciamento()` and `backToFilter()` go through it, then click the TreeView node `#ctl00_Conteudo_ctl00_tvwMenut3` ("Credenciamento").
 
-`NEWCON_URL` must be `…/WWW/frmCorCcCnsLogin.aspx` with exactly that casing. The `frmCorCCCnsLogin.aspx` spelling, which the server's own root redirect uses, gets its TCP connection reset right after the TLS handshake, for browsers and curl alike.
+**The login page needs a `Referer` header.** Without one, the server resets the TCP connection
+right after the TLS handshake and answers nothing at all — Playwright reports
+`net::ERR_CONNECTION_RESET`, which reads like the site being down. Any `Referer` gets through (even
+a made-up one), the User-Agent is irrelevant, and **both spellings of the URL work**. `newcon.js`
+sends the Portal do Parceiro address (`REFERER_PADRAO`, overridable with `NEWCON_REFERER`) on the
+login `goto`, and the page it is leaving on the Pré-Contemplação `goto`; a test fails if any
+`page.goto` in `src/` is written without one.
+
+Measured on 2026-11-16, from the office and from the production VM, with curl and with the
+worker's own Chromium: no `Referer` → connection reset; with `Referer` → 200. Until then this file
+said the `frmCorCCCnsLogin.aspx` casing was what got reset — that was this same rule showing
+through, because the only link anyone ever followed to that spelling came from the portal (the
+"NewCon" button there points at `…/www/frmCorCCCnsLogin.aspx`) and so carried the header.
+That is why it took a production failure — two dry-runs refused on 2026-11-16 — to spot it.
 - **Known per-cota failures** throw `NewconCotaError` (exported from `newcon.js`), whose message is written for the user:
   - `searchCota()` waits for the main-frame navigation after "Localizar" and checks where it landed. It continues on `frmConCpCadCredenciamentoLance.aspx`. It throws when Newcon opens `frmConCpCnsHistoricoOfertaLance.aspx` (history only, no credenciamento available; the message includes the last assembly with a bid). It also throws when the page stays on the `_Filtro` page (e.g. a nonexistent versão). In that case it includes Newcon's red validation text, such as "Consorciado inválido.", read by `_redMessage()`: there is no known element id, so it takes the visible red leaf text.
   - `selectSegundoFixo()` throws when `#ctl00_Conteudo_rgLance_2` is disabled (e.g. group 6620 has no "2º Lance Fixo") and lists the enabled modalities.

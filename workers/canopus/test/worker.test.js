@@ -233,11 +233,17 @@ test('resumirHistorico conta os lances da assembleia atual', () => {
   assert.equal(resumirHistorico([{ protocolo: '1', assembleia: '15/09/2026' }], null).lances_nesta_assembleia, 0);
 });
 
-test('configuração recusa URL do Newcon com a grafia derrubada e token curto', () => {
+test('configuração aceita as duas grafias da URL do Newcon e recusa token curto', () => {
   const base = { WORKER_TOKEN: 'x'.repeat(32), API_INTERNA_URL: 'http://api:8081', NEWCON_URL: 'https://cnp3.consorciocanopus.com.br/WWW/frmCorCcCnsLogin.aspx', NEWCON_USER: 'u', NEWCON_PASS: 'p' };
   assert.equal(carregarConfig(base).newcon.url, base.NEWCON_URL);
   assert.equal(carregarConfig(base).playwright.headless, true);
-  assert.throws(() => carregarConfig({ ...base, NEWCON_URL: 'https://cnp3.consorciocanopus.com.br/WWW/frmCorCCCnsLogin.aspx' }), /frmCorCcCnsLogin/);
+  // A grafia do botão "NewCon" no Portal do Parceiro: o que derrubava a conexão era a falta do
+  // Referer, não o casing, então ela não é mais recusada (medido em 16/11/2026).
+  const oficial = 'https://cnp3.consorciocanopus.com.br/www/frmCorCCCnsLogin.aspx';
+  assert.equal(carregarConfig({ ...base, NEWCON_URL: oficial }).newcon.url, oficial);
+  // Referer em branco quer dizer "usa o padrão do NewconClient"; dá para apontar para outro.
+  assert.equal(carregarConfig(base).newcon.referer, '');
+  assert.equal(carregarConfig({ ...base, NEWCON_REFERER: 'https://outro.exemplo/' }).newcon.referer, 'https://outro.exemplo/');
   assert.throws(() => carregarConfig({ ...base, WORKER_TOKEN: 'curto' }), /32 caracteres/);
   assert.equal(carregarConfig(base).lanceRealHabilitado, false);
   assert.equal(carregarConfig({ ...base, LANCE_REAL_HABILITADO: 'sim' }).lanceRealHabilitado, false, 'só "true" liga o lance real');

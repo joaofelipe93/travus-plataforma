@@ -23,11 +23,10 @@ function carregarConfig(env = process.env) {
   const token = obrigatoria(env, 'WORKER_TOKEN');
   if (token.length < 32) throw new Error('WORKER_TOKEN precisa ter pelo menos 32 caracteres');
 
+  // As duas grafias da tela de login funcionam (medido em 16/11/2026). O que derruba a conexão
+  // é abrir a página sem cabeçalho Referer, e disso cuida o NewconClient — por isso a grafia
+  // frmCorCCCnsLogin.aspx, que é a do botão "NewCon" no Portal do Parceiro, não é mais recusada.
   const newconUrl = obrigatoria(env, 'NEWCON_URL');
-  // O servidor derruba a conexão com a grafia do próprio redirect (frmCorCCCnsLogin).
-  if (/frmCorCCCnsLogin\.aspx/.test(newconUrl)) {
-    throw new Error('NEWCON_URL deve terminar em frmCorCcCnsLogin.aspx (com "Cc"): a grafia frmCorCCCnsLogin.aspx tem a conexão derrubada');
-  }
 
   const tmp = env.WORKER_TMP_DIR || path.join(os.tmpdir(), 'travus-worker');
   return {
@@ -39,7 +38,13 @@ function carregarConfig(env = process.env) {
       intervaloFilaMs: Number(env.WORKER_INTERVALO_FILA_MS || 5000),
       renovarTravaMs: 30000,
     },
-    newcon: { url: newconUrl, user: obrigatoria(env, 'NEWCON_USER'), pass: obrigatoria(env, 'NEWCON_PASS') },
+    newcon: {
+      url: newconUrl,
+      user: obrigatoria(env, 'NEWCON_USER'),
+      pass: obrigatoria(env, 'NEWCON_PASS'),
+      // Em branco, o NewconClient usa o endereço do Portal do Parceiro (REFERER_PADRAO).
+      referer: String(env.NEWCON_REFERER || '').trim(),
+    },
     playwright: {
       timeoutMs: Number(env.PLAYWRIGHT_TIMEOUT_SECONDS || 30) * 1000,
       headless: !booleano(env.HEADFUL, false),
